@@ -1,0 +1,11 @@
+{
+  "name": "學術論文",
+  "titleColor": "FF000000",
+  "titleSize": 28,
+  "titleFont": "Times New Roman",
+  "bodyFont": "宋體",
+  "bodySize": 21,
+  "bodyColor": "FF000000",
+  "lineSpacing": 300,
+  "headingColor": "FF333333"
+}
