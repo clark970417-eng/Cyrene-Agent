@@ -112,8 +112,8 @@ export const PROVIDER_CAPABILITIES: ProviderCapability[] = [
     thinkingField: "reasoning_content",
     cacheStrategy: "auto",
     testStrategy: "text",
-    // model 由用戶填，保守 false；門控會按 supportsVision 攔截
-    supportsVision: false,
+    // model 由用戶填，支持自定義多模態模型（如 gpt-4o / gemini）
+    supportsVision: true,
   },
   {
     id: "claude",

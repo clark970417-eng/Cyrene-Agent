@@ -241,12 +241,16 @@ interface SchedulerApi {
 
 interface ModelPreset {
   providerName: string;
+  // 下拉選單顯示名；保留 providerName 可兼容既有配置鍵（例如 Custom）。
+  selectLabel?: string;
   // 廠商短名（去括號後綴），用於狀態欄"正在餵養"顯示和暱稱默認值。
   // 如 "MiniMax（稀宇科技）" → shortName "MiniMax"。
   shortName: string;
   baseUrl: string;
   mainModels: string[];
   iconUrl: string;
+  // 不需要真實密鑰的本機 OpenAI 兼容服務可提供一個佔位值。
+  defaultApiKey?: string;
   // 廠商官網鏈接，顯示在預設下拉框旁邊，方便用戶直接跳轉註冊/查看文檔。
   websiteUrl?: string;
   // 視覺模型的 OpenAI 兼容 baseUrl。僅當主配走 Anthropic 入口、視覺要走 OpenAI 入口時才標
@@ -267,6 +271,7 @@ interface GeneralSettings {
   soundVolume: number;
   petAlwaysOnTop: boolean;
   petVisible: boolean;
+  petChatInputEnabled: boolean;
   petZoom: number;
   sidebarVisible: boolean;
   tasksVisible: boolean;
@@ -446,6 +451,34 @@ declare global {
 }
 
 const MODEL_PRESETS: ModelPreset[] = [
+  {
+    // 沿用既有的 Custom profile key，讓已保存的 OpenRouter API Key 無需遷移即可復用。
+    providerName: "Custom",
+    selectLabel: "OpenRouter（免費路由）",
+    shortName: "OpenRouter Free",
+    baseUrl: "https://openrouter.ai/api/v1",
+    mainModels: ["openrouter/free"],
+    iconUrl: "https://unpkg.com/@lobehub/icons-static-svg@latest/icons/openrouter.svg",
+    websiteUrl: "https://openrouter.ai/",
+  },
+  {
+    providerName: "Gemini（Google）",
+    shortName: "Gemini 3.5 Flash",
+    baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai/",
+    mainModels: ["gemini-3.5-flash"],
+    iconUrl: "https://unpkg.com/@lobehub/icons-static-svg@latest/icons/gemini.svg",
+    websiteUrl: "https://aistudio.google.com/apikey",
+    supportsVision: true,
+  },
+  {
+    providerName: "Ollama（本機）",
+    shortName: "Llama Local",
+    baseUrl: "http://127.0.0.1:11434/v1",
+    mainModels: ["llama3.1:8b"],
+    iconUrl: "https://unpkg.com/@lobehub/icons-static-svg@latest/icons/ollama.svg",
+    websiteUrl: "https://ollama.com/library/llama3.1",
+    defaultApiKey: "ollama",
+  },
   // 當前 v1 計劃適配的 7 家：MiniMax / 火山 Agent-Plan / 智譜 GLM / Kimi / Qwen / ChatGPT / Claude
   // 順序按使用頻率 + 適配優先級；未在此清單內的廠商已硬刪，需要時再補回。
   {
@@ -535,17 +568,18 @@ if (!window.settings) {
     close: () => {},
     getConfig: () =>
       Promise.resolve({
-        mode: "auto",
-        provider: "DeepSeek",
-        baseUrl: "https://api.deepseek.com",
-        model: "deepseek-v4-pro",
+        mode: "manual",
+        provider: "Custom",
+        displayName: "OpenRouter Free",
+        baseUrl: "https://openrouter.ai/api/v1",
+        model: "openrouter/free",
         apiKey: "",
         runtimeSync: "off",
         stickerEnabled: true,
         stickerSize: "standard",
       }),
     saveConfig: (c) => Promise.resolve(c as ModelSettings),
-    getGeneral: () => Promise.resolve({ musicEnabled: false, musicVolume: 60, soundEnabled: true, soundVolume: 70, petAlwaysOnTop: true, petVisible: true, petZoom: 1, sidebarVisible: true, tasksVisible: true, launchAtLogin: false, language: "zh-CN", uiTheme: "classic" }),
+    getGeneral: () => Promise.resolve({ musicEnabled: false, musicVolume: 60, soundEnabled: true, soundVolume: 70, petAlwaysOnTop: true, petVisible: true, petChatInputEnabled: false, petZoom: 1, sidebarVisible: true, tasksVisible: true, launchAtLogin: false, language: "zh-CN", uiTheme: "classic" }),
     saveGeneral: (c) => Promise.resolve(c as GeneralSettings),
     openSidebar: () => {},
     closeSidebar: () => {},
@@ -653,6 +687,7 @@ const modelInput = document.getElementById("model-input") as HTMLInputElement;
 const modelInputSuggestions = document.getElementById("model-input-suggestions") as HTMLDataListElement;
 const apiKeyInput = document.getElementById("api-key") as HTMLInputElement;
 const testConnectionBtn = document.getElementById("test-connection-btn") as HTMLButtonElement | null;
+const quickApiButtons = Array.from(document.querySelectorAll<HTMLButtonElement>("[data-api-source]"));
 // API 協議下拉（auto / openai / anthropic）—— 用戶顯式 override transport
 const transportSelect = document.getElementById("transport-select") as HTMLSelectElement;
 
@@ -684,6 +719,7 @@ const soundEnabledInput = document.getElementById("sound-enabled") as HTMLInputE
 const soundVolumeInput = document.getElementById("sound-volume") as HTMLInputElement;
 const petAlwaysOnTopInput = document.getElementById("pet-always-on-top") as HTMLInputElement;
 const petVisibleInput = document.getElementById("pet-visible") as HTMLInputElement;
+const petChatInputEnabledInput = document.getElementById("pet-chat-input-enabled") as HTMLInputElement;
 const petZoomInput = document.getElementById("pet-zoom") as HTMLInputElement;
 const petZoomVal = document.getElementById("pet-zoom-val") as HTMLElement;
 const launchAtLoginInput = document.getElementById("launch-at-login") as HTMLInputElement;
@@ -825,17 +861,17 @@ function fillPresetOptions(): void {
     const option = document.createElement("option");
     option.value = preset.providerName;
     if (preset.disabled) {
-      option.textContent = preset.providerName + "（暫未適配）";
+      option.textContent = (preset.selectLabel ?? preset.providerName) + "（暫未適配）";
       option.disabled = true;
     } else {
-      option.textContent = preset.providerName;
+      option.textContent = preset.selectLabel ?? preset.providerName;
     }
     presetSelect.appendChild(option);
   }
 }
 
 function findPreset(providerName: string): ModelPreset {
-  // fallback：找不到匹配的預設時，回退到列表第一個可用項（當前是 MiniMax）。
+  // fallback：找不到匹配的預設時，回退到列表第一個可用項（當前是 OpenRouter）。
   // 不直接返回 MODEL_PRESETS[0] 是為了未來若把首項改成 disabled 也仍然合法。
   const fallback = MODEL_PRESETS.find((preset) => !preset.disabled) ?? MODEL_PRESETS[0];
   return MODEL_PRESETS.find((preset) => preset.providerName === providerName) ?? fallback;
@@ -873,6 +909,16 @@ function captureActiveProviderProfile(): void {
     displayName: displayNameInput.value.trim(),
     explicitTransport: transportSelect.value as ProviderProfile["explicitTransport"],
   };
+}
+
+function syncQuickApiSelection(): void {
+  for (const button of quickApiButtons) {
+    const active = button.dataset.apiSource === activeProvider;
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-pressed", String(active));
+    const state = button.querySelector<HTMLElement>(".api-source-card__state");
+    if (state) state.textContent = active ? "使用中" : "選擇";
+  }
 }
 
 /** 模式按鈕已刪除——模型名永遠從 input 讀取。保留函數名供舊調用點用，語義不變。 */
@@ -929,7 +975,7 @@ function applyPreset(providerName: string, preferredModel?: string, preferredApi
 
   // apiKey：優先用緩存；否則**顯式清空**——避免上一家廠商的 key 殘留在輸入框裡被用戶誤點保存。
   // 這是 v1 切廠商行為裡的關鍵不變量：apiKey 永遠只跟當前廠商綁定。
-  apiKeyInput.value = preferredApiKey ?? "";
+  apiKeyInput.value = preferredApiKey ?? preset.defaultApiKey ?? "";
 
   // explicitTransport：優先用緩存（用戶自定義過），其次默認 "auto"
   // （切廠商時上一家的 explicitTransport 不應該延續，preset 自帶 capabilities transport 兜底）
@@ -945,6 +991,7 @@ function applyPreset(providerName: string, preferredModel?: string, preferredApi
   }
 
   activeProvider = preset.providerName;
+  syncQuickApiSelection();
 }
 
 async function loadConfig(): Promise<void> {
@@ -968,7 +1015,23 @@ async function loadConfig(): Promise<void> {
         }
       }
     }
-    applyPreset(cfg.provider, cfg.model, cfg.apiKey, cfg.baseUrl, cfg.displayName, cfg.explicitTransport);
+    // 舊版把 Google Gemini 存在 ChatGPT profile 下。保留原資料並映射到新的專屬 Gemini 卡，
+    // 讓用戶無需重新輸入已加密保存的 API Key。
+    const legacyGemini = providerProfileCache["ChatGPT（OpenAI）"];
+    if (
+      !providerProfileCache["Gemini（Google）"]
+      && legacyGemini?.baseUrl.includes("generativelanguage.googleapis.com")
+    ) {
+      providerProfileCache["Gemini（Google）"] = {
+        ...legacyGemini,
+        displayName: legacyGemini.displayName || "Gemini 3.5 Flash",
+      };
+    }
+    const loadedProvider = cfg.provider === "ChatGPT（OpenAI）"
+      && cfg.baseUrl.includes("generativelanguage.googleapis.com")
+      ? "Gemini（Google）"
+      : cfg.provider;
+    applyPreset(loadedProvider, cfg.model, cfg.apiKey, cfg.baseUrl, cfg.displayName, cfg.explicitTransport);
     applyRuntimeSyncSelection(cfg.runtimeSync);
     stickerEnabledInput.checked = cfg.stickerEnabled !== false;
     applyStickerSizeSelection(cfg.stickerSize);
@@ -998,8 +1061,7 @@ async function loadConfig(): Promise<void> {
     setCyreneSaveStatus("等待保存");
   } catch {
     fillPresetOptions();
-    // 默認廠商已從 DeepSeek 改為 MiniMax（v1 vendor adapter 第一家落地的）
-    applyPreset("MiniMax（稀宇科技）");
+    applyPreset("Custom");
     setSaveStatus("讀取配置失敗", "is-error");
     setCyreneSaveStatus("讀取配置失敗", "is-error");
   }
@@ -1015,6 +1077,7 @@ async function loadGeneralSettings(): Promise<void> {
     soundVolumeInput.value = String(cfg.soundVolume);
     petAlwaysOnTopInput.checked = cfg.petAlwaysOnTop;
     petVisibleInput.checked = cfg.petVisible;
+    petChatInputEnabledInput.checked = cfg.petChatInputEnabled ?? false;
     petZoomInput.value = String(cfg.petZoom ?? 1);
     petZoomVal.textContent = Math.round((cfg.petZoom ?? 1) * 100) + "%";
     sidebarVisibleInput.checked = cfg.sidebarVisible ?? true;
@@ -1081,6 +1144,9 @@ soundVolumeInput.addEventListener("input", () => setGeneralSaveStatus("有未保
 
 petAlwaysOnTopInput.addEventListener("change", () => window.settings?.setPetAlwaysOnTop(petAlwaysOnTopInput.checked));
 petVisibleInput.addEventListener("change", () => window.settings?.setPetVisible(petVisibleInput.checked));
+petChatInputEnabledInput.addEventListener("change", () => {
+  void window.settings?.saveGeneral({ petChatInputEnabled: petChatInputEnabledInput.checked });
+});
 petZoomInput.addEventListener("input", () => {
   petZoomVal.textContent = Math.round(Number(petZoomInput.value) * 100) + "%";
 });
@@ -1787,6 +1853,42 @@ presetSelect.addEventListener("change", () => {
   setSaveStatus(cached ? "已切回上次配置" : "已應用預設，填寫 API Key 後保存");
 });
 
+for (const button of quickApiButtons) {
+  button.addEventListener("click", async () => {
+    const providerName = button.dataset.apiSource;
+    if (!providerName) return;
+    if (providerName === activeProvider) {
+      setSaveStatus("目前已在使用這個 API", "is-ok");
+      return;
+    }
+
+    captureActiveProviderProfile();
+    const cached = providerProfileCache[providerName];
+    applyPreset(
+      providerName,
+      cached?.model,
+      cached?.apiKey,
+      cached?.baseUrl,
+      cached?.displayName,
+      cached?.explicitTransport,
+    );
+    applyVisionSyncUI();
+
+    quickApiButtons.forEach((item) => { item.disabled = true; });
+    button.classList.add("is-switching");
+    setSaveStatus(`正在切換至 ${findPreset(providerName).shortName}…`);
+    try {
+      await persistApiSettings();
+      setSaveStatus(`已切換至 ${findPreset(providerName).shortName}`, "is-ok");
+    } catch {
+      setSaveStatus("切換失敗，請檢查配置後再試", "is-error");
+    } finally {
+      button.classList.remove("is-switching");
+      quickApiButtons.forEach((item) => { item.disabled = false; });
+    }
+  });
+}
+
 // 測試連接按鈕：調用廠商 adapter 的真實連接測試
 if (testConnectionBtn) {
   testConnectionBtn.addEventListener("click", async () => {
@@ -1995,6 +2097,7 @@ generalForm.addEventListener("submit", async (e) => {
       soundVolume: Number(soundVolumeInput.value),
       petAlwaysOnTop: petAlwaysOnTopInput.checked,
       petVisible: petVisibleInput.checked,
+      petChatInputEnabled: petChatInputEnabledInput.checked,
       petZoom: Number(petZoomInput.value),
       sidebarVisible: sidebarVisibleInput.checked,
       tasksVisible: tasksVisibleInput.checked,
@@ -2019,31 +2122,35 @@ cyrenePanel.addEventListener("submit", async (e) => {
   }
 });
 
+async function persistApiSettings(): Promise<void> {
+  // 保存前把當前輸入快照進 perProvider 緩存（main 進程也會做一次，但渲染端先做一遍，
+  // 是為了下一次切廠商再切回來不依賴磁盤往返）
+  captureActiveProviderProfile();
+  // mode 字段在 UI 層已刪除，但仍傳給 main 進程保留向後兼容（舊配置文件可能有該字段）。
+  // 默認 "manual"（baseUrl 永遠可改、模型名永遠可填，行為等同原 Manual）。
+  await window.settings!.saveConfig({
+    mode: "manual",
+    provider: activeProvider,
+    displayName: displayNameInput.value.trim(),
+    baseUrl: baseUrlInput.value.trim(),
+    model: getCurrentModelValue().trim(),
+    apiKey: apiKeyInput.value.trim(),
+    explicitTransport: transportSelect.value as "openai" | "anthropic" | "auto",
+    vision: {
+      syncWithMain: isVisionSynced(),
+      // syncWithMain=true 時三字段傳空（main 進程不落盤，運行時從主配置讀）
+      baseUrl: isVisionSynced() ? "" : visionBaseUrlInput.value.trim(),
+      apiKey: isVisionSynced() ? "" : visionApiKeyInput.value.trim(),
+      model: isVisionSynced() ? "" : visionModelInput.value.trim(),
+    },
+  });
+}
+
 apiForm.addEventListener("submit", async (e) => {
   e.preventDefault();
   setSaveStatus("保存中…");
   try {
-    // 保存前把當前輸入快照進 perProvider 緩存（main 進程也會做一次，但渲染端先做一遍，
-    // 是為了下一次切廠商再切回來不依賴磁盤往返）
-    captureActiveProviderProfile();
-    // mode 字段在 UI 層已刪除，但仍傳給 main 進程保留向後兼容（舊配置文件可能有該字段）。
-    // 默認 "manual"（baseUrl 永遠可改、模型名永遠可填，行為等同原 Manual）。
-    await window.settings!.saveConfig({
-      mode: "manual",
-      provider: activeProvider,
-      displayName: displayNameInput.value.trim(),
-      baseUrl: baseUrlInput.value.trim(),
-      model: getCurrentModelValue().trim(),
-      apiKey: apiKeyInput.value.trim(),
-      explicitTransport: transportSelect.value as "openai" | "anthropic" | "auto",
-      vision: {
-        syncWithMain: isVisionSynced(),
-        // syncWithMain=true 時三字段傳空（main 進程不落盤，運行時從主配置讀）
-        baseUrl: isVisionSynced() ? "" : visionBaseUrlInput.value.trim(),
-        apiKey: isVisionSynced() ? "" : visionApiKeyInput.value.trim(),
-        model: isVisionSynced() ? "" : visionModelInput.value.trim(),
-      },
-    });
+    await persistApiSettings();
     setSaveStatus("已保存", "is-ok");
   } catch {
     setSaveStatus("保存失敗", "is-error");

@@ -81,9 +81,12 @@ tabs.forEach((tab) => {
     tab.classList.add("is-active");
 
     const targetTab = tab.getAttribute("data-tab");
+    if (targetTab) {
+      updateTitlebarModeText(targetTab);
+    }
 
-    // 如果是共同筆記本，隱藏右側資訊面板以騰出全寬空間，並將停靠在裡面的桌寵暫時隱藏（不讓其彈出到桌面）
-    if (targetTab === "notebook" || targetTab === "game-room") {
+    // 如果是共同筆記本、遊戲房或考試模式，隱藏右側資訊面板以騰出全寬空間，並將停靠在裡面的桌寵暫時隱藏（不讓其彈出到桌面）
+    if (targetTab === "notebook" || targetTab === "game-room" || targetTab === "exam") {
       setInfoPanelVisible(false);
       window.sidebar?.setPetDockVisible(false);
     } else {
@@ -103,6 +106,8 @@ tabs.forEach((tab) => {
       iframe.src = "../settings/index.html#memory";
     } else if (targetTab === "notebook") {
       iframe.src = "../notebook/index.html";
+    } else if (targetTab === "exam") {
+      iframe.src = "../exam/index.html";
     } else if (targetTab === "game-room") {
       iframe.src = "../game-room/index.html";
     } else if (targetTab === "channels") {
@@ -120,6 +125,28 @@ let activeStyle = "01_default.md";
 
 const modeValEl = document.getElementById("ws-mode-val");
 const styleValEl = document.getElementById("ws-style-val");
+const titlebarModeEl = document.querySelector(".titlebar__mode");
+
+function updateTitlebarModeText(tab: string) {
+  if (!titlebarModeEl) return;
+  if (tab === "chat") {
+    titlebarModeEl.textContent = modeValEl?.textContent?.trim() || "協作";
+  } else if (tab === "tasks") {
+    titlebarModeEl.textContent = "備忘任務";
+  } else if (tab === "notebook") {
+    titlebarModeEl.textContent = "共同筆記本";
+  } else if (tab === "exam") {
+    titlebarModeEl.textContent = "考試模式";
+  } else if (tab === "game-room") {
+    titlebarModeEl.textContent = "遊戲房";
+  } else if (tab === "settings" || tab === "memory") {
+    titlebarModeEl.textContent = "系統設置";
+  } else if (tab === "channels") {
+    titlebarModeEl.textContent = "渠道管理";
+  } else {
+    titlebarModeEl.textContent = "陪伴模式";
+  }
+}
 
 const modeItems = document.querySelectorAll("#ws-mode-menu .ws-dropdown__item");
 const styleItems = document.querySelectorAll("#ws-style-menu .ws-dropdown__item");
@@ -148,6 +175,7 @@ modeItems.forEach((item) => {
     const label = item.textContent?.trim() || "協作";
     activeMode = value;
     if (modeValEl) modeValEl.textContent = label;
+    updateTitlebarModeText("chat");
     broadcastStateToIframe();
   });
 });
@@ -683,11 +711,28 @@ function updateActiveSessionHighlight() {
   });
 }
 
-// 監聽 iframe 傳回的會話切換事件，以同步工作台側欄的高亮狀態
+// 監聽 iframe 傳回的會話切換事件，以及文字觸發的模式切換事件
 window.addEventListener("message", (e) => {
   if (e.data && e.data.type === "active-session-changed") {
     currentActiveSessionId = e.data.sessionId || "";
     updateActiveSessionHighlight();
+  }
+  if (e.data && e.data.type === "mode-updated-by-text") {
+    const value = e.data.value;
+    const wsMode = value === "collab" ? "chat" : value;
+    activeMode = wsMode;
+    const modeItems = document.querySelectorAll(".ws-dropdown__item");
+    modeItems.forEach((item) => {
+      const o = item as HTMLElement;
+      if (o.dataset.value === wsMode) {
+        modeItems.forEach((i) => i.classList.remove("is-active"));
+        o.classList.add("is-active");
+        if (modeValEl) {
+          modeValEl.textContent = o.textContent?.trim() || "";
+        }
+        updateTitlebarModeText("chat");
+      }
+    });
   }
 });
 

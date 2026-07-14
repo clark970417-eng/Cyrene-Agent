@@ -28,6 +28,8 @@
 
 - 新增支援 Markdown 分頁、章節導覽與翻頁效果的雙頁筆記本。
 - 新增繪圖／圖片生成介面，支援提示詞整理、免費圖片來源與可配置的生成服務。
+- 新增專用學習模式，可依中英文問題切換語言，以 Markdown、LaTeX 與來源查證輔助學術解題。
+- 新增 AI 出題考試介面，可選科目、題數與推理強度，並提供計時、答題解析、成績與錯題回顧。
 - 強化文件、PDF、試算表與簡報相關工具，讓代理能處理更多實際工作。
 
 ### 4. 更完整的代理、記憶與陪伴行為
@@ -36,6 +38,7 @@
 - 新增記憶圖譜檢視，將人物、地點、事件與長期記憶整理成節點與關係。
 - 新增早安、午後關心與晚安三種每日儀式，可結合近期記憶、待辦與天氣。
 - 加入安靜時段與主動開場策略，降低不合時宜的打擾。
+- 加入桌寵氣泡專用的短回覆整理與長度保護，避免桌面對話被過長內容佔滿。
 
 ### 5. 語音、通話與畫面理解
 
@@ -59,7 +62,7 @@
 
 ### 8. 測試與可靠性
 
-- 專案目前包含約 70 個測試檔，涵蓋記憶、排程、工具、頻道、遊戲、語音、安全與 UI 邏輯。
+- 專案目前包含 71 個測試檔、431 項測試，涵蓋記憶、排程、工具、頻道、遊戲、語音、安全與 UI 邏輯。
 - 對 IPC 資料、共享畫面、備份路徑、訊息長度與代理活動紀錄加入界線檢查。
 - 提供 TypeScript 建置、Vitest 測試與 GitHub Actions workflow。
 
@@ -92,6 +95,7 @@ Electron Renderer
 ├── Chat / Call / Settings
 ├── Workspace Dashboard
 ├── Notebook / Paint
+├── Study / Exam
 └── Game Room
 ```
 
@@ -117,8 +121,8 @@ Electron Renderer
 ## 安裝與啟動
 
 ```bash
-git clone https://github.com/clark970417-eng/cyrene-private.git
-cd cyrene-private
+git clone https://github.com/clark970417-eng/My-project-one.git
+cd My-project-one
 npm ci
 npm run dev
 ```

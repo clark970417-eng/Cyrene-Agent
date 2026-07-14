@@ -19,26 +19,16 @@ export class OpenerBubbleController {
     return window.live2dSpeech.onShowBubble((payload) => this.handle(payload));
   }
 
-  private handle(payload: { text: string; audioBase64: string; format: "wav" | "mp3"; durationMs: number; sceneId: string; itemId: string }): void {
+  public show(payload: { text: string; audioBase64?: string; format?: "wav" | "mp3"; durationMs?: number; sceneId?: string; itemId?: string }): void {
     if (!this.bubbleEl) return;
     this.stopCurrent();
-
-    // 顯示氣泡文字
-    this.bubbleEl.textContent = payload.text;
-    this.bubbleEl.hidden = false;
-    this.bubbleEl.classList.add("opener-bubble--show");
-
-    // 點擊氣泡 = 接話
-    this.bubbleEl.onclick = () => {
-      window.openerBridge?.feedback({ type: "clicked", sceneId: payload.sceneId, itemId: payload.itemId });
-    };
 
     // prepare（停當前 motion + 嘴動 reset）
     window.live2dSpeech?.prepare();
 
     // 每日儀式即使未啟用 TTS，也要能以文字氣泡出現。
     if (!payload.audioBase64) {
-      this.fadeTimer = setTimeout(() => this.fadeOut(), BUBBLE_HOLD_MS + Math.min(8000, payload.text.length * 80));
+      this.reveal(payload);
       return;
     }
 
@@ -58,16 +48,40 @@ export class OpenerBubbleController {
     };
 
     void audio.play().then(() => {
-      // 播放開始 → 嘴動 + 盪鞦韆（startMouth 自動連帶 speakingMotion）
-      window.live2dSpeech?.startMouth(payload.durationMs);
+      // 音訊真正開始播放時才顯示字幕，避免文字比聲音早出現。
+      this.reveal(payload, false);
+      const durationMs = Number.isFinite(audio.duration)
+        ? Math.round(audio.duration * 1000)
+        : Number(payload.durationMs ?? 0);
+      window.live2dSpeech?.startMouth(durationMs);
       this.mouthStopTimer = setTimeout(() => {
         window.live2dSpeech?.stopMouth();
-      }, payload.durationMs + 500);
+      }, durationMs + 500);
     }).catch((err) => {
       console.warn("[OpenerBubble] 播放失敗:", err);
       URL.revokeObjectURL(url);
-      this.fadeOut();
+      this.reveal(payload);
     });
+  }
+
+  private handle(payload: { text: string; audioBase64: string; format: "wav" | "mp3"; durationMs: number; sceneId: string; itemId: string }): void {
+    this.show(payload);
+  }
+
+  private reveal(
+    payload: { text: string; sceneId?: string; itemId?: string },
+    scheduleFade = true,
+  ): void {
+    if (!this.bubbleEl) return;
+    this.bubbleEl.textContent = payload.text;
+    this.bubbleEl.hidden = false;
+    this.bubbleEl.classList.add("opener-bubble--show");
+    this.bubbleEl.onclick = payload.sceneId && payload.itemId
+      ? () => window.openerBridge?.feedback({ type: "clicked", sceneId: payload.sceneId!, itemId: payload.itemId! })
+      : null;
+    if (scheduleFade) {
+      this.fadeTimer = setTimeout(() => this.fadeOut(), BUBBLE_HOLD_MS + Math.min(8000, payload.text.length * 80));
+    }
   }
 
   private fadeOut(): void {

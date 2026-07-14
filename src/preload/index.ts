@@ -7,6 +7,8 @@ const cyreneApi = {
   quit: () => ipcRenderer.send(IPC.APP_QUIT),
   setInteractive: (interactive: boolean) =>
     ipcRenderer.invoke(IPC.WINDOW_SET_INTERACTIVE, interactive),
+  setTextInputActive: (active: boolean) =>
+    ipcRenderer.send(IPC.WINDOW_SET_TEXT_INPUT_ACTIVE, active),
   moveBy: (dx: number, dy: number) =>
     ipcRenderer.send(IPC.WINDOW_MOVE, dx, dy),
   moveTo: (x: number, y: number) =>
@@ -45,10 +47,26 @@ const chatApi = {
   onStreamChunk: (cb: (chunk: string) => void) => { ipcRenderer.on(IPC.CHAT_STREAM_CHUNK, (_e: unknown, chunk: string) => cb(chunk)); },
   onStreamDone: (cb: (payload: unknown) => void) => { ipcRenderer.on(IPC.CHAT_STREAM_DONE, (_e: unknown, payload: unknown) => cb(payload)); },
   removeStreamListeners: () => { ipcRenderer.removeAllListeners(IPC.CHAT_STREAM_CHUNK); ipcRenderer.removeAllListeners(IPC.CHAT_STREAM_DONE); },
+  onUpdateMode: (cb: (mode: string) => void) => {
+    const listener = (_e: unknown, mode: string) => cb(mode);
+    ipcRenderer.on("chat:update-mode", listener);
+    return () => ipcRenderer.removeListener("chat:update-mode", listener);
+  },
+};
+
+const petChatApi = {
+  send: (text: string) => ipcRenderer.invoke(IPC.PET_CHAT_SEND, text),
+  getInputVisibility: () => ipcRenderer.invoke(IPC.PET_CHAT_INPUT_VISIBILITY),
+  onInputVisibility: (callback: (visible: boolean) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, visible: boolean) => callback(Boolean(visible));
+    ipcRenderer.on(IPC.PET_CHAT_INPUT_VISIBILITY, listener);
+    return () => ipcRenderer.removeListener(IPC.PET_CHAT_INPUT_VISIBILITY, listener);
+  },
 };
 
 contextBridge.exposeInMainWorld("cyrene", cyreneApi);
 contextBridge.exposeInMainWorld("chat", chatApi);
+contextBridge.exposeInMainWorld("petChat", petChatApi);
 
 // AG-UI 事件流：發起一次 agent run，通過 onEvent 回調收 AG-UI 標準事件，
 // 返回 Promise<{success,error}> 表示整輪結束。onEvent 返回的取消訂閱函數用於停止監聽。

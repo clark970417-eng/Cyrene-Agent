@@ -27,7 +27,13 @@ function toWireMessages(messages: ChatMessage[]): unknown[] {
       return wire;
     }
     // assistant：回傳 content + tool_calls（OpenAI 多輪要求 assistant 消息帶 tool_calls）
+    if (m.rawAssistant) {
+      return m.rawAssistant;
+    }
     const wire: Record<string, unknown> = { role: "assistant", content: m.content || null };
+    if (m.thinking) {
+      wire.reasoning_content = m.thinking;
+    }
     if (m.toolCalls && m.toolCalls.length > 0) {
       wire.tool_calls = m.toolCalls.map(tc => ({
         id: tc.id,
@@ -148,6 +154,7 @@ export class OpenAICompatAdapter implements ChatVendorAdapter {
       content: text,
       ...(toolCalls.length > 0 ? { toolCalls } : {}),
       ...(thinking ? { thinking } : {}),
+      rawAssistant: msg,
     };
 
     // 提取 token 用量（OpenAI 協議: prompt_tokens/completion_tokens）

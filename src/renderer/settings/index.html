@@ -71,6 +71,48 @@
             </div>
           </div>
 
+          <section class="api-source-switcher" aria-labelledby="api-source-title">
+            <div class="api-source-switcher__heading">
+              <div>
+                <span class="api-source-switcher__eyebrow">QUICK SWITCH</span>
+                <h2 id="api-source-title">選擇昔漣的思考來源</h2>
+              </div>
+              <span class="api-source-switcher__hint">點一下立即切換並保存</span>
+            </div>
+            <div class="api-source-grid" role="group" aria-label="快速切換聊天 API">
+              <button type="button" class="api-source-card" data-api-source="Custom" aria-pressed="false">
+                <span class="api-source-card__signal api-source-card__signal--cloud" aria-hidden="true">
+                  <span></span><span></span><span></span>
+                </span>
+                <span class="api-source-card__copy">
+                  <strong>OpenRouter Free</strong>
+                  <small>雲端免費路由 · 使用現有 API Key</small>
+                </span>
+                <span class="api-source-card__state">選擇</span>
+              </button>
+              <button type="button" class="api-source-card" data-api-source="Gemini（Google）" aria-pressed="false">
+                <span class="api-source-card__signal api-source-card__signal--gemini" aria-hidden="true">
+                  <span></span><span></span><span></span>
+                </span>
+                <span class="api-source-card__copy">
+                  <strong>Gemini 3.5 Flash</strong>
+                  <small>Google 雲端 · 使用已保存 API Key</small>
+                </span>
+                <span class="api-source-card__state">選擇</span>
+              </button>
+              <button type="button" class="api-source-card" data-api-source="Ollama（本機）" aria-pressed="false">
+                <span class="api-source-card__signal api-source-card__signal--local" aria-hidden="true">
+                  <span></span><span></span><span></span>
+                </span>
+                <span class="api-source-card__copy">
+                  <strong>Llama 3.1 · 8B</strong>
+                  <small>本機離線推理 · 不使用雲端額度</small>
+                </span>
+                <span class="api-source-card__state">選擇</span>
+              </button>
+            </div>
+          </section>
+
           <div class="preset-row">
             <label class="field field--full">
               <span>模型預設</span>
@@ -236,6 +278,14 @@
                 <span>隱藏或顯示 Live2D 桌寵本體。</span>
               </div>
               <span class="switch"><input id="pet-visible" type="checkbox" /><span class="switch__track"><span class="switch__thumb"></span></span></span>
+            </label>
+
+            <label class="setting-row">
+              <div>
+                <strong>桌寵快捷輸入</strong>
+                <span>桌寵拖出工作台後，在下方顯示文字輸入列。</span>
+              </div>
+              <span class="switch"><input id="pet-chat-input-enabled" type="checkbox" /><span class="switch__track"><span class="switch__thumb"></span></span></span>
             </label>
 
             <label class="setting-row">

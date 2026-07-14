@@ -1397,6 +1397,10 @@ function syncSpeakingUi(): void {
 function setSpeakingMsgId(id: string | null): void {
   currentSpeakingMsgId = id;
   syncSpeakingUi();
+  const stopBtn = document.getElementById("stop-speaking-btn");
+  if (stopBtn) {
+    stopBtn.style.display = id ? "flex" : "none";
+  }
 }
 
 function stopLive2dMouth(): void {
@@ -1406,7 +1410,7 @@ function stopLive2dMouth(): void {
 }
 
 function startTextModeMouth(): void {
-  if (textMouthStarted) return;
+  if (textMouthStarted || isStudyMode()) return;
   textMouthStarted = true;
   window.live2dSpeech?.startMouth(TEXT_MODE_MOUTH_DURATION_MS);
 }
@@ -1928,6 +1932,7 @@ async function speakMessage(message: Message): Promise<void> {
 
 // 自動朗讀：檢查引擎是否開啟 + autoRead 開關，滿足條件才朗讀
 async function autoSpeakIfEnabled(text: string, msgId?: string): Promise<{ cacheKey: string } | null> {
+  if (isStudyMode()) return null;
   const settings = await loadTtsSettings();
   if (!settings || settings.ttsEngine === "off" || !settings.ttsAutoRead) return null;
   ttsPlaybackSequence += 1;
@@ -1962,7 +1967,7 @@ function createEarlyMinimaxPlayback(): EarlyMinimaxPlayback {
   };
 
   const tryStart = async (text: string): Promise<void> => {
-    if (triggered) return;
+    if (triggered || isStudyMode()) return;
     const cfg = await ensureSettings();
     if (!cfg || !eligible || triggered) return;
     const early = extractEarlyTtsSegment(text);
@@ -1979,10 +1984,11 @@ function createEarlyMinimaxPlayback(): EarlyMinimaxPlayback {
 
   return {
     append(delta: string): void {
-      if (triggered) return;
+      if (triggered || isStudyMode()) return;
       void tryStart(delta);
     },
     async finish(fullText: string, msgId?: string): Promise<{ cacheKey: string } | null> {
+      if (isStudyMode()) return null;
       const cfg = await ensureSettings();
       if (!cfg || !eligible) return autoSpeakIfEnabled(fullText, msgId);
 
@@ -2150,6 +2156,26 @@ window.addEventListener("message", (e) => {
   }
 });
 
+if (window.chat?.onUpdateMode) {
+  window.chat.onUpdateMode((mode) => {
+    currentWorkspaceMode = mode;
+    if (window.self !== window.top) {
+      window.top.postMessage({ type: "mode-updated-by-text", value: mode }, "*");
+    } else {
+      const opts = document.querySelectorAll("#mode-dropdown .dm-opt");
+      opts.forEach((opt) => {
+        const o = opt as HTMLElement;
+        if (o.dataset.value === mode) {
+          opts.forEach((el) => el.classList.remove("is-active"));
+          o.classList.add("is-active");
+          const valEl = document.querySelector("#mode-val");
+          if (valEl) valEl.textContent = o.textContent?.trim() || "";
+        }
+      });
+    }
+  });
+}
+
 function isTalkMode(): boolean {
   if (window.self !== window.top) {
     return currentWorkspaceMode === "talk";
@@ -2158,14 +2184,25 @@ function isTalkMode(): boolean {
   return active?.dataset?.value === "talk";
 }
 
+function isStudyMode(): boolean {
+  if (window.self !== window.top) {
+    return currentWorkspaceMode === "study";
+  }
+  const active = document.querySelector("#mode-dropdown .dm-opt.is-active") as HTMLElement | null;
+  return active?.dataset?.value === "study";
+}
+
 function getCurrentStyle(): string {
   if (window.self !== window.top) {
-    return currentWorkspaceMode === "talk" ? "talk" : currentWorkspaceStyle;
+    if (currentWorkspaceMode === "talk") return "talk";
+    if (currentWorkspaceMode === "study") return "study";
+    return currentWorkspaceStyle;
   }
   const active = document.querySelector("#style-dropdown .dm-opt.is-active") as HTMLElement | null;
   const style = (active && active.dataset && active.dataset.value) || "01_default.md";
-  // 日常聊天模式：前綴 "talk" 觸發後端走 talk_system.md + tools:[]
-  return isTalkMode() ? "talk" : style;
+  if (isTalkMode()) return "talk";
+  if (isStudyMode()) return "study";
+  return style;
 }
 async function getModelReply(): Promise<ChatReplyPayload> {
   if (!window.chat?.sendMessage) {
@@ -3127,5 +3164,20 @@ if (window.self !== window.top) {
 window.addEventListener("message", (e) => {
   if (e.data && e.data.type === "clear-chat") {
     clearChat();
+  }
+});
+
+// ── 停止播放熱鍵與按鈕監聽 ──
+document.getElementById("stop-speaking-btn-inner")?.addEventListener("click", () => {
+  stopCurrentTts();
+  setSpeakingMsgId(null);
+});
+
+window.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") {
+    if (currentSpeakingMsgId) {
+      stopCurrentTts();
+      setSpeakingMsgId(null);
+    }
   }
 });

@@ -831,35 +831,88 @@ async function tavilySearch(query: string, key: string): Promise<string> {
   }
 }
 
-async function executeWebSearch(args: Record<string, unknown>): Promise<string> {
-  const engine = searchEngineGetter?.() ?? "off";
-  if (engine === "off") {
-    return "[提示] 聯網搜索未啟用。請在 設置 → 插件 → 聯網搜索 選擇搜索源並填入 Key。";
-  }
+async function freeSearch(query: string): Promise<string> {
+  const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), SEARCH_TIMEOUT_MS);
+  try {
+    const resp = await fetch(url, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept-Language": "zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7",
+      },
+      signal: ctrl.signal,
+    });
+    if (!resp.ok) {
+      return `[錯誤] 免費搜尋失敗：HTTP ${resp.status}`;
+    }
+    const html = await resp.text();
+    const results: Array<{ title: string; url: string; content: string }> = [];
+    
+    const resultBlocks = html.split('<div class="result__body">');
+    for (let i = 1; i < resultBlocks.length && results.length < 8; i++) {
+      const block = resultBlocks[i].split('</div>')[0] || resultBlocks[i];
+      const titleMatch = block.match(/<a class="result__a"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/);
+      const snippetMatch = block.match(/<a class="result__snippet"[^>]*>([\s\S]*?)<\/a>/);
+      
+      if (titleMatch) {
+        let rawUrl = titleMatch[1];
+        let finalUrl = rawUrl;
+        if (rawUrl.includes("uddg=")) {
+          const u = new URL("https:" + rawUrl);
+          const uddg = u.searchParams.get("uddg");
+          if (uddg) finalUrl = uddg;
+        } else if (rawUrl.startsWith("//")) {
+          finalUrl = "https:" + rawUrl;
+        }
+        
+        const title = titleMatch[2].replace(/<[^>]+>/g, "").trim();
+        const content = snippetMatch ? snippetMatch[1].replace(/<[^>]+>/g, "").trim() : "（無摘要）";
+        results.push({ title, url: finalUrl, content });
+      }
+    }
 
+    if (results.length === 0) {
+      return `[提示] 搜尋"${query}"沒有找到任何結果。`;
+    }
+
+    const lines: string[] = [`搜尋"${query}"的結果（共 ${results.length} 條）：`, ""];
+    for (let i = 0; i < results.length; i++) {
+      const r = results[i];
+      lines.push(`【${i + 1}】${r.title}`);
+      lines.push(`  鏈接：${r.url}`);
+      lines.push(`  摘要：${r.content}`);
+      lines.push("");
+    }
+    return lines.join("\n");
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return "[錯誤] 免費搜尋失敗：" + msg;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function executeWebSearch(args: Record<string, unknown>): Promise<string> {
   const query = String(args.query ?? "").trim();
   if (!query) {
     return "[提示] 請提供搜索關鍵詞。";
   }
 
+  const engine = searchEngineGetter?.() ?? "off";
+
   if (engine === "bocha") {
     const key = searchBochaKeyGetter?.() ?? "";
-    if (!key) {
-      return "[錯誤] 還沒有配置博查搜索 Key。請在 設置 → 插件 → 聯網搜索 填入博查 Key。";
-    }
-    return bochaSearch(query, key);
+    if (key) return bochaSearch(query, key);
   }
 
   if (engine === "tavily") {
     const key = searchTavilyKeyGetter?.() ?? "";
-    if (!key) {
-      return "[錯誤] 還沒有配置 Tavily 搜索 Key。請在 設置 → 插件 → 聯網搜索 填入 Tavily Key。";
-    }
-    return tavilySearch(query, key);
+    if (key) return tavilySearch(query, key);
   }
 
-  // 其他搜索引擎暫未接入
-  return `[提示] 搜索引擎"${engine}"暫未接入，目前支持 bocha 和 tavily。`;
+  // 兜底：若未配置或配置缺失 Key，自動啟用免費免 Key 搜尋（基於 DuckDuckGo HTML 解析，覆蓋全球網頁）
+  return freeSearch(query);
 }
 
 toolRegistry.register({

@@ -19,6 +19,7 @@ export default defineConfig({
         call: resolve(__dirname, "src/renderer/call/index.html"),
         workspace: resolve(__dirname, "src/renderer/workspace/index.html"),
         notebook: resolve(__dirname, "src/renderer/notebook/index.html"),
+        exam: resolve(__dirname, "src/renderer/exam/index.html"),
         gameRoom: resolve(__dirname, "src/renderer/game-room/index.html"),
       },
     },

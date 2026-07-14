@@ -126,10 +126,10 @@ html, body {
   align-items: center;
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid rgba(255, 255, 255, 0.05);
-  padding: 8px 12px;
+  padding: 8px 9px;
   border-radius: 12px;
-  font-size: 12px;
-  gap: 8px;
+  font-size: 11px;
+  gap: 6px;
 }
 
 .sidebar__status-dot {
@@ -143,12 +143,18 @@ html, body {
 .sidebar__status-text {
   color: var(--text-primary);
   font-weight: 500;
+  white-space: nowrap;
+  word-break: keep-all;
+  flex-shrink: 0;
 }
 
 .sidebar__status-count {
   color: var(--text-muted);
   margin-left: auto;
-  font-size: 11px;
+  font-size: 10px;
+  white-space: nowrap;
+  word-break: keep-all;
+  flex-shrink: 0;
 }
 
 /* ── 中間主內容區域 ── */
@@ -169,6 +175,7 @@ html, body {
   padding: 0 16px;
   border-bottom: 1px solid var(--border-color);
   background: rgba(14, 10, 20, 0.4);
+  gap: 8px;
 }
 
 .titlebar__left {
@@ -183,6 +190,7 @@ html, body {
 
 .titlebar__mode {
   color: var(--text-primary);
+  white-space: nowrap;
 }
 
 .titlebar__divider {
@@ -196,6 +204,7 @@ html, body {
   border-radius: 10px;
   border: 1px solid rgba(16, 185, 129, 0.15);
   font-size: 11px;
+  white-space: nowrap;
 }
 
 .titlebar__center-stats {
@@ -587,6 +596,7 @@ html, body {
   align-items: center;
   gap: 12px;
   -webkit-app-region: no-drag;
+  flex-shrink: 0;
 }
 
 .ws-dropdown {
@@ -601,6 +611,9 @@ html, body {
   cursor: pointer;
   transition: all 0.2s ease;
   font-size: 11px;
+  white-space: nowrap;
+  word-break: keep-all;
+  flex-shrink: 0;
 }
 
 .ws-dropdown:hover {
@@ -611,11 +624,14 @@ html, body {
 
 .ws-dropdown__label {
   color: var(--text-muted);
+  white-space: nowrap;
 }
 
 .ws-dropdown__value {
   color: #fff;
   font-weight: 600;
+  white-space: nowrap;
+  word-break: keep-all;
 }
 
 .ws-dropdown__arrow {
@@ -678,6 +694,41 @@ html, body {
   color: #ec4899; /* pink checkmark */
   font-weight: bold;
   font-size: 14px;
+}
+
+/* 窄視窗：拿掉重複的欄位名稱，保留真正的選項值，避免中文字被逐字換行。 */
+@media (max-width: 1250px) {
+  .titlebar {
+    padding-inline: 8px;
+  }
+
+  .titlebar__left,
+  .titlebar__dropdowns,
+  .titlebar__actions {
+    gap: 6px;
+  }
+
+  .titlebar__divider,
+  .ws-dropdown__label {
+    display: none;
+  }
+
+  .ws-dropdown {
+    padding-inline: 7px;
+    gap: 4px;
+  }
+}
+
+@media (max-width: 980px) {
+  .titlebar__mode {
+    display: none;
+  }
+
+  .titlebar__model-status {
+    max-width: 150px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
 }
 
 /* ── 桌寵停靠槽 ── */

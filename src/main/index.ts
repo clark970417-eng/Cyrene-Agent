@@ -6,6 +6,7 @@ import { createHash } from "crypto";
 import * as zlib from "zlib";
 import { pathToFileURL } from "url";
 import { IPC } from "../shared/ipc-channels";
+import { compactPetReply } from "./pet-chat";
 import { STATUS_KEYWORDS } from "./status-keywords";
 import { initRAG, buildMemoryContext, addMemory, removeMemory, importDocument, switchEmbeddingModel, deleteImportedDoc } from "./rag";
 import { getEmbeddingProvider, getSceneEmbeddingProvider } from "./rag/embedding";
@@ -376,6 +377,8 @@ interface GeneralSettings {
   soundVolume: number;
   petAlwaysOnTop: boolean;
   petVisible: boolean;
+  /** 桌寵獨立在桌面上時，在下方顯示快速文字輸入列。 */
+  petChatInputEnabled: boolean;
   /** 桌寵縮放因子：1.0=默認，0.5~2.0，窗口與模型同步等比縮放。 */
   petZoom: number;
   /** 桌寵窗口 X 座標，未保存時為 undefined */
@@ -521,9 +524,19 @@ const PET_WINDOW_BASE_HEIGHT = 500;
 
 let lastSlotBounds: { x: number; y: number; width: number; height: number } | null = null;
 let isPetDocked = true;
+let isPetTextInputActive = false;
 let isProgrammaticMoving = false;
 let isPetDragging = false;
 let pendingPetPosition: { x: number; y: number } | null = null;
+
+function applyPetWindowLevel(settings: GeneralSettings): void {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (isPetDocked || isPetTextInputActive || !settings.petAlwaysOnTop) {
+    mainWindow.setAlwaysOnTop(false);
+    return;
+  }
+  mainWindow.setAlwaysOnTop(true, "screen-saver");
+}
 
 /**
  * Turn the docked pet into an independent desktop window before a drag moves
@@ -541,10 +554,8 @@ function undockPet(restoreSize = true): void {
   // Resizing a BrowserWindow while a pointer is down cancels pointer capture
   // on macOS. During a drag, keep the docked size until pointerup.
   if (restoreSize) applyPetZoom(settings.petZoom || 1.0);
-  mainWindow.setAlwaysOnTop(
-    settings.petAlwaysOnTop,
-    settings.petAlwaysOnTop ? "screen-saver" : "normal",
-  );
+  applyPetWindowLevel(settings);
+  syncPetChatInputVisibility(settings);
 
   if (sidebarWindow && !sidebarWindow.isDestroyed()) {
     try {
@@ -559,6 +570,7 @@ function updatePetDockPosition(): void {
   if (!lastSlotBounds) return;
 
   const settings = loadGeneralSettings();
+  syncPetChatInputVisibility(settings);
 
   if (isPetDocked) {
     // 停靠時：縮小比例為 0.45 左右，使桌寵完美契合小型卡片邊框
@@ -567,7 +579,7 @@ function updatePetDockPosition(): void {
     if (sidebarWindow && !sidebarWindow.isDestroyed()) {
       mainWindow.setParentWindow(sidebarWindow);
     }
-    mainWindow.setAlwaysOnTop(false);
+    applyPetWindowLevel(settings);
     // The dock slot is an intentional interaction surface. Per-pixel
     // click-through can race with mousedown here (especially after a window
     // resize), causing the drag gesture never to receive pointerdown.
@@ -578,7 +590,7 @@ function updatePetDockPosition(): void {
     // 解除父子視窗關係，使桌寵成為獨立的桌面小工具
     mainWindow.setParentWindow(null);
     // 拖出時：恢復常規桌寵的置頂狀態
-    mainWindow.setAlwaysOnTop(settings.petAlwaysOnTop, settings.petAlwaysOnTop ? "screen-saver" : "normal");
+    applyPetWindowLevel(settings);
     return; // 不繼續跟隨工作台移動
   }
 
@@ -644,6 +656,7 @@ const DEFAULT_GENERAL_SETTINGS: GeneralSettings = {
   soundVolume: 70,
   petAlwaysOnTop: true,
   petVisible: true,
+  petChatInputEnabled: false,
   petZoom: 1,
   sidebarVisible: true,
   tasksVisible: true,
@@ -1092,6 +1105,9 @@ function normalizeGeneralSettings(input: Partial<GeneralSettings> | null | undef
     soundVolume: clamp(input?.soundVolume, DEFAULT_GENERAL_SETTINGS.soundVolume),
     petAlwaysOnTop: input?.petAlwaysOnTop === undefined ? DEFAULT_GENERAL_SETTINGS.petAlwaysOnTop : Boolean(input.petAlwaysOnTop),
     petVisible: input?.petVisible === undefined ? DEFAULT_GENERAL_SETTINGS.petVisible : Boolean(input.petVisible),
+    petChatInputEnabled: input?.petChatInputEnabled === undefined
+      ? DEFAULT_GENERAL_SETTINGS.petChatInputEnabled
+      : Boolean(input.petChatInputEnabled),
     petZoom: typeof input?.petZoom === "number" ? Math.max(0.5, Math.min(2, input.petZoom)) : DEFAULT_GENERAL_SETTINGS.petZoom,
     petWindowX: typeof input?.petWindowX === "number" && isFinite(input.petWindowX)
       ? Math.round(input.petWindowX) : undefined,
@@ -1196,15 +1212,18 @@ function loadGeneralSettings(): GeneralSettings {
 }
 
 function applyGeneralSettings(settings: GeneralSettings): void {
-  if (isPetDocked) {
-    mainWindow?.setAlwaysOnTop(false);
-  } else {
-    mainWindow?.setAlwaysOnTop(settings.petAlwaysOnTop, settings.petAlwaysOnTop ? "screen-saver" : "normal");
-  }
+  applyPetWindowLevel(settings);
   if (settings.petVisible) mainWindow?.show();
   else mainWindow?.hide();
-  app.setLoginItemSettings({ openAtLogin: settings.launchAtLogin });
+  // 未簽名的開發版 Electron 在 macOS 呼叫此 API 會固定被系統拒絕並輸出
+  // platform_util_mac 錯誤；正式封裝版才有可註冊的登入項目。
+  if (!isDev) app.setLoginItemSettings({ openAtLogin: settings.launchAtLogin });
   applyPetZoom(isPetDocked ? 0.45 : settings.petZoom);
+  syncPetChatInputVisibility(settings);
+}
+
+function syncPetChatInputVisibility(settings = loadGeneralSettings()): void {
+  sendToLive2DWindow(IPC.PET_CHAT_INPUT_VISIBILITY, settings.petChatInputEnabled && !isPetDocked);
 }
 
 /**
@@ -1836,9 +1855,12 @@ function logWorldbookInjection(alwaysOnContext: string, systemContent: string): 
 function buildSystemPrompt(styleFile: string): string {
   const parts: string[] = [];
 
-  // styleFile 以 "talk" 開頭時走純聊天模式：用 talk_system.md 替換 system.md（不調工具）
+  // styleFile 以 "talk" 開頭時走純聊天模式，以 "study" 開頭時走學習模式
   const isTalkMode = styleFile.startsWith("talk");
-  const system = loadPromptFile(isTalkMode ? "talk_system.md" : "system.md");
+  const isStudyMode = styleFile.startsWith("study");
+  const system = loadPromptFile(
+    isTalkMode ? "talk_system.md" : (isStudyMode ? "study_system.md" : "system.md")
+  );
   if (system) parts.push(system);
   
   const identity = loadPromptFile("identity.md");
@@ -1947,6 +1969,21 @@ async function observeRuntimeState(
   void latestUserText;
 }
 
+function isEnglishText(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+  
+  const cleanText = trimmed
+    .replace(/<@!?\d+>/g, "")
+    .replace(/[0-9\s\p{P}\p{S}]/gu, "");
+  if (!cleanText) return false;
+
+  const englishChars = (cleanText.match(/[a-zA-Z]/g) || []).length;
+  const chineseChars = (cleanText.match(/[\u4e00-\u9fa5]/g) || []).length;
+
+  return englishChars > 0 && englishChars > chineseChars * 2;
+}
+
 async function requestModelReply(inputMessages: unknown, styleFile = "01_default.md"): Promise<ChatReplyPayload> {
   const settings = loadModelSettings();
   if (!settings.apiKey) {
@@ -1957,7 +1994,27 @@ async function requestModelReply(inputMessages: unknown, styleFile = "01_default
   if (messages.length === 0) {
     throw new Error("沒有可發送的聊天內容。");
   }
-  const latestUserText = messages.filter((message) => message.role === "user").at(-1)?.content ?? "";
+  let latestUserText = messages.filter((message) => message.role === "user").at(-1)?.content ?? "";
+
+  // 根據語意動態切換模式：如果用戶稱呼「昔漣老師」切至學習模式；若稱呼「昔漣」且無「昔漣老師」切回一般模式
+  let activeStyle = styleFile;
+  if (latestUserText.includes("昔漣老師")) {
+    activeStyle = "study";
+    for (const win of BrowserWindow.getAllWindows()) {
+      try { win.webContents.send("chat:update-mode", "study"); } catch { /* ignore */ }
+    }
+  } else if (latestUserText.includes("昔漣")) {
+    activeStyle = "01_default.md";
+    for (const win of BrowserWindow.getAllWindows()) {
+      try { win.webContents.send("chat:update-mode", "collab"); } catch { /* ignore */ }
+    }
+  } else if (isEnglishText(latestUserText)) {
+    activeStyle = "study";
+    for (const win of BrowserWindow.getAllWindows()) {
+      try { win.webContents.send("chat:update-mode", "study"); } catch { /* ignore */ }
+    }
+  }
+  styleFile = activeStyle;
 
   // 1. 構建 always-on 上下文（世界書 + L0/L1 畫像）
   let alwaysOnContext = "";
@@ -2705,6 +2762,11 @@ ipcMain.handle(IPC.WINDOW_SET_INTERACTIVE, (_event, interactive: boolean) => {
   }
 });
 
+ipcMain.on(IPC.WINDOW_SET_TEXT_INPUT_ACTIVE, (_event, active: boolean) => {
+  isPetTextInputActive = Boolean(active);
+  applyPetWindowLevel(loadGeneralSettings());
+});
+
 ipcMain.on(IPC.WINDOW_MOVE, (_event, dx: number, dy: number) => {
   if (mainWindow) {
     const [x, y] = mainWindow.getPosition();
@@ -2843,8 +2905,43 @@ ipcMain.on(IPC.CHAT_TOGGLE_MAXIMIZE, () => {
 ipcMain.handle(IPC.CHAT_IS_MAXIMIZED, () => {
   return chatWindow?.isMaximized() ?? false;
 });
-ipcMain.handle(IPC.CHAT_SEND_MESSAGE, async (_event, messages: unknown) => {
-  return requestModelReply(messages);
+ipcMain.handle(IPC.CHAT_SEND_MESSAGE, async (_event, messages: unknown, style: unknown) => {
+  return requestModelReply(messages, typeof style === "string" ? style : undefined);
+});
+
+const petChatHistory: Array<{ role: "user" | "assistant"; content: string }> = [];
+
+ipcMain.handle(IPC.PET_CHAT_INPUT_VISIBILITY, () => {
+  const settings = loadGeneralSettings();
+  return settings.petChatInputEnabled && !isPetDocked;
+});
+
+ipcMain.handle(IPC.PET_CHAT_SEND, async (_event, rawText: unknown) => {
+  const text = typeof rawText === "string" ? rawText.trim().slice(0, 500) : "";
+  if (!text) throw new Error("請先輸入想說的話。");
+
+  const result = await requestModelReply([
+    {
+      role: "system",
+      content: "這是桌寵快捷對話。只回覆一個很短、自然的繁體中文段落，最多兩句、70 個中文字內；直接回答，不要舞台動作、括號描寫、標題、條列、Markdown 或換行。這項限制只適用本次桌寵快捷對話。",
+    },
+    ...petChatHistory.slice(-10),
+    { role: "user", content: text },
+  ]);
+  const reply = compactPetReply(result.reply);
+  petChatHistory.push({ role: "user", content: text }, { role: "assistant", content: reply });
+  if (petChatHistory.length > 12) petChatHistory.splice(0, petChatHistory.length - 12);
+
+  const settings = loadGeneralSettings();
+  const speech = settings.ttsAutoRead && settings.ttsEngine !== "off"
+    ? await synthesizeDailyRitual(reply, { ...settings, dailyRitualVoice: true })
+    : null;
+  return {
+    text: reply,
+    audioBase64: speech?.base64 ?? "",
+    format: speech?.format ?? "mp3",
+    durationMs: Math.max(1800, Math.min(18000, reply.length * 180)),
+  };
 });
 
 ipcMain.handle(IPC.CHAT_INGEST_FILES, async (_event, paths: unknown) => {
@@ -3036,7 +3133,7 @@ ipcMain.on(IPC.SETTINGS_CLOSE_TASKS, () => {
 
 ipcMain.on(IPC.SETTINGS_SET_PET_ALWAYS_ON_TOP, (_event, value: boolean) => {
   const saved = saveGeneralSettings({ ...loadGeneralSettings(), petAlwaysOnTop: Boolean(value) });
-  mainWindow?.setAlwaysOnTop(saved.petAlwaysOnTop, saved.petAlwaysOnTop ? "screen-saver" : "normal");
+  applyPetWindowLevel(saved);
 });
 
 ipcMain.on(IPC.SETTINGS_SET_PET_VISIBLE, (_event, value: boolean) => {
@@ -4124,7 +4221,37 @@ app.whenReady().then(async () => {
     return loadRecentHistory(sessionId, limit);
   });
 
+  const channelSessionModes = new Map<string, string>();
+
   setDispatcherBuildAndRunAgent(async (msg, sessionId, priorMessages) => {
+    const textTrimmed = msg.text.trim();
+    if (textTrimmed === "/study") {
+      channelSessionModes.set(sessionId, "study");
+      return "昔漣已為你切換至學習模式（英文教學、無語音）！\nCyrene has switched to Study Mode (English, no TTS) for you! ♪";
+    }
+    if (textTrimmed === "/talk") {
+      channelSessionModes.set(sessionId, "talk");
+      return "昔漣已為你切換至日常聊天模式！♪";
+    }
+    if (textTrimmed === "/collab") {
+      channelSessionModes.set(sessionId, "collab");
+      return "昔漣已為你切換至協作模式！♪";
+    }
+
+    // 根據語意動態切換模式（適用於 DC 等多渠道對話）
+    if (msg.text.includes("昔漣老師")) {
+      channelSessionModes.set(sessionId, "study");
+    } else if (msg.text.includes("昔漣")) {
+      channelSessionModes.set(sessionId, "collab");
+    } else if (isEnglishText(msg.text)) {
+      channelSessionModes.set(sessionId, "study");
+    }
+
+    const currentMode = channelSessionModes.get(sessionId) || "collab";
+    let style = "01_default.md";
+    if (currentMode === "study") style = "study";
+    else if (currentMode === "talk") style = "talk";
+
     // Phase 3.3：按 toolSandbox 過濾可用工具
     const sandbox = loadChannelsSettings().toolSandbox;
     const allTools = toolRegistry.getEnabledTools();
@@ -4152,7 +4279,7 @@ app.whenReady().then(async () => {
           ...historyMessages,
           { role: "user", content: msg.text },
         ],
-        style: "01_default.md",
+        style,
         sessionId,
         attachments: msg.attachments?.map((a) => ({
           name: a.filePath ?? a.url ?? "attachment",
@@ -4420,6 +4547,7 @@ app.whenReady().then(async () => {
   ipcMain.on("sidebar:report-slot-bounds", (event, bounds) => {
     lastSlotBounds = { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height };
     isPetDocked = bounds.isDocked;
+    syncPetChatInputVisibility();
     updatePetDockPosition();
   });
 
