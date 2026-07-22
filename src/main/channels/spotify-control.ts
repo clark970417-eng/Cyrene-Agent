@@ -207,10 +207,46 @@ export async function getSpotifyStatus(): Promise<SpotifyPlaybackStatus> {
   }
 }
 
-export async function controlSpotify(input: { command?: string; value?: number; deviceId?: string }): Promise<{ ok: boolean; message: string }> {
+export function spotifyUriFromInput(input: string): string | null {
+  const value = input.trim();
+  if (/^spotify:(track|album|playlist):[A-Za-z0-9]+$/i.test(value)) return value;
+  try {
+    const url = new URL(value);
+    if (url.hostname !== "open.spotify.com") return null;
+    const [type, id] = url.pathname.split("/").filter(Boolean);
+    if (!id || !["track", "album", "playlist"].includes(type)) return null;
+    return `spotify:${type}:${id}`;
+  } catch {
+    return null;
+  }
+}
+
+async function resolveSpotifyPlaybackUri(query: string): Promise<string> {
+  const direct = spotifyUriFromInput(query);
+  if (direct) return direct;
+  const params = new URLSearchParams({ q: query.trim(), type: "track", limit: "1" });
+  const result = await spotifyApi<{ tracks?: { items?: Array<{ uri?: string; name?: string; artists?: Array<{ name: string }> }> } }>(`/search?${params}`);
+  const item = result?.tracks?.items?.[0];
+  if (!item?.uri) throw new Error("Spotify 找不到這首歌，請改貼 Spotify 歌曲連結");
+  return item.uri;
+}
+
+export async function controlSpotify(input: { command?: string; value?: number; deviceId?: string; query?: string }): Promise<{ ok: boolean; message: string }> {
   const device = input.deviceId ? `?device_id=${encodeURIComponent(input.deviceId)}` : "";
   const command = input.command;
   try {
+    if (command === "play") {
+      const query = input.query?.trim();
+      if (!query) throw new Error("請輸入歌曲名稱或 Spotify 連結");
+      const uri = await resolveSpotifyPlaybackUri(query);
+      const isTrack = uri.startsWith("spotify:track:");
+      await spotifyApi("/me/player/play" + device, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(isTrack ? { uris: [uri] } : { context_uri: uri }),
+      });
+      return { ok: true, message: "已在 Spotify 開始播放" };
+    }
     if (command === "previous") await spotifyApi("/me/player/previous" + device, { method: "POST" });
     else if (command === "next") await spotifyApi("/me/player/next" + device, { method: "POST" });
     else if (command === "pause") await spotifyApi("/me/player/pause" + device, { method: "PUT" });

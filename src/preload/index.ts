@@ -284,7 +284,7 @@ const settingsApi = {
   channelsDiscordPickBanner: () => ipcRenderer.invoke(IPC.CHANNELS_DISCORD_PICK_BANNER),
   channelsSpotifyAuthorize: (input: { clientId?: string; clientSecret?: string }) => ipcRenderer.invoke(IPC.CHANNELS_SPOTIFY_AUTHORIZE, input),
   channelsSpotifyGetStatus: () => ipcRenderer.invoke(IPC.CHANNELS_SPOTIFY_GET_STATUS),
-  channelsSpotifyControl: (input: { command: string; value?: number; deviceId?: string }) => ipcRenderer.invoke(IPC.CHANNELS_SPOTIFY_CONTROL, input),
+  channelsSpotifyControl: (input: { command: string; value?: number; deviceId?: string; query?: string }) => ipcRenderer.invoke(IPC.CHANNELS_SPOTIFY_CONTROL, input),
   channelsSpotifyDisconnect: () => ipcRenderer.invoke(IPC.CHANNELS_SPOTIFY_DISCONNECT),
   // Phase 3.4：消息日誌
   channelsLogGet: (limit?: number) => ipcRenderer.invoke(IPC.CHANNELS_LOG_GET, limit ?? 100),

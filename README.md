@@ -55,7 +55,7 @@
 - 擴充 Discord Slash Commands、語音通話與狀態查詢，讓使用者可直接聊天、加入或離開語音頻道。
 - 新增 Discord 音樂播放，可用歌曲名稱搜尋，並處理 YouTube／Bilibili／SoundCloud／Spotify 連結、播放清單、Bilibili 合集與多分段內容。
 - 提供可即時更新的播放器卡片、私人佇列、播放歷史、分類續播、音量、循環、隨機與自動推薦控制。
-- 新增 Spotify Premium 連線與播放控制，可透過 OAuth 授權、切換裝置、上一首／下一首、播放／暫停與音量控制，並以加密方式保存 Client Secret 與 Refresh Token。
+- 新增 Spotify Premium 連線與播放控制，可透過 OAuth 授權、歌曲搜尋或 Spotify 連結播放、切換裝置、上一首／下一首、播放／暫停與音量控制，並以加密方式保存 Client Secret 與 Refresh Token。
 - 外部訊息與 Discord 顯示文字會統一轉為台灣繁體中文，並保留使用者的原始輸入。
 - 持續整合飛書、微信與本機 inbound server，讓同一個代理核心可服務不同聊天入口。
 - 對平台能力進行分流，避免不支援的訊息格式或工具被錯誤調用。
@@ -69,7 +69,7 @@
 
 ### 8. 測試與可靠性
 
-- 專案目前包含 76 個測試檔、499 項測試，涵蓋記憶、排程、工具、頻道、遊戲、語音、安全與 UI 邏輯。
+- 專案目前包含 77 個測試檔、501 項測試，涵蓋記憶、排程、工具、頻道、遊戲、語音、安全與 UI 邏輯。
 - 對 IPC 資料、共享畫面、備份路徑、訊息長度與代理活動紀錄加入界線檢查。
 - 提供 TypeScript 建置、Vitest 測試與 GitHub Actions workflow。
 

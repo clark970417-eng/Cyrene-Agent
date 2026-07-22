@@ -418,7 +418,7 @@ interface SettingsApi {
   channelsDiscordPickBanner: () => Promise<string | null>;
   channelsSpotifyAuthorize: (input: { clientId?: string; clientSecret?: string }) => Promise<ChannelConnectionResult>;
   channelsSpotifyGetStatus: () => Promise<SpotifyPlaybackStatus>;
-  channelsSpotifyControl: (input: { command: string; value?: number; deviceId?: string }) => Promise<{ ok: boolean; message: string }>;
+  channelsSpotifyControl: (input: { command: string; value?: number; deviceId?: string; query?: string }) => Promise<{ ok: boolean; message: string }>;
   channelsSpotifyDisconnect: () => Promise<ChannelConnectionResult>;
   channelsGetConfig: () => Promise<ChannelsPreviewConfig>;
   channelsSaveConfig: (patch: unknown) => Promise<unknown>;
@@ -2887,6 +2887,8 @@ const channelsSpotifyNextBtn = document.getElementById("channels-spotify-next") 
 const channelsSpotifyDeviceSelectEl = document.getElementById("channels-spotify-device-select") as HTMLSelectElement | null;
 const channelsSpotifyVolumeEl = document.getElementById("channels-spotify-volume") as HTMLInputElement | null;
 const channelsSpotifyVolumeValueEl = document.getElementById("channels-spotify-volume-value") as HTMLOutputElement | null;
+const channelsSpotifyQueryEl = document.getElementById("channels-spotify-query") as HTMLInputElement | null;
+const channelsSpotifyPlayQueryBtn = document.getElementById("channels-spotify-play-query") as HTMLButtonElement | null;
 const channelsSpotifyClientIdEl = document.getElementById("channels-spotify-client-id") as HTMLInputElement | null;
 const channelsSpotifyClientSecretEl = document.getElementById("channels-spotify-client-secret") as HTMLInputElement | null;
 const channelsSpotifySecretRevealBtn = document.getElementById("channels-spotify-secret-reveal") as HTMLButtonElement | null;
@@ -3169,6 +3171,8 @@ function renderSpotify(status: SpotifyPlaybackStatus): void {
   }
   if (channelsSpotifyConnectBtn) channelsSpotifyConnectBtn.textContent = status.connected ? "重新授權" : "連接 Spotify";
   if (channelsSpotifyDisconnectBtn) channelsSpotifyDisconnectBtn.disabled = !status.connected;
+  if (channelsSpotifyQueryEl) channelsSpotifyQueryEl.disabled = !status.connected || !status.devices.length;
+  if (channelsSpotifyPlayQueryBtn) channelsSpotifyPlayQueryBtn.disabled = !status.connected || !status.devices.length;
   for (const button of [channelsSpotifyPreviousBtn, channelsSpotifyToggleBtn, channelsSpotifyNextBtn]) if (button) button.disabled = !usable;
   if (channelsSpotifyVolumeEl) channelsSpotifyVolumeEl.disabled = !usable;
   if (channelsSpotifyDeviceSelectEl) {
@@ -3203,8 +3207,8 @@ async function refreshSpotify(): Promise<void> {
   finally { spotifyRefreshInFlight = false; }
 }
 
-async function controlSpotifyUi(command: string, value?: number): Promise<void> {
-  const result = await window.settings.channelsSpotifyControl({ command, value, deviceId: channelsSpotifyDeviceSelectEl?.value || undefined });
+async function controlSpotifyUi(command: string, value?: number, query?: string): Promise<void> {
+  const result = await window.settings.channelsSpotifyControl({ command, value, query, deviceId: channelsSpotifyDeviceSelectEl?.value || undefined });
   if (!result.ok) setSpotifyFeedback("err", result.message);
   await refreshSpotify();
 }
@@ -3388,6 +3392,19 @@ async function loadChannelsPanel(): Promise<void> {
   channelsSpotifyNextBtn?.addEventListener("click", () => void controlSpotifyUi("next"));
   channelsSpotifyToggleBtn?.addEventListener("click", () => void controlSpotifyUi(spotifyStatus.playback?.active && !spotifyStatus.playback.paused ? "pause" : "resume"));
   channelsSpotifyDeviceSelectEl?.addEventListener("change", () => void controlSpotifyUi("transfer"));
+  const playSpotifyQuery = async () => {
+    const query = channelsSpotifyQueryEl?.value.trim() ?? "";
+    if (!query) { setSpotifyFeedback("err", "請輸入歌曲名稱或 Spotify 連結"); return; }
+    if (channelsSpotifyPlayQueryBtn) channelsSpotifyPlayQueryBtn.disabled = true;
+    try {
+      await controlSpotifyUi("play", undefined, query);
+      if (channelsSpotifyQueryEl) channelsSpotifyQueryEl.value = "";
+    } finally {
+      if (channelsSpotifyPlayQueryBtn) channelsSpotifyPlayQueryBtn.disabled = false;
+    }
+  };
+  channelsSpotifyPlayQueryBtn?.addEventListener("click", () => void playSpotifyQuery());
+  channelsSpotifyQueryEl?.addEventListener("keydown", (event) => { if (event.key === "Enter") { event.preventDefault(); void playSpotifyQuery(); } });
   channelsSpotifyVolumeEl?.addEventListener("input", () => {
     const volume = Number(channelsSpotifyVolumeEl.value);
     if (channelsSpotifyVolumeValueEl) channelsSpotifyVolumeValueEl.value = `${volume}%`;

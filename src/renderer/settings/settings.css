@@ -3279,6 +3279,9 @@ body {
 .spotify-player__progress { height:4px; margin-top:4px; overflow:hidden; border-radius:99px; background:rgba(255,255,255,.09); }
 .spotify-player__progress i { display:block; width:0; height:100%; border-radius:inherit; background:linear-gradient(90deg,#1ed760,#7ee8a4); transition:width .6s linear; }
 .spotify-player__controls { display:flex; align-items:center; justify-content:center; gap:8px; margin-top:12px; }
+.spotify-player__request { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:8px; margin-top:14px; }
+.spotify-player__request .form-input { min-width:0; }
+.spotify-player__request button { white-space:nowrap; }
 .spotify-player__controls button { display:grid; width:36px; height:36px; place-items:center; border:1px solid rgba(255,255,255,.12); border-radius:50%; background:rgba(255,255,255,.055); color:rgba(255,255,255,.75); cursor:pointer; }
 .spotify-player__controls .spotify-player__primary { width:42px; height:42px; border:0; background:#1ed760; color:#101510; box-shadow:0 8px 22px rgba(30,215,96,.22); }
 .spotify-player__controls select { width:min(210px,36vw); margin-left:8px; }
@@ -3294,7 +3297,7 @@ body {
 .btn-spotify { border-color:rgba(30,215,96,.52); background:#1db954; color:#07170d; font-weight:700; }
 .btn-spotify:hover:not(:disabled) { background:#1ed760; }
 .spotify-portal-link { display:inline-flex; align-items:center; text-decoration:none; }
-@media (max-width:760px) { .spotify-credentials { grid-template-columns:1fr; } .spotify-player__controls { flex-wrap:wrap; } .spotify-player__controls select { width:100%; margin:4px 0 0; } }
+@media (max-width:760px) { .spotify-credentials { grid-template-columns:1fr; } .spotify-player__request { grid-template-columns:1fr; } .spotify-player__controls { flex-wrap:wrap; } .spotify-player__controls select { width:100%; margin:4px 0 0; } }
 
 .discord-identity {
   position: relative;

@@ -323,6 +323,7 @@ function registerChannelsIpc(): void {
       command: typeof input.command === "string" ? input.command : undefined,
       value: typeof input.value === "number" ? input.value : undefined,
       deviceId: typeof input.deviceId === "string" ? input.deviceId : undefined,
+      query: typeof input.query === "string" ? input.query : undefined,
     });
   });
   ipcMain.handle(IPC.CHANNELS_SPOTIFY_DISCONNECT, () => {
