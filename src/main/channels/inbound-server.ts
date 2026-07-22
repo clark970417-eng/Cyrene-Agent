@@ -23,11 +23,11 @@ interface InboundRoute {
 }
 
 const routes: InboundRoute[] = [];
-const localGetRoutes = new Map<string, (req: http.IncomingMessage, res: http.ServerResponse) => Promise<void>>();
+const localRoutes = new Map<string, (req: http.IncomingMessage, res: http.ServerResponse) => Promise<void>>();
 
 /** 註冊只綁定 localhost 的 GET 回呼（例如 OAuth redirect）。 */
 export function registerLocalGetRoute(pathname: string, handler: (req: http.IncomingMessage, res: http.ServerResponse) => Promise<void>): void {
-  localGetRoutes.set(pathname, handler);
+  localRoutes.set(`GET ${pathname}`, handler);
 }
 
 /** adapter 在 start() 時調用一次註冊自己的路由。重複註冊按 id 覆蓋。 */
@@ -79,7 +79,7 @@ async function handleRequest(
   secret: string,
 ): Promise<void> {
   const requestUrl = new URL(req.url || "/", "http://127.0.0.1");
-  const localHandler = req.method === "GET" ? localGetRoutes.get(requestUrl.pathname) : undefined;
+  const localHandler = localRoutes.get(`${req.method ?? "GET"} ${requestUrl.pathname}`);
   if (localHandler) {
     await localHandler(req, res);
     return;

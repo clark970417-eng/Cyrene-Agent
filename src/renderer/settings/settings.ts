@@ -3194,9 +3194,13 @@ function renderSpotify(status: SpotifyPlaybackStatus): void {
   if (status.error) setSpotifyFeedback("err", status.error);
 }
 
+let spotifyRefreshInFlight = false;
 async function refreshSpotify(): Promise<void> {
+  if (spotifyRefreshInFlight) return;
+  spotifyRefreshInFlight = true;
   try { renderSpotify(await window.settings.channelsSpotifyGetStatus()); }
   catch (err) { setSpotifyFeedback("err", err instanceof Error ? err.message : String(err)); }
+  finally { spotifyRefreshInFlight = false; }
 }
 
 async function controlSpotifyUi(command: string, value?: number): Promise<void> {

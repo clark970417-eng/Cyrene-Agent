@@ -44,6 +44,7 @@ export interface SpotifyPlaybackStatus {
 
 let accessToken = "";
 let accessTokenExpiresAt = 0;
+let accessTokenRefresh: Promise<string> | null = null;
 let expectedState = "";
 let lastAuthError = "";
 
@@ -66,6 +67,7 @@ async function tokenRequest(body: URLSearchParams): Promise<SpotifyTokenResponse
       "Content-Type": "application/x-www-form-urlencoded",
     },
     body,
+    signal: AbortSignal.timeout(10_000),
   });
   const payload = await response.json().catch(() => ({})) as SpotifyTokenResponse & { error_description?: string; error?: string };
   if (!response.ok || !payload.access_token) {
@@ -76,13 +78,21 @@ async function tokenRequest(body: URLSearchParams): Promise<SpotifyTokenResponse
 
 async function getAccessToken(): Promise<string> {
   if (accessToken && Date.now() < accessTokenExpiresAt - 30_000) return accessToken;
-  const { refreshToken } = credentials();
-  if (!refreshToken) throw new Error("Spotify 尚未完成帳號授權");
-  const token = await tokenRequest(new URLSearchParams({ grant_type: "refresh_token", refresh_token: refreshToken }));
-  accessToken = token.access_token;
-  accessTokenExpiresAt = Date.now() + Math.max(60, token.expires_in) * 1000;
-  if (token.refresh_token) saveChannelsSettings({ spotify: { enabled: true, refreshToken: token.refresh_token } });
-  return accessToken;
+  if (accessTokenRefresh) return accessTokenRefresh;
+  accessTokenRefresh = (async () => {
+    const { refreshToken } = credentials();
+    if (!refreshToken) throw new Error("Spotify 尚未完成帳號授權");
+    const token = await tokenRequest(new URLSearchParams({ grant_type: "refresh_token", refresh_token: refreshToken }));
+    accessToken = token.access_token;
+    accessTokenExpiresAt = Date.now() + Math.max(60, token.expires_in) * 1000;
+    if (token.refresh_token) saveChannelsSettings({ spotify: { enabled: true, refreshToken: token.refresh_token } });
+    return accessToken;
+  })();
+  try {
+    return await accessTokenRefresh;
+  } finally {
+    accessTokenRefresh = null;
+  }
 }
 
 async function spotifyApi<T>(path: string, init: RequestInit = {}): Promise<T | null> {
@@ -90,6 +100,7 @@ async function spotifyApi<T>(path: string, init: RequestInit = {}): Promise<T | 
   const response = await fetch(`https://api.spotify.com/v1${path}`, {
     ...init,
     headers: { Authorization: `Bearer ${token}`, ...(init.headers ?? {}) },
+    signal: init.signal ?? AbortSignal.timeout(10_000),
   });
   if (response.status === 204) return null;
   const payload = await response.json().catch(() => ({})) as T & { error?: { message?: string } };
