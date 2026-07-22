@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
+import { EventEmitter } from "node:events";
+import { PassThrough } from "node:stream";
 import { DiscordVoiceCall, formatDiscordMusicActivity, parseDiscordVoiceCommand, stereo48kToMono16k } from "./voice-call";
+import * as musicSource from "./music-source";
 
 describe("Discord voice commands", () => {
   it.each(["加入通話", "進來通話！", "加入語音頻道", "陪我通話"])("parses join: %s", (text) => {
@@ -87,6 +90,41 @@ describe("Discord desktop music state", () => {
     (voice as unknown as Record<string, unknown>).musicOwnerId = "owner";
     expect(voice.canControlMusic("owner")).toBe(true);
     expect(voice.canControlMusic("someone-else")).toBe(false);
+  });
+
+  it("warms only the next queued song in the background", async () => {
+    const process = Object.assign(new EventEmitter(), {
+      stdout: new PassThrough(),
+      stderr: new PassThrough(),
+      exitCode: null as number | null,
+      killed: false,
+      kill: vi.fn(function (this: { killed: boolean }) { this.killed = true; return true; }),
+    });
+    const spawn = vi.spyOn(musicSource, "spawnDiscordMusicStream").mockResolvedValue(process as never);
+    const voice = new DiscordVoiceCall({} as never, () => ({ enabled: true } as never), async () => null);
+    const internal = voice as unknown as {
+      mode: "music";
+      musicQueue: Array<{ title: string; url: string; queueOrder: number }>;
+      prefetchedMusic: { queueOrder: number } | null;
+      scheduleNextMusicPrefetch: () => void;
+      stopPrefetchedMusic: () => void;
+    };
+    internal.mode = "music";
+    internal.musicQueue = [
+      { title: "Second", url: "https://example.com/2", queueOrder: 2 },
+      { title: "Third", url: "https://example.com/3", queueOrder: 3 },
+    ];
+
+    internal.scheduleNextMusicPrefetch();
+    await Promise.resolve();
+    await Promise.resolve();
+    internal.scheduleNextMusicPrefetch();
+
+    expect(spawn).toHaveBeenCalledTimes(1);
+    expect(spawn).toHaveBeenCalledWith(expect.objectContaining({ title: "Second" }));
+    expect(internal.prefetchedMusic?.queueOrder).toBe(2);
+    internal.stopPrefetchedMusic();
+    spawn.mockRestore();
   });
 
   it("exposes the same current track, queue and volume used by Discord", () => {

@@ -123,6 +123,16 @@ export class DiscordVoiceCall {
   private musicOwnerId: string | null = null;
   private currentMusicTrack: (DiscordMusicTrack & { queueOrder: number }) | null = null;
   private musicProcess: DiscordMusicProcess | null = null;
+  private prefetchedMusic: {
+    queueOrder: number;
+    process: DiscordMusicProcess;
+    stderr: string;
+    failed: boolean;
+    onData: (chunk: Buffer) => void;
+    onError: () => void;
+    onClose: (code: number | null) => void;
+  } | null = null;
+  private prefetchingMusicOrder: number | null = null;
   private musicResource: AudioResource<DiscordMusicTrack> | null = null;
   private musicRepeat: "off" | "track" | "queue" = "off";
   private musicShuffle = false;
@@ -182,6 +192,7 @@ export class DiscordVoiceCall {
       this.musicQueue = this.musicQueue.filter((track) => track.queueOrder !== previous.queueOrder);
       if (this.currentMusicTrack) this.musicQueue.unshift(this.currentMusicTrack);
       this.musicQueue.unshift(previous);
+      this.stopPrefetchedMusic();
       this.currentMusicTrack = null;
       this.stopPlayerAndAdvance(true);
       return { ok: true, message: "已回到上一首。" };
@@ -213,6 +224,7 @@ export class DiscordVoiceCall {
     if (command === "shuffle") {
       this.musicShuffle = true;
       this.shuffleTracks(this.musicQueue);
+      this.scheduleNextMusicPrefetch();
       this.notifyMusicStateChange();
       return { ok: true, message: "已切換為隨機播放。" };
     }
@@ -224,12 +236,14 @@ export class DiscordVoiceCall {
     if (command === "ordered") {
       this.musicShuffle = false;
       this.musicQueue.sort((a, b) => a.queueOrder - b.queueOrder);
+      this.scheduleNextMusicPrefetch();
       this.notifyMusicStateChange();
       return { ok: true, message: "已切換為原本順序。" };
     }
     if (command === "clear") {
       const count = this.musicQueue.length;
       this.musicQueue = [];
+      this.stopPrefetchedMusic();
       this.notifyMusicStateChange();
       return { ok: true, message: count ? `已清空接下來的 ${count} 首歌曲。` : "播放佇列本來就是空的。" };
     }
@@ -239,6 +253,7 @@ export class DiscordVoiceCall {
         return { ok: false, message: `請選擇 1–${Math.max(1, this.musicQueue.length)} 之間的歌曲序號。` };
       }
       const [removed] = this.musicQueue.splice(index - 1, 1);
+      this.scheduleNextMusicPrefetch();
       this.notifyMusicStateChange();
       return { ok: true, message: `已從播放清單移除「${removed.title}」。` };
     }
@@ -296,6 +311,7 @@ export class DiscordVoiceCall {
       const queued = tracks.map((track) => ({ ...track, queueOrder: this.musicOrder++ }));
       if (this.musicShuffle) this.shuffleTracks(queued);
       this.musicQueue.push(...queued);
+      if (this.currentMusicTrack) this.scheduleNextMusicPrefetch();
       this.notifyMusicStateChange();
       const first = tracks[0];
       const label = tracks.length > 1
@@ -387,6 +403,7 @@ export class DiscordVoiceCall {
     this.advancingMusic = false;
     this.skipMusicRepeat = false;
     this.stopMusicProcess();
+    this.stopPrefetchedMusic();
     this.player?.stop(true);
     this.connection?.destroy();
     this.player = null;
@@ -517,9 +534,10 @@ export class DiscordVoiceCall {
         return;
       }
       this.currentMusicTrack = next;
-      const process = await spawnDiscordMusicStream(next);
+      const prepared = this.takePrefetchedMusic(next);
+      const process = prepared?.process ?? await spawnDiscordMusicStream(next);
       this.musicProcess = process;
-      let stderr = "";
+      let stderr = prepared?.stderr ?? "";
       process.stderr.on("data", (chunk: Buffer) => {
         stderr = `${stderr}${chunk.toString("utf8")}`.slice(-1200);
       });
@@ -544,6 +562,7 @@ export class DiscordVoiceCall {
       resource.volume?.setVolume(this.musicVolume / 100);
       this.musicResource = resource;
       this.player.play(resource);
+      this.scheduleNextMusicPrefetch();
       this.setMusicPresence(next);
       this.notifyMusicStateChange();
       void recordDiscordMusicInNotebook({
@@ -569,6 +588,72 @@ export class DiscordVoiceCall {
     const process = this.musicProcess;
     this.musicProcess = null;
     if (process?.exitCode === null && !process.killed) process.kill("SIGKILL");
+  }
+
+  /**
+   * Keep exactly one upcoming yt-dlp process warm. Its stdout remains paused, so
+   * extraction and the first small audio buffer are ready without downloading
+   * the whole playlist or consuming unbounded memory.
+   */
+  private scheduleNextMusicPrefetch(): void {
+    const next = this.musicQueue[0];
+    if (this.mode !== "music" || !next) {
+      this.stopPrefetchedMusic();
+      return;
+    }
+    if (this.prefetchedMusic?.queueOrder === next.queueOrder || this.prefetchingMusicOrder === next.queueOrder) return;
+    this.stopPrefetchedMusic();
+    this.prefetchingMusicOrder = next.queueOrder;
+    void spawnDiscordMusicStream(next).then((process) => {
+      if (this.mode !== "music" || this.musicQueue[0]?.queueOrder !== next.queueOrder) {
+        if (process.exitCode === null && !process.killed) process.kill("SIGKILL");
+        return;
+      }
+      const state = {
+        queueOrder: next.queueOrder,
+        process,
+        stderr: "",
+        failed: false,
+        onData: (_chunk: Buffer) => undefined,
+        onError: () => undefined,
+        onClose: (_code: number | null) => undefined,
+      };
+      state.onData = (chunk: Buffer) => { state.stderr = `${state.stderr}${chunk.toString("utf8")}`.slice(-1200); };
+      state.onError = () => { state.failed = true; };
+      state.onClose = (code: number | null) => { if (code !== 0) state.failed = true; };
+      process.stderr.on("data", state.onData);
+      process.once("error", state.onError);
+      process.once("close", state.onClose);
+      this.prefetchedMusic = state;
+    }).catch((err) => {
+      console.warn(LOG, `預取下一首失敗（播放時會重試）: ${this.musicErrorMessage(err)}`);
+    }).finally(() => {
+      if (this.prefetchingMusicOrder === next.queueOrder) this.prefetchingMusicOrder = null;
+    });
+  }
+
+  private takePrefetchedMusic(track: DiscordMusicTrack & { queueOrder: number }): { process: DiscordMusicProcess; stderr: string } | null {
+    const state = this.prefetchedMusic;
+    this.prefetchedMusic = null;
+    if (!state || state.queueOrder !== track.queueOrder || state.failed || state.process.killed) {
+      if (state?.process.exitCode === null && !state.process.killed) state.process.kill("SIGKILL");
+      return null;
+    }
+    state.process.stderr.off("data", state.onData);
+    state.process.off("error", state.onError);
+    state.process.off("close", state.onClose);
+    return { process: state.process, stderr: state.stderr };
+  }
+
+  private stopPrefetchedMusic(): void {
+    const state = this.prefetchedMusic;
+    this.prefetchedMusic = null;
+    this.prefetchingMusicOrder = null;
+    if (!state) return;
+    state.process.stderr.off("data", state.onData);
+    state.process.off("error", state.onError);
+    state.process.off("close", state.onClose);
+    if (state.process.exitCode === null && !state.process.killed) state.process.kill("SIGKILL");
   }
 
   /**
