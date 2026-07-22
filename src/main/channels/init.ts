@@ -231,6 +231,23 @@ function registerChannelsIpc(): void {
     return adapter?.getProfile() ?? { connected: false, guildCount: 0, guilds: [], voiceActive: false };
   });
 
+  ipcMain.handle(IPC.CHANNELS_DISCORD_GET_MUSIC_STATE, () => {
+    const adapter = channelManager.getAdapter("discord") as DiscordAdapter | undefined;
+    return adapter?.getMusicState() ?? { active: false, paused: false, current: null, queue: [], volume: 100, repeat: "off", shuffle: false, elapsed: 0 };
+  });
+
+  ipcMain.handle(IPC.CHANNELS_DISCORD_CONTROL_MUSIC, async (_event, raw: unknown) => {
+    const adapter = channelManager.getAdapter("discord") as DiscordAdapter | undefined;
+    if (!adapter) return { ok: false, message: "Discord adapter 未註冊" };
+    const input = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+    const allowed = new Set(["previous", "pause", "resume", "skip", "stop", "repeat-track", "repeat-queue", "repeat-off", "shuffle", "ordered", "clear", "remove", "volume"]);
+    if (typeof input.command !== "string" || !allowed.has(input.command)) return { ok: false, message: "不支援的播放控制" };
+    return await adapter.controlMusic({
+      command: input.command as Parameters<DiscordAdapter["controlMusic"]>[0]["command"],
+      value: typeof input.value === "number" ? input.value : undefined,
+    });
+  });
+
   ipcMain.handle(IPC.CHANNELS_DISCORD_PICK_AVATAR, async () => {
     const result = await dialog.showOpenDialog({
       title: "選擇 Discord Bot 頭像",

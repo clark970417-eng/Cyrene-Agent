@@ -3483,6 +3483,102 @@ body {
 }
 .btn-discord:hover:not(:disabled) { background: #6875f5; }
 .discord-portal-link { display: inline-flex; align-items: center; text-decoration: none; }
+.discord-player {
+  margin-top: 18px;
+  padding: 16px;
+  border: 1px solid rgba(132, 143, 255, 0.20);
+  border-radius: 16px;
+  background: linear-gradient(145deg, rgba(26, 22, 52, 0.88), rgba(13, 12, 30, 0.74));
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.035);
+}
+.discord-player__heading,
+.discord-player__list-head,
+.discord-player__time,
+.discord-player__volume {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.discord-player h3,
+.discord-player h4 { margin: 2px 0 0; color: rgba(255, 255, 255, 0.94); font-weight: 650; }
+.discord-player h3 { font-size: 16px; }
+.discord-player h4 { font-size: 13px; }
+.discord-player__live {
+  padding: 5px 9px;
+  border: 1px solid rgba(235, 229, 245, 0.12);
+  border-radius: 999px;
+  color: rgba(235, 229, 245, 0.52);
+  font-size: 10px;
+}
+.discord-player__live.is-active { border-color: rgba(86, 224, 143, 0.30); color: #72e7a2; background: rgba(35, 165, 90, 0.10); }
+.discord-player__now {
+  display: grid;
+  grid-template-columns: 74px minmax(0, 1fr);
+  gap: 16px;
+  align-items: center;
+  margin-top: 15px;
+  padding: 14px;
+  border-radius: 14px;
+  background: radial-gradient(circle at 0 50%, rgba(88, 101, 242, 0.18), transparent 50%), rgba(255, 255, 255, 0.035);
+}
+.discord-player__record {
+  position: relative;
+  display: grid;
+  width: 66px;
+  height: 66px;
+  place-items: center;
+  border-radius: 50%;
+  background: repeating-radial-gradient(circle, #25213e 0 4px, #19162f 5px 7px);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.34);
+}
+.discord-player__record::before { position: absolute; width: 25px; height: 25px; border-radius: 50%; content: ""; background: linear-gradient(135deg, #ff77bd, #6975ff); }
+.discord-player__record img { position: absolute; inset: 5px; width: calc(100% - 10px); height: calc(100% - 10px); border-radius: 50%; object-fit: cover; }
+.discord-player__record.has-cover::after { position: absolute; width: 10px; height: 10px; border: 3px solid rgba(255, 255, 255, 0.72); border-radius: 50%; content: ""; background: #211b39; box-shadow: 0 0 0 3px rgba(25, 20, 48, 0.38); }
+.discord-player__record.has-cover::before,
+.discord-player__record.has-cover span { display: none; }
+.discord-player__record span { position: relative; z-index: 1; color: white; font-size: 12px; }
+.discord-player__record.is-playing { animation: discord-record-spin 7s linear infinite; }
+.discord-player__record.is-paused { animation-play-state: paused; }
+@keyframes discord-record-spin { to { transform: rotate(360deg); } }
+.discord-player__track { display: grid; min-width: 0; gap: 5px; }
+.discord-player__track > span { color: rgba(235, 229, 245, 0.46); font-size: 10px; }
+.discord-player__track strong { overflow: hidden; color: rgba(255, 255, 255, 0.92); font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.discord-player__progress { height: 4px; overflow: hidden; border-radius: 99px; background: rgba(255, 255, 255, 0.09); }
+.discord-player__progress i { display: block; width: 0; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #6975ff, #ff77bd); transition: width 0.5s linear; }
+.discord-player__time { color: rgba(235, 229, 245, 0.40); font-size: 9px; }
+.discord-player__controls { display: flex; justify-content: center; gap: 8px; margin-top: 12px; }
+.discord-player__controls button {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border: 1px solid rgba(158, 167, 255, 0.15);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.045);
+  color: rgba(235, 229, 245, 0.72);
+  cursor: pointer;
+}
+.discord-player__controls button:hover:not(:disabled),
+.discord-player__controls button:focus-visible { outline: none; border-color: rgba(132, 143, 255, 0.42); color: #fff; background: rgba(88, 101, 242, 0.18); }
+.discord-player__controls button[aria-pressed="true"] { color: #ff8fc8; background: rgba(255, 119, 189, 0.12); }
+.discord-player__controls .discord-player__primary { width: 40px; height: 40px; margin-top: -3px; border: 0; border-radius: 50%; background: linear-gradient(135deg, #6875f5, #a85fe5); color: #fff; box-shadow: 0 8px 20px rgba(88, 101, 242, 0.28); }
+.discord-player button:disabled,
+.discord-player input:disabled { cursor: not-allowed; opacity: 0.38; }
+.discord-player__volume { gap: 10px; margin-top: 13px; color: rgba(235, 229, 245, 0.56); font-size: 10px; }
+.discord-player__volume input { min-width: 0; flex: 1; accent-color: #7d79fa; }
+.discord-player__volume output { width: 34px; color: rgba(235, 229, 245, 0.72); text-align: right; }
+.discord-player__library { margin-top: 14px; padding-top: 13px; border-top: 1px solid rgba(158, 167, 255, 0.10); }
+.discord-player__list-head button { padding: 5px 8px; border: 0; border-radius: 8px; background: rgba(255, 255, 255, 0.05); color: rgba(235, 229, 245, 0.55); font-size: 9px; cursor: pointer; }
+.discord-player__queue { display: grid; max-height: 210px; gap: 4px; margin: 9px 0 0; padding: 0; overflow: auto; list-style: none; }
+.discord-player__queue li { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto auto; gap: 8px; align-items: center; padding: 8px; border-radius: 9px; color: rgba(235, 229, 245, 0.68); font-size: 10px; }
+.discord-player__queue li:hover { background: rgba(255, 255, 255, 0.04); }
+.discord-player__queue li.is-current { background: rgba(255, 119, 189, 0.09); color: #ff96ca; }
+.discord-player__queue li.is-empty { display: block; color: rgba(235, 229, 245, 0.36); text-align: center; }
+.discord-player__queue strong { overflow: hidden; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.discord-player__queue small { color: rgba(235, 229, 245, 0.35); }
+.discord-player__queue button { width: 24px; height: 24px; padding: 0; border: 0; border-radius: 7px; background: transparent; color: rgba(235, 229, 245, 0.36); cursor: pointer; }
+.discord-player__queue button:hover { color: #ff8aaa; background: rgba(255, 102, 142, 0.10); }
+@media (prefers-reduced-motion: reduce) { .discord-player__record.is-playing { animation: none; } }
 .discord-connection-divider {
   display: flex;
   align-items: center;
@@ -3500,6 +3596,8 @@ body {
   .discord-media-change { grid-column: 1 / -1; justify-self: start; }
   .discord-identity__stats,
   .discord-identity__editor { grid-template-columns: 1fr; }
+  .discord-player__now { grid-template-columns: 54px minmax(0, 1fr); }
+  .discord-player__record { width: 50px; height: 50px; }
 }
 
 /* 微信掃碼登錄 QR 彈窗（modal overlay） */

@@ -276,6 +276,8 @@ export const IPC = {
   // Discord 專屬
   CHANNELS_DISCORD_TEST_CONNECTION: "channels:discord:test-connection",
   CHANNELS_DISCORD_GET_PROFILE: "channels:discord:get-profile",
+  CHANNELS_DISCORD_GET_MUSIC_STATE: "channels:discord:get-music-state",
+  CHANNELS_DISCORD_CONTROL_MUSIC: "channels:discord:control-music",
   CHANNELS_DISCORD_UPDATE_PROFILE: "channels:discord:update-profile",
   CHANNELS_DISCORD_PICK_AVATAR: "channels:discord:pick-avatar",
   CHANNELS_DISCORD_PICK_BANNER: "channels:discord:pick-banner",

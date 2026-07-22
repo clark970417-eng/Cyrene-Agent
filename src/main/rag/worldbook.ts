@@ -258,34 +258,40 @@ export class WorldbookManager {
       while (i < lines.length) {
         const metaLine = lines[i].trim();
 
-        if (metaLine.startsWith("- 觸發詞:") || metaLine.startsWith("- 觸發詞：")) {
-          const val = metaLine.replace(/^-\s*觸發詞[：:]/, "").trim();
+        if (metaLine.startsWith("- 觸發詞:") || metaLine.startsWith("- 觸發詞：") ||
+            metaLine.startsWith("- 触发词:") || metaLine.startsWith("- 触发词：")) {
+          const val = metaLine.replace(/^-\s*(觸發詞|触发词)[：:]/, "").trim();
           keywords = val.split(/[,，、]/).map((k) => k.trim()).filter(Boolean);
           i++;
-        } else if (metaLine.startsWith("- 常駐:")) {
-          const val = metaLine.replace(/^-\s*常駐:/, "").trim();
-          permanent = val === "是" || val === "yes" || val === "true";
+        } else if (metaLine.startsWith("- 常駐:") || metaLine.startsWith("- 常驻:") ||
+                   metaLine.startsWith("- 常駐：") || metaLine.startsWith("- 常驻：")) {
+          const val = metaLine.replace(/^-\s*(常駐|常驻)[：:]/, "").trim();
+          permanent = val === "是" || val === "yes" || val === "true" || val === "是" || val === "yes" || val === "true";
           i++;
-        } else if (metaLine.startsWith("- 優先級:")) {
-          const val = metaLine.replace(/^-\s*優先級:/, "").trim();
+        } else if (metaLine.startsWith("- 優先級:") || metaLine.startsWith("- 優先級：") ||
+                   metaLine.startsWith("- 优先级:") || metaLine.startsWith("- 优先级：")) {
+          const val = metaLine.replace(/^-\s*(優先級|优先级)[：:]/, "").trim();
           priority = parseInt(val) || 5;
           i++;
         } else if (
           metaLine.startsWith("- 初始分:") || metaLine.startsWith("- 初始分：") ||
           metaLine.startsWith("- initial_score:") || metaLine.startsWith("- initial_score：") ||
           metaLine.startsWith("- 內在價值:") || metaLine.startsWith("- 內在價值：") ||
+          metaLine.startsWith("- 内在价值:") || metaLine.startsWith("- 内在价值：") ||
           metaLine.startsWith("- intrinsic_value:") || metaLine.startsWith("- intrinsic_value：")
         ) {
-          const val = metaLine.replace(/^-\s*(初始分|initial_score|內在價值|intrinsic_value)[：:]/, "").trim();
+          const val = metaLine.replace(/^-\s*(初始分|initial_score|內在價值|内在价值|intrinsic_value)[：:]/, "").trim();
           const parsed = parseFloat(val);
           intrinsicValue = Number.isFinite(parsed) ? parsed : WorldbookManager.DEFAULT_INTRINSIC_VALUE;
           i++;
         } else if (metaLine.startsWith("- 連帶觸發詞:") || metaLine.startsWith("- 連帶觸發詞：") ||
+                   metaLine.startsWith("- 连带触发词:") || metaLine.startsWith("- 连带触发词：") ||
                    metaLine.startsWith("- 連帶觸發:") || metaLine.startsWith("- 連帶觸發：") ||
+                   metaLine.startsWith("- 连带触发:") || metaLine.startsWith("- 连带触发：") ||
                    metaLine.startsWith("- link_triggers:") || metaLine.startsWith("- link_triggers：")) {
-          const val = metaLine.replace(/^-\s*(連帶觸發詞|連帶觸發|link_triggers)[：:]/, "").trim();
-          // "無" / "無" / "" 表示不連帶
-          if (val && val !== "無" && val !== "無" && val !== "none" && val !== "-") {
+          const val = metaLine.replace(/^-\s*(連帶觸發詞|连带触发词|連帶觸發|连带触发|link_triggers)[：:]/, "").trim();
+          // "無" / "无" / "" 表示不連帶
+          if (val && val !== "無" && val !== "无" && val !== "none" && val !== "-") {
             linkTriggers = val.split(/[,，、]/).map((k) => k.trim()).filter(Boolean);
           }
           i++;

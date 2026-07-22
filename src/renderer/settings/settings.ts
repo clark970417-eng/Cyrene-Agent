@@ -410,6 +410,8 @@ interface SettingsApi {
   testConnection?: (config: { provider: string; baseUrl: string; model: string; apiKey: string }) => Promise<{ ok: boolean; latency: number; sample?: string; error?: string }>;
   testVision?: (config: { baseUrl: string; apiKey: string; model: string }) => Promise<{ ok: boolean; latency: number; sample?: string; error?: string }>;
   channelsDiscordGetProfile: () => Promise<DiscordBotProfile>;
+  channelsDiscordGetMusicState: () => Promise<DiscordMusicState>;
+  channelsDiscordControlMusic: (input: DiscordMusicControlInput) => Promise<{ ok: boolean; message: string; state?: DiscordMusicState }>;
   channelsDiscordUpdateProfile: (profile: { username: string; activityText: string; status: string; avatarPath?: string; bannerPath?: string }) => Promise<{ ok: boolean; profile?: DiscordBotProfile; error?: string }>;
   channelsDiscordPickAvatar: () => Promise<string | null>;
   channelsDiscordPickBanner: () => Promise<string | null>;
@@ -439,6 +441,33 @@ interface DiscordBotProfile {
   presenceStatus?: string;
   activityText?: string;
   voiceActive: boolean;
+}
+
+interface DiscordMusicTrack {
+  id: string;
+  title: string;
+  url: string;
+  thumbnail?: string;
+  playlistTitle?: string;
+  duration?: number;
+  index: number;
+  total: number;
+}
+
+interface DiscordMusicState {
+  active: boolean;
+  paused: boolean;
+  current: DiscordMusicTrack | null;
+  queue: DiscordMusicTrack[];
+  volume: number;
+  repeat: "off" | "track" | "queue";
+  shuffle: boolean;
+  elapsed: number;
+}
+
+interface DiscordMusicControlInput {
+  command: "previous" | "pause" | "resume" | "skip" | "stop" | "repeat-track" | "repeat-queue" | "repeat-off" | "shuffle" | "ordered" | "clear" | "remove" | "volume";
+  value?: number;
 }
 
 declare global {
@@ -607,6 +636,8 @@ if (!window.settings) {
     removeMcpServer: async () => ({ ok: false, error: "settings api unavailable" }),
     listMcpServers: async () => [],
     channelsDiscordGetProfile: async () => ({ connected: false, guildCount: 0, guilds: [], voiceActive: false }),
+    channelsDiscordGetMusicState: async () => ({ active: false, paused: false, current: null, queue: [], volume: 100, repeat: "off", shuffle: false, elapsed: 0 }),
+    channelsDiscordControlMusic: async () => ({ ok: false, message: "settings api unavailable" }),
     channelsDiscordUpdateProfile: async () => ({ ok: false, error: "settings api unavailable" }),
     channelsDiscordPickAvatar: async () => null,
     channelsDiscordPickBanner: async () => null,
@@ -2703,6 +2734,25 @@ const channelsDiscordBannerOptionBtn = document.getElementById("channels-discord
 const channelsDiscordProfileSaveBtn = document.getElementById("channels-discord-profile-save") as HTMLButtonElement | null;
 const channelsDiscordProfileFeedbackEl = document.getElementById("channels-discord-profile-feedback");
 const channelsDiscordEmojiPickerEl = document.getElementById("channels-discord-emoji-picker");
+const channelsDiscordMusicStatusEl = document.getElementById("channels-discord-music-status");
+const channelsDiscordMusicRecordEl = document.getElementById("channels-discord-music-record");
+const channelsDiscordMusicCoverEl = document.getElementById("channels-discord-music-cover") as HTMLImageElement | null;
+const channelsDiscordMusicTitleEl = document.getElementById("channels-discord-music-title");
+const channelsDiscordMusicProgressEl = document.getElementById("channels-discord-music-progress") as HTMLElement | null;
+const channelsDiscordMusicElapsedEl = document.getElementById("channels-discord-music-elapsed");
+const channelsDiscordMusicDurationEl = document.getElementById("channels-discord-music-duration");
+const channelsDiscordMusicToggleBtn = document.getElementById("channels-discord-music-toggle") as HTMLButtonElement | null;
+const channelsDiscordMusicPreviousBtn = document.getElementById("channels-discord-music-previous") as HTMLButtonElement | null;
+const channelsDiscordMusicNextBtn = document.getElementById("channels-discord-music-next") as HTMLButtonElement | null;
+const channelsDiscordMusicStopBtn = document.getElementById("channels-discord-music-stop") as HTMLButtonElement | null;
+const channelsDiscordMusicRepeatBtn = document.getElementById("channels-discord-music-repeat") as HTMLButtonElement | null;
+const channelsDiscordMusicShuffleBtn = document.getElementById("channels-discord-music-shuffle") as HTMLButtonElement | null;
+const channelsDiscordMusicClearBtn = document.getElementById("channels-discord-music-clear") as HTMLButtonElement | null;
+const channelsDiscordMusicVolumeEl = document.getElementById("channels-discord-music-volume") as HTMLInputElement | null;
+const channelsDiscordMusicVolumeValueEl = document.getElementById("channels-discord-music-volume-value") as HTMLOutputElement | null;
+const channelsDiscordMusicQueueEl = document.getElementById("channels-discord-music-queue");
+const channelsDiscordMusicPlaylistTitleEl = document.getElementById("channels-discord-music-playlist-title");
+const channelsDiscordMusicFeedbackEl = document.getElementById("channels-discord-music-feedback");
 // 微信按鈕
 const channelsWechatLoginBtn = document.getElementById("channels-wechat-login");
 const channelsWechatRestartBtn = document.getElementById("channels-wechat-restart");
@@ -2714,6 +2764,9 @@ let channelsInitialized = false;
 let channelsSaveTimer: number | null = null;
 let pendingDiscordAvatarPath: string | undefined;
 let pendingDiscordBannerPath: string | undefined;
+let discordMusicState: DiscordMusicState = { active: false, paused: false, current: null, queue: [], volume: 100, repeat: "off", shuffle: false, elapsed: 0 };
+let discordMusicRefreshTimer: number | null = null;
+let discordMusicVolumeTimer: number | null = null;
 
 function setDiscordProfileFeedback(kind: "info" | "ok" | "err", message: string): void {
   if (!channelsDiscordProfileFeedbackEl) return;
@@ -2785,6 +2838,127 @@ async function refreshDiscordProfile(): Promise<void> {
   }
 }
 
+function formatDiscordMusicTime(seconds?: number): string {
+  if (!Number.isFinite(seconds) || (seconds ?? 0) < 0) return "—";
+  const total = Math.floor(seconds ?? 0);
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const rest = total % 60;
+  return hours ? `${hours}:${String(minutes).padStart(2, "0")}:${String(rest).padStart(2, "0")}` : `${minutes}:${String(rest).padStart(2, "0")}`;
+}
+
+function setDiscordMusicFeedback(kind: "info" | "ok" | "err", message: string): void {
+  if (!channelsDiscordMusicFeedbackEl) return;
+  channelsDiscordMusicFeedbackEl.textContent = message;
+  channelsDiscordMusicFeedbackEl.className = "channels-feedback";
+  channelsDiscordMusicFeedbackEl.classList.add(kind === "ok" ? "channels-feedback--ok" : kind === "err" ? "channels-feedback--err" : "channels-feedback--info");
+}
+
+function renderDiscordMusic(state: DiscordMusicState): void {
+  discordMusicState = state;
+  const current = state.current;
+  const controls = [channelsDiscordMusicPreviousBtn, channelsDiscordMusicToggleBtn, channelsDiscordMusicNextBtn, channelsDiscordMusicStopBtn, channelsDiscordMusicRepeatBtn, channelsDiscordMusicShuffleBtn];
+  for (const control of controls) if (control) control.disabled = !state.active;
+  if (channelsDiscordMusicClearBtn) channelsDiscordMusicClearBtn.disabled = !state.queue.length;
+  if (channelsDiscordMusicVolumeEl) {
+    if (document.activeElement !== channelsDiscordMusicVolumeEl) channelsDiscordMusicVolumeEl.value = String(state.volume);
+    channelsDiscordMusicVolumeEl.disabled = !state.active;
+  }
+  if (channelsDiscordMusicVolumeValueEl && document.activeElement !== channelsDiscordMusicVolumeEl) channelsDiscordMusicVolumeValueEl.value = `${state.volume}%`;
+  if (channelsDiscordMusicStatusEl) {
+    channelsDiscordMusicStatusEl.textContent = state.active ? (state.paused ? "已暫停" : "正在播放") : "尚未播放";
+    channelsDiscordMusicStatusEl.classList.toggle("is-active", state.active);
+  }
+  if (channelsDiscordMusicRecordEl) {
+    channelsDiscordMusicRecordEl.classList.toggle("is-playing", state.active);
+    channelsDiscordMusicRecordEl.classList.toggle("is-paused", state.paused);
+  }
+  if (channelsDiscordMusicCoverEl && channelsDiscordMusicRecordEl) {
+    const thumbnail = current?.thumbnail;
+    if (thumbnail) {
+      if (channelsDiscordMusicCoverEl.src !== thumbnail) channelsDiscordMusicCoverEl.src = thumbnail;
+      channelsDiscordMusicCoverEl.hidden = false;
+      channelsDiscordMusicRecordEl.classList.add("has-cover");
+    } else {
+      channelsDiscordMusicCoverEl.removeAttribute("src");
+      channelsDiscordMusicCoverEl.hidden = true;
+      channelsDiscordMusicRecordEl.classList.remove("has-cover");
+    }
+  }
+  if (channelsDiscordMusicTitleEl) channelsDiscordMusicTitleEl.textContent = current?.title ?? "等待你在 Discord 使用 /play";
+  if (channelsDiscordMusicPlaylistTitleEl) {
+    channelsDiscordMusicPlaylistTitleEl.textContent = current?.playlistTitle ?? state.queue[0]?.playlistTitle ?? "播放清單";
+    channelsDiscordMusicPlaylistTitleEl.title = channelsDiscordMusicPlaylistTitleEl.textContent;
+  }
+  if (channelsDiscordMusicToggleBtn) {
+    channelsDiscordMusicToggleBtn.textContent = state.paused ? "▶" : "Ⅱ";
+    channelsDiscordMusicToggleBtn.title = state.paused ? "繼續播放" : "暫停播放";
+  }
+  if (channelsDiscordMusicRepeatBtn) {
+    channelsDiscordMusicRepeatBtn.textContent = state.repeat === "track" ? "↻¹" : state.repeat === "queue" ? "↻∞" : "↻";
+    channelsDiscordMusicRepeatBtn.setAttribute("aria-pressed", String(state.repeat !== "off"));
+    channelsDiscordMusicRepeatBtn.title = state.repeat === "track" ? "單曲循環（點擊切換清單循環）" : state.repeat === "queue" ? "清單循環（點擊關閉）" : "開啟單曲循環";
+  }
+  if (channelsDiscordMusicShuffleBtn) channelsDiscordMusicShuffleBtn.setAttribute("aria-pressed", String(state.shuffle));
+  const duration = current?.duration;
+  if (channelsDiscordMusicElapsedEl) channelsDiscordMusicElapsedEl.textContent = formatDiscordMusicTime(state.elapsed);
+  if (channelsDiscordMusicDurationEl) channelsDiscordMusicDurationEl.textContent = formatDiscordMusicTime(duration);
+  if (channelsDiscordMusicProgressEl) channelsDiscordMusicProgressEl.style.width = duration ? `${Math.min(100, state.elapsed / duration * 100)}%` : "0%";
+
+  if (channelsDiscordMusicQueueEl) {
+    channelsDiscordMusicQueueEl.replaceChildren();
+    const tracks = current ? [current, ...state.queue] : state.queue;
+    if (!tracks.length) {
+      const empty = document.createElement("li");
+      empty.className = "is-empty";
+      empty.textContent = "用 Discord 的 /play 加入歌曲後，播放清單會顯示在這裡";
+      channelsDiscordMusicQueueEl.appendChild(empty);
+    } else {
+      tracks.forEach((track, index) => {
+        const item = document.createElement("li");
+        if (index === 0 && current) item.className = "is-current";
+        const number = document.createElement("span");
+        number.textContent = index === 0 && current ? "♪" : String(current ? index : index + 1);
+        const title = document.createElement("strong");
+        title.textContent = track.title;
+        title.title = track.title;
+        const time = document.createElement("small");
+        time.textContent = formatDiscordMusicTime(track.duration);
+        item.append(number, title, time);
+        if (!(index === 0 && current)) {
+          const remove = document.createElement("button");
+          remove.type = "button";
+          remove.textContent = "×";
+          remove.title = `從播放清單移除 ${track.title}`;
+          remove.dataset.queuePosition = String(current ? index : index + 1);
+          item.appendChild(remove);
+        } else {
+          item.appendChild(document.createElement("span"));
+        }
+        channelsDiscordMusicQueueEl.appendChild(item);
+      });
+    }
+  }
+}
+
+async function refreshDiscordMusic(): Promise<void> {
+  try {
+    renderDiscordMusic(await window.settings.channelsDiscordGetMusicState());
+  } catch (err) {
+    console.warn("[Channels] 讀取 Discord 音樂狀態失敗:", err);
+  }
+}
+
+async function controlDiscordMusic(input: DiscordMusicControlInput, quiet = false): Promise<void> {
+  try {
+    const result = await window.settings.channelsDiscordControlMusic(input);
+    if (result.state) renderDiscordMusic(result.state);
+    if (!quiet || !result.ok) setDiscordMusicFeedback(result.ok ? "ok" : "err", result.message);
+  } catch (err) {
+    setDiscordMusicFeedback("err", err instanceof Error ? err.message : String(err));
+  }
+}
+
 function renderChannelStatus(el: HTMLElement | null, phase: string, message?: string): void {
   if (!el) return;
   const dot = el.querySelector(".channels-status__dot");
@@ -2802,7 +2976,7 @@ function renderChannelStatus(el: HTMLElement | null, phase: string, message?: st
 
 async function loadChannelsPanel(): Promise<void> {
   if (channelsInitialized) {
-    await refreshDiscordProfile();
+    await Promise.all([refreshDiscordProfile(), refreshDiscordMusic()]);
     return;
   }
   channelsInitialized = true;
@@ -2841,7 +3015,10 @@ async function loadChannelsPanel(): Promise<void> {
     renderChannelStatus(channelsWechatStatusEl, status.wechat?.phase ?? "offline", status.wechat?.message);
     renderChannelStatus(channelsFeishuStatusEl, status.feishu?.phase ?? "offline", status.feishu?.message);
     renderChannelStatus(channelsDiscordStatusEl, status.discord?.phase ?? "offline", status.discord?.message);
-    await refreshDiscordProfile();
+    await Promise.all([refreshDiscordProfile(), refreshDiscordMusic()]);
+    if (discordMusicRefreshTimer == null) {
+      discordMusicRefreshTimer = window.setInterval(() => void refreshDiscordMusic(), 1000);
+    }
     // Phase 3.4：拉一次消息日誌
     void refreshChannelsLog();
   } catch (err) {
@@ -3074,6 +3251,35 @@ async function loadChannelsPanel(): Promise<void> {
     } finally {
       channelsDiscordProfileSaveBtn.disabled = false;
     }
+  });
+  channelsDiscordMusicToggleBtn?.addEventListener("click", () => {
+    void controlDiscordMusic({ command: discordMusicState.paused ? "resume" : "pause" }, true);
+  });
+  channelsDiscordMusicPreviousBtn?.addEventListener("click", () => void controlDiscordMusic({ command: "previous" }, true));
+  channelsDiscordMusicCoverEl?.addEventListener("error", () => {
+    channelsDiscordMusicCoverEl.hidden = true;
+    channelsDiscordMusicRecordEl?.classList.remove("has-cover");
+  });
+  channelsDiscordMusicNextBtn?.addEventListener("click", () => void controlDiscordMusic({ command: "skip" }, true));
+  channelsDiscordMusicStopBtn?.addEventListener("click", () => void controlDiscordMusic({ command: "stop" }, true));
+  channelsDiscordMusicRepeatBtn?.addEventListener("click", () => {
+    const command = discordMusicState.repeat === "off" ? "repeat-track" : discordMusicState.repeat === "track" ? "repeat-queue" : "repeat-off";
+    void controlDiscordMusic({ command }, true);
+  });
+  channelsDiscordMusicShuffleBtn?.addEventListener("click", () => {
+    void controlDiscordMusic({ command: discordMusicState.shuffle ? "ordered" : "shuffle" }, true);
+  });
+  channelsDiscordMusicClearBtn?.addEventListener("click", () => void controlDiscordMusic({ command: "clear" }));
+  channelsDiscordMusicQueueEl?.addEventListener("click", (event) => {
+    const button = (event.target as HTMLElement).closest<HTMLButtonElement>("button[data-queue-position]");
+    const position = Number(button?.dataset.queuePosition);
+    if (Number.isInteger(position) && position > 0) void controlDiscordMusic({ command: "remove", value: position }, true);
+  });
+  channelsDiscordMusicVolumeEl?.addEventListener("input", () => {
+    const value = Number(channelsDiscordMusicVolumeEl.value);
+    if (channelsDiscordMusicVolumeValueEl) channelsDiscordMusicVolumeValueEl.value = `${value}%`;
+    if (discordMusicVolumeTimer != null) window.clearTimeout(discordMusicVolumeTimer);
+    discordMusicVolumeTimer = window.setTimeout(() => void controlDiscordMusic({ command: "volume", value }, true), 120);
   });
   channelsDiscordSaveBtn?.addEventListener("click", async () => {
     setDiscordFeedback("info", "保存並連接中…");

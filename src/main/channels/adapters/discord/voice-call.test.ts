@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseDiscordVoiceCommand, stereo48kToMono16k } from "./voice-call";
+import { DiscordVoiceCall, formatDiscordMusicActivity, parseDiscordVoiceCommand, stereo48kToMono16k } from "./voice-call";
 
 describe("Discord voice commands", () => {
   it.each(["加入通話", "進來通話！", "加入語音頻道", "陪我通話"])("parses join: %s", (text) => {
@@ -30,5 +30,55 @@ describe("Discord PCM conversion", () => {
 
   it("ignores an incomplete trailing frame", () => {
     expect(stereo48kToMono16k(Buffer.alloc(11)).length).toBe(0);
+  });
+});
+
+describe("Discord music presence", () => {
+  it("uses the song portion of a Bilibili multi-part title", () => {
+    expect(formatDiscordMusicActivity("【音乐集】超时空辉夜姬 p01 【剧中歌】星降る海（繁星坠海）"))
+      .toBe("🎧 星降る海（繁星坠海）｜剧中歌");
+  });
+
+  it("adds the song role and work name without repeating playlist metadata", () => {
+    expect(formatDiscordMusicActivity("【第一季 OP】勇者", "葬送的芙莉莲 歌曲全收录"))
+      .toBe("🎧 勇者｜第一季 OP｜葬送的芙莉莲");
+  });
+
+  it("limits Discord activity names to 128 code points", () => {
+    expect([...formatDiscordMusicActivity("歌".repeat(200))]).toHaveLength(128);
+  });
+});
+
+describe("Discord desktop music state", () => {
+  it("reserves an active music session for the user who started it", () => {
+    const voice = new DiscordVoiceCall({} as never, () => ({ enabled: true } as never), async () => null);
+    expect(voice.canControlMusic("anyone")).toBe(true);
+    (voice as unknown as Record<string, unknown>).musicOwnerId = "owner";
+    expect(voice.canControlMusic("owner")).toBe(true);
+    expect(voice.canControlMusic("someone-else")).toBe(false);
+  });
+
+  it("exposes the same current track, queue and volume used by Discord", () => {
+    const voice = new DiscordVoiceCall({} as never, () => ({ enabled: true } as never), async () => null);
+    const internal = voice as unknown as Record<string, unknown>;
+    internal.mode = "music";
+    internal.connection = {};
+    internal.player = { state: { status: "paused" } };
+    internal.currentMusicTrack = { id: "one", title: "Song one", url: "https://example.com/1", index: 1, total: 2, duration: 120, queueOrder: 0 };
+    internal.musicQueue = [{ id: "two", title: "Song two", url: "https://example.com/2", index: 2, total: 2, duration: 90, queueOrder: 1 }];
+    internal.musicVolume = 75;
+    internal.musicRepeat = "queue";
+    internal.musicResource = { playbackDuration: 12_400 };
+
+    expect(voice.getMusicState()).toEqual({
+      active: true,
+      paused: true,
+      current: { id: "one", title: "Song one", url: "https://example.com/1", index: 1, total: 2, duration: 120 },
+      queue: [{ id: "two", title: "Song two", url: "https://example.com/2", index: 2, total: 2, duration: 90 }],
+      volume: 75,
+      repeat: "queue",
+      shuffle: false,
+      elapsed: 12,
+    });
   });
 });

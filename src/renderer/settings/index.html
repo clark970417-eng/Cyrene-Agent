@@ -1023,6 +1023,55 @@
                   <a class="btn-secondary discord-portal-link" href="https://discord.com/developers/applications" target="_blank" rel="noopener">開啟 Developer Portal ↗</a>
                 </div>
                 <p class="channels-feedback" id="channels-discord-profile-feedback"></p>
+
+                <section class="discord-player" id="channels-discord-player" aria-labelledby="discord-player-title">
+                  <div class="discord-player__heading">
+                    <div>
+                      <span class="discord-identity__eyebrow">VOICE MUSIC</span>
+                      <h3 id="discord-player-title">Discord 播放器</h3>
+                    </div>
+                    <span class="discord-player__live" id="channels-discord-music-status">尚未播放</span>
+                  </div>
+
+                  <div class="discord-player__now">
+                    <div class="discord-player__record" id="channels-discord-music-record" aria-hidden="true">
+                      <img id="channels-discord-music-cover" alt="" hidden />
+                      <span>♪</span>
+                    </div>
+                    <div class="discord-player__track">
+                      <span>目前播放</span>
+                      <strong id="channels-discord-music-title">等待你在 Discord 使用 /play</strong>
+                      <div class="discord-player__progress" aria-hidden="true"><i id="channels-discord-music-progress"></i></div>
+                      <div class="discord-player__time"><span id="channels-discord-music-elapsed">0:00</span><span id="channels-discord-music-duration">—</span></div>
+                    </div>
+                  </div>
+
+                  <div class="discord-player__controls" aria-label="Discord 音樂控制">
+                    <button type="button" id="channels-discord-music-shuffle" title="切換隨機播放" aria-pressed="false">⇄</button>
+                    <button type="button" id="channels-discord-music-previous" title="上一首">│◀</button>
+                    <button type="button" id="channels-discord-music-toggle" class="discord-player__primary" title="暫停或繼續">Ⅱ</button>
+                    <button type="button" id="channels-discord-music-next" title="下一首">▶│</button>
+                    <button type="button" id="channels-discord-music-repeat" title="切換循環模式" aria-pressed="false">↻</button>
+                    <button type="button" id="channels-discord-music-stop" title="停止並離開語音">■</button>
+                  </div>
+
+                  <label class="discord-player__volume" for="channels-discord-music-volume">
+                    <span>音量</span>
+                    <input type="range" id="channels-discord-music-volume" min="0" max="150" step="1" value="100" />
+                    <output id="channels-discord-music-volume-value">100%</output>
+                  </label>
+
+                  <div class="discord-player__library">
+                    <div class="discord-player__list-head">
+                      <div><span class="discord-identity__eyebrow">PLAYLIST</span><h4 id="channels-discord-music-playlist-title">播放清單</h4></div>
+                      <button type="button" id="channels-discord-music-clear">清空待播</button>
+                    </div>
+                    <ol id="channels-discord-music-queue" class="discord-player__queue">
+                      <li class="is-empty">播放清單會和 Discord 即時同步</li>
+                    </ol>
+                  </div>
+                  <p class="channels-feedback" id="channels-discord-music-feedback" aria-live="polite"></p>
+                </section>
               </section>
 
               <div class="discord-connection-divider"><span>連線與回覆規則</span></div>

@@ -918,6 +918,12 @@ html, body {
   color: #fff;
 }
 
+.sidebar__session-item.is-menu-open {
+  color: #fff;
+  background: rgba(168, 85, 247, 0.1);
+  box-shadow: inset 0 0 0 1px rgba(192, 132, 252, 0.2);
+}
+
 .sidebar__session-title {
   white-space: nowrap;
   overflow: hidden;
@@ -930,6 +936,126 @@ html, body {
   font-size: 10px;
   color: var(--text-muted);
   flex-shrink: 0;
+}
+
+.sidebar__session-title-input {
+  min-width: 0;
+  width: 100%;
+  margin-right: 8px;
+  padding: 3px 6px;
+  border: 1px solid rgba(216, 180, 254, 0.42);
+  border-radius: 6px;
+  outline: none;
+  color: #fff;
+  background: rgba(27, 14, 40, 0.92);
+  font: inherit;
+  box-shadow: 0 0 0 3px rgba(168, 85, 247, 0.1);
+  user-select: text;
+}
+
+.session-context-menu {
+  position: fixed;
+  z-index: 1000;
+  width: 184px;
+  padding: 7px;
+  border: 1px solid rgba(216, 180, 254, 0.2);
+  border-radius: 13px;
+  background: rgba(24, 14, 34, 0.96);
+  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.42), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  backdrop-filter: blur(18px);
+  transform-origin: top left;
+  animation: session-menu-in 120ms ease-out;
+}
+
+.session-context-menu[hidden],
+.session-delete-overlay[hidden] { display: none; }
+
+.session-context-menu__title {
+  overflow: hidden;
+  padding: 5px 9px 8px;
+  color: rgba(216, 180, 254, 0.56);
+  font-size: 9px;
+  letter-spacing: 0.05em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-context-menu button {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  padding: 9px;
+  border: 0;
+  border-radius: 9px;
+  color: var(--text-primary);
+  background: transparent;
+  font-size: 11px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.session-context-menu button:hover,
+.session-context-menu button:focus-visible {
+  outline: none;
+  color: #fff;
+  background: rgba(168, 85, 247, 0.14);
+}
+
+.session-context-menu button.is-danger { color: #f1a7b5; }
+.session-context-menu button.is-danger:hover,
+.session-context-menu button.is-danger:focus-visible { background: rgba(244, 63, 94, 0.12); }
+.session-context-menu kbd { color: rgba(224, 220, 240, 0.34); font: 8px/1 ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+.session-delete-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1100;
+  display: grid;
+  place-items: center;
+  background: rgba(5, 3, 9, 0.56);
+  backdrop-filter: blur(7px);
+}
+
+.session-delete-dialog {
+  display: grid;
+  grid-template-columns: 46px minmax(0, 1fr);
+  gap: 13px;
+  width: min(360px, calc(100vw - 36px));
+  padding: 20px;
+  border: 1px solid rgba(251, 113, 133, 0.2);
+  border-radius: 18px;
+  background: linear-gradient(145deg, rgba(41, 23, 47, 0.98), rgba(18, 11, 27, 0.98));
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.5);
+}
+
+.session-delete-dialog__mark {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border: 1px solid rgba(251, 113, 133, 0.22);
+  border-radius: 13px;
+  color: #fda4af;
+  background: rgba(244, 63, 94, 0.09);
+  font-size: 19px;
+}
+
+.session-delete-dialog h2 { margin: 1px 0 5px; color: #fff; font-size: 15px; }
+.session-delete-dialog p { color: var(--text-muted); font-size: 11px; line-height: 1.55; }
+.session-delete-dialog__actions { grid-column: 1 / -1; display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px; }
+.session-delete-dialog__actions button { padding: 8px 13px; border: 1px solid rgba(255,255,255,.08); border-radius: 9px; color: var(--text-primary); background: rgba(255,255,255,.05); cursor: pointer; }
+.session-delete-dialog__actions button:hover { background: rgba(255,255,255,.09); }
+.session-delete-dialog__actions button.is-danger { border-color: rgba(251,113,133,.2); color: #fff; background: linear-gradient(135deg, #d94a67, #a82f57); }
+
+@keyframes session-menu-in {
+  from { opacity: 0; transform: translateY(-4px) scale(.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .session-context-menu { animation: none; }
 }
 
 .overview-item-card {

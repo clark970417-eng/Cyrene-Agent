@@ -1410,7 +1410,7 @@ function stopLive2dMouth(): void {
 }
 
 function startTextModeMouth(): void {
-  if (textMouthStarted || isStudyMode()) return;
+  if (textMouthStarted || isStudyMode() || isGameMode()) return;
   textMouthStarted = true;
   window.live2dSpeech?.startMouth(TEXT_MODE_MOUTH_DURATION_MS);
 }
@@ -1932,7 +1932,7 @@ async function speakMessage(message: Message): Promise<void> {
 
 // 自動朗讀：檢查引擎是否開啟 + autoRead 開關，滿足條件才朗讀
 async function autoSpeakIfEnabled(text: string, msgId?: string): Promise<{ cacheKey: string } | null> {
-  if (isStudyMode()) return null;
+  if (isStudyMode() || isGameMode()) return null;
   const settings = await loadTtsSettings();
   if (!settings || settings.ttsEngine === "off" || !settings.ttsAutoRead) return null;
   ttsPlaybackSequence += 1;
@@ -1967,7 +1967,7 @@ function createEarlyMinimaxPlayback(): EarlyMinimaxPlayback {
   };
 
   const tryStart = async (text: string): Promise<void> => {
-    if (triggered || isStudyMode()) return;
+    if (triggered || isStudyMode() || isGameMode()) return;
     const cfg = await ensureSettings();
     if (!cfg || !eligible || triggered) return;
     const early = extractEarlyTtsSegment(text);
@@ -1984,11 +1984,11 @@ function createEarlyMinimaxPlayback(): EarlyMinimaxPlayback {
 
   return {
     append(delta: string): void {
-      if (triggered || isStudyMode()) return;
+      if (triggered || isStudyMode() || isGameMode()) return;
       void tryStart(delta);
     },
     async finish(fullText: string, msgId?: string): Promise<{ cacheKey: string } | null> {
-      if (isStudyMode()) return null;
+      if (isStudyMode() || isGameMode()) return null;
       const cfg = await ensureSettings();
       if (!cfg || !eligible) return autoSpeakIfEnabled(fullText, msgId);
 
@@ -2192,16 +2192,26 @@ function isStudyMode(): boolean {
   return active?.dataset?.value === "study";
 }
 
+function isGameMode(): boolean {
+  if (window.self !== window.top) {
+    return currentWorkspaceMode === "game";
+  }
+  const active = document.querySelector("#mode-dropdown .dm-opt.is-active") as HTMLElement | null;
+  return active?.dataset?.value === "game";
+}
+
 function getCurrentStyle(): string {
   if (window.self !== window.top) {
     if (currentWorkspaceMode === "talk") return "talk";
     if (currentWorkspaceMode === "study") return "study";
+    if (currentWorkspaceMode === "game") return "game";
     return currentWorkspaceStyle;
   }
   const active = document.querySelector("#style-dropdown .dm-opt.is-active") as HTMLElement | null;
   const style = (active && active.dataset && active.dataset.value) || "01_default.md";
   if (isTalkMode()) return "talk";
   if (isStudyMode()) return "study";
+  if (isGameMode()) return "game";
   return style;
 }
 async function getModelReply(): Promise<ChatReplyPayload> {

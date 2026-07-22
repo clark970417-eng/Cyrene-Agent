@@ -1855,11 +1855,18 @@ function logWorldbookInjection(alwaysOnContext: string, systemContent: string): 
 function buildSystemPrompt(styleFile: string): string {
   const parts: string[] = [];
 
-  // styleFile 以 "talk" 開頭時走純聊天模式，以 "study" 開頭時走學習模式
+  // styleFile 以 "talk" 開頭時走純聊天模式，以 "study" 開頭時走學習模式，以 "game" 開頭時走遊戲模式
   const isTalkMode = styleFile.startsWith("talk");
   const isStudyMode = styleFile.startsWith("study");
+  const isGameMode = styleFile.startsWith("game");
   const system = loadPromptFile(
-    isTalkMode ? "talk_system.md" : (isStudyMode ? "study_system.md" : "system.md")
+    isTalkMode
+      ? "talk_system.md"
+      : isStudyMode
+        ? "study_system.md"
+        : isGameMode
+          ? "game_system.md"
+          : "system.md"
   );
   if (system) parts.push(system);
   
@@ -1872,8 +1879,8 @@ function buildSystemPrompt(styleFile: string): string {
   const canon = loadPromptFile("canon_quotes.md");
   if (canon) parts.push(canon);
   
-  // 純聊天模式不加載 style 文件（talk_system.md 已包含完整規則）
-  if (!isTalkMode) {
+  // 純聊天模式與遊戲模式不加載額外的 styles/ 文件
+  if (!isTalkMode && !isGameMode) {
     const style = loadPromptFile("styles/" + styleFile);
     if (style) parts.push(style);
   }
@@ -1998,6 +2005,7 @@ async function requestModelReply(inputMessages: unknown, styleFile = "01_default
 
   // 根據語意動態切換模式：如果用戶稱呼「昔漣老師」切至學習模式；若稱呼「昔漣」且無「昔漣老師」切回一般模式
   let activeStyle = styleFile;
+  const isGameQuery = ["攻略", "遊戲", "打法", "配隊"].some(k => latestUserText.includes(k));
   if (latestUserText.includes("昔漣老師")) {
     activeStyle = "study";
     for (const win of BrowserWindow.getAllWindows()) {
@@ -2007,6 +2015,11 @@ async function requestModelReply(inputMessages: unknown, styleFile = "01_default
     activeStyle = "01_default.md";
     for (const win of BrowserWindow.getAllWindows()) {
       try { win.webContents.send("chat:update-mode", "collab"); } catch { /* ignore */ }
+    }
+  } else if (isGameQuery) {
+    activeStyle = "game";
+    for (const win of BrowserWindow.getAllWindows()) {
+      try { win.webContents.send("chat:update-mode", "game"); } catch { /* ignore */ }
     }
   } else if (isEnglishText(latestUserText)) {
     activeStyle = "study";
@@ -2022,6 +2035,22 @@ async function requestModelReply(inputMessages: unknown, styleFile = "01_default
     alwaysOnContext = await buildAlwaysOnContext(latestUserText, messages);
   } catch (err) {
     console.warn("[Cyrene] always-on context build failed:", err);
+  }
+
+  // 1.05 遊戲模式專用：自動提前進行聯網小紅書搜尋並注入事實上下文，防止模型工具調用失敗
+  if (styleFile === "game" || isGameQuery) {
+    try {
+      const webSearchTool = toolRegistry.getById("web_search");
+      if (webSearchTool) {
+        console.log(`[Cyrene] Game mode proactive search for: "${latestUserText}"`);
+        const searchResult = await webSearchTool.execute({ query: latestUserText + " site:xiaohongshu.com" });
+        if (searchResult) {
+          alwaysOnContext += `\n\n【聯網小紅書即時搜尋參考資料】\n${searchResult}\n`;
+        }
+      }
+    } catch (err) {
+      console.warn("[Cyrene] Proactive game search failed:", err);
+    }
   }
 
   // 1.1 自動注入相關記憶（L2 + 導入文檔），讓模型無需調 tool 也能感知
@@ -4239,10 +4268,13 @@ app.whenReady().then(async () => {
     }
 
     // 根據語意動態切換模式（適用於 DC 等多渠道對話）
+    const isGameQueryDC = ["攻略", "遊戲", "打法", "配隊"].some(k => msg.text.includes(k));
     if (msg.text.includes("昔漣老師")) {
       channelSessionModes.set(sessionId, "study");
     } else if (msg.text.includes("昔漣")) {
       channelSessionModes.set(sessionId, "collab");
+    } else if (isGameQueryDC) {
+      channelSessionModes.set(sessionId, "game");
     } else if (isEnglishText(msg.text)) {
       channelSessionModes.set(sessionId, "study");
     }
@@ -4251,6 +4283,7 @@ app.whenReady().then(async () => {
     let style = "01_default.md";
     if (currentMode === "study") style = "study";
     else if (currentMode === "talk") style = "talk";
+    else if (currentMode === "game") style = "game";
 
     // Phase 3.3：按 toolSandbox 過濾可用工具
     const sandbox = loadChannelsSettings().toolSandbox;

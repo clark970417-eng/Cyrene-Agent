@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { shouldHandleDiscordMessage } from "./index";
+import { shouldHandleDiscordInteraction, shouldHandleDiscordMessage } from "./index";
 import type { DiscordChannelConfig } from "../../settings-store";
 
 function fakeMessage(options: {
@@ -40,5 +40,23 @@ describe("DiscordAdapter message security", () => {
     expect(shouldHandleDiscordMessage(fakeMessage({ bot: true }), config, "bot-1")).toBe(false);
     expect(shouldHandleDiscordMessage(fakeMessage({ guildId: "guild-no", channelId: "channel-ok", userId: "user-ok" }), config, "bot-1")).toBe(false);
     expect(shouldHandleDiscordMessage(fakeMessage({ guildId: "guild-ok", channelId: "channel-ok", userId: "user-ok" }), config, "bot-1")).toBe(true);
+  });
+});
+
+describe("DiscordAdapter slash command security", () => {
+  it("applies user, channel and guild allowlists without requiring a mention", () => {
+    const config: DiscordChannelConfig = {
+      enabled: true,
+      requireMention: true,
+      allowedGuildIds: ["guild-ok"],
+      allowedChannelIds: ["channel-ok"],
+      allowedUserIds: ["user-ok"],
+    };
+    expect(shouldHandleDiscordInteraction({
+      user: { id: "user-ok" }, guildId: "guild-ok", channelId: "channel-ok",
+    }, config)).toBe(true);
+    expect(shouldHandleDiscordInteraction({
+      user: { id: "user-no" }, guildId: "guild-ok", channelId: "channel-ok",
+    }, config)).toBe(false);
   });
 });

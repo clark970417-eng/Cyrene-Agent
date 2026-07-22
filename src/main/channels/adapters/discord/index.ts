@@ -4,9 +4,14 @@ import {
   Client,
   EmbedBuilder,
   GatewayIntentBits,
+  MessageFlags,
   Partials,
+  type ButtonInteraction,
+  type ChatInputCommandInteraction,
+  type GuildMember,
   type Message,
   type SendableChannels,
+  type StringSelectMenuInteraction,
 } from "discord.js";
 import type { ChannelAdapter } from "../base";
 import type {
@@ -18,7 +23,14 @@ import type {
   OutgoingPart,
 } from "../../types";
 import { loadChannelsSettings, saveChannelsSettings, type DiscordChannelConfig } from "../../settings-store";
-import { DiscordVoiceCall, parseDiscordVoiceCommand } from "./voice-call";
+import { DiscordVoiceCall, parseDiscordVoiceCommand, type DiscordMusicState } from "./voice-call";
+import { parseDiscordMusicRequest } from "./music-source";
+import {
+  buildDiscordMusicControls,
+  buildDiscordVolumeControl,
+  DISCORD_SLASH_COMMANDS,
+  musicRequestFromButton,
+} from "./slash-commands";
 
 const LOG = "[DiscordAdapter]";
 
@@ -45,6 +57,11 @@ export interface DiscordBotProfileUpdate {
   activityText?: string;
 }
 
+export interface DiscordMusicControlInput {
+  command: "previous" | "pause" | "resume" | "skip" | "stop" | "repeat-track" | "repeat-queue" | "repeat-off" | "shuffle" | "ordered" | "clear" | "remove" | "volume";
+  value?: number;
+}
+
 const DISCORD_CAPABILITY: ChannelCapability = {
   text: true,
   image: true,
@@ -59,6 +76,16 @@ const DISCORD_CAPABILITY: ChannelCapability = {
 
 function isAllowed(list: string[] | undefined, id: string | null): boolean {
   return !list?.length || (!!id && list.includes(id));
+}
+
+export function shouldHandleDiscordInteraction(
+  interaction: { user: { id: string }; guildId: string | null; channelId: string | null },
+  config: DiscordChannelConfig,
+): boolean {
+  if (!isAllowed(config.allowedUserIds, interaction.user.id)) return false;
+  if (!isAllowed(config.allowedChannelIds, interaction.channelId)) return false;
+  if (interaction.guildId && !isAllowed(config.allowedGuildIds, interaction.guildId)) return false;
+  return true;
 }
 
 export function shouldHandleDiscordMessage(
@@ -163,6 +190,8 @@ export class DiscordAdapter implements ChannelAdapter {
       try {
         const mentionPattern = new RegExp(`<@!?${botUserId}>`, "g");
         const content = message.content.replace(mentionPattern, "").trim();
+        const musicRequest = parseDiscordMusicRequest(content);
+        if (musicRequest && await this.voiceCall?.handleMusicRequest(message, musicRequest)) return;
         const voiceCommand = parseDiscordVoiceCommand(content);
         if (voiceCommand && await this.voiceCall?.handleCommand(message, voiceCommand)) return;
         await message.channel.sendTyping().catch(() => undefined);
@@ -170,6 +199,28 @@ export class DiscordAdapter implements ChannelAdapter {
       } catch (err) {
         console.error(LOG, "處理入站消息失敗:", err);
       }
+    });
+    client.on("interactionCreate", async (interaction) => {
+      const actionable = interaction.isChatInputCommand() ? interaction
+        : interaction.isButton() ? interaction
+        : interaction.isStringSelectMenu() ? interaction
+        : null;
+      if (!actionable) return;
+      try {
+        if (actionable.isChatInputCommand()) await this.handleSlashCommand(actionable);
+        else if (actionable.isButton()) await this.handleMusicButton(actionable);
+        else await this.handleMusicVolumeSelect(actionable);
+      } catch (err) {
+        console.error(LOG, "處理 Discord / 指令失敗:", err);
+        const content = `指令執行失敗：${err instanceof Error ? err.message : String(err)}`;
+        if (actionable.deferred || actionable.replied) await actionable.editReply({ content }).catch(() => undefined);
+        else await actionable.reply({ content, ephemeral: true }).catch(() => undefined);
+      }
+    });
+    client.on("guildCreate", (guild) => {
+      void guild.commands.set(DISCORD_SLASH_COMMANDS)
+        .then(() => console.log(LOG, `已在 ${guild.name} 註冊 ${DISCORD_SLASH_COMMANDS.length} 個 / 指令`))
+        .catch((err) => console.warn(LOG, `新伺服器 / 指令註冊失敗 [${guild.name}]:`, err));
     });
     client.on("error", (err) => {
       console.error(LOG, "client error:", err.message);
@@ -184,6 +235,7 @@ export class DiscordAdapter implements ChannelAdapter {
 
     try {
       await client.login(config.botToken);
+      await this.registerSlashCommands(client);
       client.user?.setPresence({
         status: config.presenceStatus ?? "online",
         activities: config.activityText?.trim()
@@ -229,6 +281,237 @@ export class DiscordAdapter implements ChannelAdapter {
     await this.start();
   }
 
+  private async registerSlashCommands(client: Client): Promise<void> {
+    const results = await Promise.allSettled([...client.guilds.cache.values()].map(async (guild) => {
+      await guild.commands.set(DISCORD_SLASH_COMMANDS);
+      console.log(LOG, `已在 ${guild.name} 註冊 ${DISCORD_SLASH_COMMANDS.length} 個 / 指令`);
+    }));
+    const failures = results.filter((result) => result.status === "rejected");
+    if (failures.length) console.warn(LOG, `${failures.length} 個伺服器無法註冊 / 指令`);
+  }
+
+  private async handleSlashCommand(interaction: ChatInputCommandInteraction): Promise<void> {
+    const config = loadChannelsSettings().discord;
+    if (!shouldHandleDiscordInteraction(interaction, config)) {
+      await interaction.reply({ content: "你不在 Cyrene 的 Discord 白名單中，或這個頻道／伺服器未被允許。", ephemeral: true });
+      return;
+    }
+    if (interaction.commandName === "chat") {
+      await this.handleSlashChat(interaction, interaction.options.getString("message", true));
+      return;
+    }
+    if (interaction.commandName === "status") {
+      const client = this.client;
+      await interaction.reply({
+        content: [
+          `🟢 **${client?.user?.username ?? "Cyrene"} 已連線**`,
+          `延遲：${Math.max(0, Math.round(client?.ws.ping ?? 0))} ms`,
+          `所在伺服器：${client?.guilds.cache.size ?? 0}`,
+          `語音狀態：${this.voiceCall?.getSessionSummary() ?? "未啟用"}`,
+        ].join("\n"),
+        ephemeral: true,
+      });
+      return;
+    }
+    if (interaction.commandName === "help") {
+      await interaction.reply({
+        content: [
+          "**Cyrene Discord 指令**",
+          "`/chat` AI 對話　`/join` 語音聊天　`/leave` 離開",
+          "`/play` 播放 YouTube／Bilibili　`/previous`　`/pause`　`/resume`　`/skip`　`/stop`",
+          "`/queue`　`/remove`　`/clear`　`/volume`　`/repeat`　`/mode`",
+          "`/status` 查看連線、延遲及目前播放狀態",
+        ].join("\n"),
+        ephemeral: true,
+      });
+      return;
+    }
+
+    const musicSessionActive = this.voiceCall?.getMusicState().active ?? false;
+    const musicCommands = new Set(["play", "previous", "pause", "resume", "skip", "stop", "queue", "clear", "remove", "volume", "repeat", "mode", "leave"]);
+    if (musicSessionActive && musicCommands.has(interaction.commandName) && !this.voiceCall?.canControlMusic(interaction.user.id)) {
+      await interaction.reply({ content: "這是其他人的播放工作階段，你不能控制她的音樂。", flags: MessageFlags.Ephemeral });
+      return;
+    }
+
+    if (interaction.commandName === "play") await interaction.deferReply();
+    else await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    const message = await this.interactionAsMessage(interaction);
+    if (interaction.commandName === "join") {
+      await this.voiceCall?.handleCommand(message, "join");
+      return;
+    }
+    if (interaction.commandName === "leave") {
+      await this.voiceCall?.handleCommand(message, "leave");
+      return;
+    }
+
+    const request = this.musicRequestFromInteraction(interaction);
+    if (!request) {
+      await interaction.editReply({ content: "找不到這個指令的功能。" });
+      return;
+    }
+    if (request.command && request.command !== "queue") {
+      const result = this.voiceCall
+        ? await this.voiceCall.controlMusic(request.command, request.value)
+        : { ok: false, message: "Discord 語音尚未啟用。" };
+      if (result.ok) await interaction.deleteReply().catch(() => undefined);
+      else await interaction.editReply({ content: result.message });
+      return;
+    }
+    const handled = await this.voiceCall?.handleMusicRequest(message, request) ?? false;
+    if (handled && interaction.commandName === "play" && this.voiceCall?.hasMusicPlaylist()) {
+      await interaction.editReply({
+        components: [buildDiscordMusicControls(this.voiceCall.getMusicState().paused), buildDiscordVolumeControl()],
+      }).catch(() => undefined);
+    }
+    if (!handled) {
+      await interaction.editReply({ content: "目前沒有正在播放的音樂，請先使用 `/play`。" });
+    }
+  }
+
+  private async handleMusicButton(interaction: ButtonInteraction): Promise<void> {
+    const request = musicRequestFromButton(interaction.customId, this.voiceCall?.getMusicState().paused ?? false);
+    if (!request) return;
+    const config = loadChannelsSettings().discord;
+    const playlistOnly = request.command === "queue";
+    const accessConfig = playlistOnly ? { ...config, allowedUserIds: undefined } : config;
+    if (!shouldHandleDiscordInteraction(interaction, accessConfig)) {
+      await interaction.reply({ content: "你沒有操作這個 Bot 的權限。", ephemeral: true });
+      return;
+    }
+    if (!playlistOnly && !this.voiceCall?.canControlMusic(interaction.user.id)) {
+      await interaction.reply({ content: "這是其他人的播放工作階段，你不能使用這些控制按鈕。", flags: MessageFlags.Ephemeral });
+      return;
+    }
+    if (request.command !== "queue") {
+      await interaction.deferUpdate();
+      const result = this.voiceCall
+        ? await this.voiceCall.controlMusic(request.command!, request.value)
+        : { ok: false, message: "Discord 語音尚未啟用。" };
+      if (result.ok && interaction.customId.endsWith("toggle") && this.voiceCall) {
+        await interaction.editReply({
+          components: [buildDiscordMusicControls(this.voiceCall.getMusicState().paused), buildDiscordVolumeControl()],
+        });
+      }
+      if (!result.ok) await interaction.followUp({ content: result.message, flags: MessageFlags.Ephemeral });
+      return;
+    }
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    const message = await this.interactionAsMessage(interaction);
+    const handled = await this.voiceCall?.handleMusicRequest(message, request) ?? false;
+    if (!handled) {
+      await interaction.editReply({ content: "目前沒有正在播放的音樂。" });
+    }
+  }
+
+  private async handleMusicVolumeSelect(interaction: StringSelectMenuInteraction): Promise<void> {
+    if (interaction.customId !== "cyrene:music:volume") return;
+    if (!shouldHandleDiscordInteraction(interaction, loadChannelsSettings().discord)) {
+      await interaction.reply({ content: "你沒有操作這個 Bot 的權限。", ephemeral: true });
+      return;
+    }
+    if (!this.voiceCall?.canControlMusic(interaction.user.id)) {
+      await interaction.reply({ content: "這是其他人的播放工作階段，你不能調整音量。", flags: MessageFlags.Ephemeral });
+      return;
+    }
+    await interaction.deferUpdate();
+    const value = Number.parseInt(interaction.values[0] ?? "100", 10);
+    const result = this.voiceCall
+      ? await this.voiceCall.controlMusic("volume", value)
+      : { ok: false, message: "Discord 語音尚未啟用。" };
+    if (!result.ok) await interaction.followUp({ content: result.message, flags: MessageFlags.Ephemeral });
+  }
+
+  private musicRequestFromInteraction(interaction: ChatInputCommandInteraction) {
+    if (interaction.commandName === "play") {
+      return parseDiscordMusicRequest(interaction.options.getString("url", true));
+    }
+    if (interaction.commandName === "pause") return { command: "pause" as const };
+    if (interaction.commandName === "resume") return { command: "resume" as const };
+    if (interaction.commandName === "previous") return { command: "previous" as const };
+    if (interaction.commandName === "skip") return { command: "skip" as const };
+    if (interaction.commandName === "stop") return { command: "stop" as const };
+    if (interaction.commandName === "queue") return { command: "queue" as const };
+    if (interaction.commandName === "clear") return { command: "clear" as const };
+    if (interaction.commandName === "remove") {
+      return { command: "remove" as const, value: interaction.options.getInteger("position", true) };
+    }
+    if (interaction.commandName === "volume") {
+      return { command: "volume" as const, value: interaction.options.getInteger("percent", true) };
+    }
+    if (interaction.commandName === "repeat") {
+      const mode = interaction.options.getString("mode", true);
+      return { command: mode === "track" ? "repeat-track" as const : mode === "queue" ? "repeat-queue" as const : "repeat-off" as const };
+    }
+    if (interaction.commandName === "mode") {
+      return { command: interaction.options.getString("type", true) === "shuffle" ? "shuffle" as const : "ordered" as const };
+    }
+    return null;
+  }
+
+  private async interactionAsMessage(
+    interaction: ChatInputCommandInteraction | ButtonInteraction | StringSelectMenuInteraction,
+  ): Promise<Message> {
+    const member: GuildMember | null = interaction.guild
+      ? await interaction.guild.members.fetch(interaction.user.id).catch(() => null)
+      : null;
+    return {
+      channelId: interaction.channelId,
+      author: interaction.user,
+      member,
+      reply: async (content: string) => {
+        if (interaction.deferred && !interaction.replied) {
+          await interaction.editReply({ content });
+          return {
+            edit: async (next: string) => {
+              await interaction.editReply({ content: next });
+              return await interaction.fetchReply();
+            },
+          } as unknown as Message;
+        }
+        if (!interaction.replied && !interaction.deferred) {
+          await interaction.reply({ content, ephemeral: true });
+          return {
+            edit: async (next: string) => {
+              await interaction.editReply({ content: next });
+              return await interaction.fetchReply();
+            },
+          } as unknown as Message;
+        }
+        return await interaction.followUp({ content, fetchReply: true, ephemeral: true });
+      },
+    } as unknown as Message;
+  }
+
+  private async handleSlashChat(interaction: ChatInputCommandInteraction, text: string): Promise<void> {
+    await interaction.deferReply();
+    const member = interaction.guild
+      ? await interaction.guild.members.fetch(interaction.user.id).catch(() => null)
+      : null;
+    const outgoing = await (this.voiceDispatch ?? this.onMessage)?.({
+      channel: "discord",
+      senderId: interaction.user.id,
+      senderName: member?.displayName ?? interaction.user.globalName ?? interaction.user.username,
+      chatId: interaction.channelId,
+      text,
+      at: new Date(),
+      _raw: { source: "discord-slash", interactionId: interaction.id, guildId: interaction.guildId },
+    }) ?? null;
+    const reply = outgoing?.parts
+      .filter((part): part is Extract<typeof part, { kind: "text" }> => part.kind === "text")
+      .map((part) => part.text)
+      .join("\n")
+      .trim();
+    if (!reply) {
+      await interaction.editReply("這次沒有取得回覆，請稍後再試一次。");
+      return;
+    }
+    const chunks = splitText(reply);
+    await interaction.editReply(chunks[0]);
+    for (const chunk of chunks.slice(1)) await interaction.followUp(chunk);
+  }
+
   getProfile(): DiscordBotProfile {
     const client = this.client;
     const user = client?.user;
@@ -249,6 +532,26 @@ export class DiscordAdapter implements ChannelAdapter {
       activityText: user?.presence?.activities[0]?.name ?? "",
       voiceActive: this.voiceCall?.isActive() ?? false,
     };
+  }
+
+  getMusicState(): DiscordMusicState {
+    return this.voiceCall?.getMusicState() ?? {
+      active: false,
+      paused: false,
+      current: null,
+      queue: [],
+      volume: 100,
+      repeat: "off",
+      shuffle: false,
+      elapsed: 0,
+    };
+  }
+
+  async controlMusic(input: DiscordMusicControlInput): Promise<{ ok: boolean; message: string; state: DiscordMusicState }> {
+    const result = this.voiceCall
+      ? await this.voiceCall.controlMusic(input.command, input.value)
+      : { ok: false, message: "Discord 尚未連接。" };
+    return { ...result, state: this.getMusicState() };
   }
 
   async updateProfile(update: DiscordBotProfileUpdate): Promise<DiscordBotProfile> {

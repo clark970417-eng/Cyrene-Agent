@@ -32,8 +32,11 @@ declare global {
       get: () => Promise<Array<{ id: string; name: string; detail: string; icon: string; state: "connected" | "pending" | "error"; label: string }>>;
     };
     chatStore?: {
-      list: () => Promise<Array<{ id: string; title: string }>>;
+      list: () => Promise<Array<{ id: string; title: string; updatedAt: number }>>;
       getMessages?: (sessionId: string) => Promise<Array<{ role: string }>>;
+      rename: (id: string, title: string) => Promise<unknown>;
+      delete: (id: string) => Promise<boolean>;
+      onChanged?: (cb: () => void) => () => void;
     };
   }
 }
@@ -649,6 +652,82 @@ petSlot?.addEventListener("click", () => {
 let currentActiveSessionId = "";
 const sidebarSessionsList = document.getElementById("sidebar-sessions-list");
 const sidebarNewSessionBtn = document.getElementById("sidebar-new-session-btn");
+const sessionContextMenu = document.getElementById("session-context-menu") as HTMLDivElement | null;
+const sessionContextTitle = document.getElementById("session-context-title");
+const sessionDeleteOverlay = document.getElementById("session-delete-overlay") as HTMLDivElement | null;
+const sessionDeleteCopy = document.getElementById("session-delete-copy");
+const sessionDeleteCancel = document.getElementById("session-delete-cancel") as HTMLButtonElement | null;
+const sessionDeleteConfirm = document.getElementById("session-delete-confirm") as HTMLButtonElement | null;
+let contextSession: { id: string; title: string; item: HTMLLIElement } | null = null;
+let pendingDeleteSession: { id: string; title: string } | null = null;
+
+function closeSessionContextMenu(): void {
+  if (sessionContextMenu) sessionContextMenu.hidden = true;
+  contextSession?.item.classList.remove("is-menu-open");
+  contextSession = null;
+}
+
+function openSessionContextMenu(event: MouseEvent | KeyboardEvent, session: { id: string; title: string }, item: HTMLLIElement): void {
+  if (!sessionContextMenu) return;
+  closeSessionContextMenu();
+  contextSession = { ...session, item };
+  item.classList.add("is-menu-open");
+  if (sessionContextTitle) sessionContextTitle.textContent = session.title || "新對話";
+  sessionContextMenu.hidden = false;
+  const rect = item.getBoundingClientRect();
+  const requestedX = event instanceof MouseEvent ? event.clientX : rect.right - 12;
+  const requestedY = event instanceof MouseEvent ? event.clientY : rect.top + 18;
+  const menuRect = sessionContextMenu.getBoundingClientRect();
+  sessionContextMenu.style.left = `${Math.max(8, Math.min(requestedX, window.innerWidth - menuRect.width - 8))}px`;
+  sessionContextMenu.style.top = `${Math.max(8, Math.min(requestedY, window.innerHeight - menuRect.height - 8))}px`;
+  sessionContextMenu.querySelector<HTMLButtonElement>("button")?.focus();
+}
+
+function beginInlineSessionRename(session: { id: string; title: string }, item: HTMLLIElement): void {
+  const title = item.querySelector(".sidebar__session-title") as HTMLSpanElement | null;
+  if (!title || item.querySelector("input")) return;
+  item.classList.add("is-editing");
+  const input = document.createElement("input");
+  input.className = "sidebar__session-title-input";
+  input.value = session.title || "新對話";
+  input.maxLength = 80;
+  input.setAttribute("aria-label", "新的對話標題");
+  title.replaceWith(input);
+  input.focus();
+  input.select();
+  let settled = false;
+  const finish = async (save: boolean) => {
+    if (settled) return;
+    settled = true;
+    const nextTitle = input.value.trim();
+    if (save && nextTitle && nextTitle !== session.title) {
+      const renamed = await window.chatStore?.rename(session.id, nextTitle);
+      if (!renamed) console.error("Failed to rename session:", session.id);
+    }
+    item.classList.remove("is-editing");
+    await renderSidebarSessionsList();
+  };
+  input.addEventListener("click", (event) => event.stopPropagation());
+  input.addEventListener("keydown", (event) => {
+    event.stopPropagation();
+    if (event.key === "Enter") { event.preventDefault(); void finish(true); }
+    if (event.key === "Escape") { event.preventDefault(); void finish(false); }
+  });
+  input.addEventListener("blur", () => void finish(true));
+}
+
+function openDeleteSessionDialog(session: { id: string; title: string }): void {
+  if (!sessionDeleteOverlay) return;
+  pendingDeleteSession = session;
+  if (sessionDeleteCopy) sessionDeleteCopy.textContent = `「${session.title || "新對話"}」會從這台電腦永久刪除，此動作無法復原。`;
+  sessionDeleteOverlay.hidden = false;
+  sessionDeleteCancel?.focus();
+}
+
+function closeDeleteSessionDialog(): void {
+  if (sessionDeleteOverlay) sessionDeleteOverlay.hidden = true;
+  pendingDeleteSession = null;
+}
 
 function formatSessionTime(timestamp: number): string {
   const diff = Date.now() - timestamp;
@@ -671,6 +750,8 @@ async function renderSidebarSessionsList() {
         li.classList.add("is-active");
       }
       li.dataset.sessionId = session.id;
+      li.tabIndex = 0;
+      li.setAttribute("aria-label", `${session.title || "新對話"}，右鍵可管理`);
       
       const title = document.createElement("span");
       title.className = "sidebar__session-title";
@@ -683,12 +764,27 @@ async function renderSidebarSessionsList() {
       li.appendChild(title);
       li.appendChild(time);
       
-      li.addEventListener("click", () => {
+      const openSession = () => {
         iframe.contentWindow?.postMessage({ type: "switch-session", sessionId: session.id }, "*");
         // 切換 workspace 分頁至「閒聊」
         const chatTab = document.querySelector('.sidebar__tab[data-tab="chat"]') as HTMLElement | null;
         if (chatTab && !chatTab.classList.contains("is-active")) {
           chatTab.click();
+        }
+      };
+      li.addEventListener("click", (event) => {
+        if ((event.target as HTMLElement).closest("input")) return;
+        openSession();
+      });
+      li.addEventListener("contextmenu", (event) => {
+        event.preventDefault();
+        openSessionContextMenu(event, { id: session.id, title: session.title || "新對話" }, li);
+      });
+      li.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") openSession();
+        if ((event.shiftKey && event.key === "F10") || event.key === "ContextMenu") {
+          event.preventDefault();
+          openSessionContextMenu(event, { id: session.id, title: session.title || "新對話" }, li);
         }
       });
       
@@ -698,6 +794,61 @@ async function renderSidebarSessionsList() {
     console.error("Failed to render sidebar sessions:", err);
   }
 }
+
+sessionContextMenu?.addEventListener("click", (event) => {
+  const button = (event.target as HTMLElement).closest<HTMLButtonElement>("button[data-session-action]");
+  if (!button || !contextSession) return;
+  const session = contextSession;
+  closeSessionContextMenu();
+  if (button.dataset.sessionAction === "rename") beginInlineSessionRename(session, session.item);
+  if (button.dataset.sessionAction === "delete") openDeleteSessionDialog(session);
+});
+
+sessionDeleteCancel?.addEventListener("click", closeDeleteSessionDialog);
+sessionDeleteOverlay?.addEventListener("click", (event) => {
+  if (event.target === sessionDeleteOverlay) closeDeleteSessionDialog();
+});
+sessionDeleteConfirm?.addEventListener("click", async () => {
+  const session = pendingDeleteSession;
+  if (!session || !window.chatStore) return;
+  sessionDeleteConfirm.disabled = true;
+  try {
+    const deleted = await window.chatStore.delete(session.id);
+    if (!deleted) throw new Error("對話不存在或無法刪除");
+    closeDeleteSessionDialog();
+    await renderSidebarSessionsList();
+  } catch (error) {
+    if (sessionDeleteCopy) sessionDeleteCopy.textContent = error instanceof Error ? error.message : String(error);
+  } finally {
+    sessionDeleteConfirm.disabled = false;
+  }
+});
+
+document.addEventListener("pointerdown", (event) => {
+  if (!sessionContextMenu?.hidden && !sessionContextMenu.contains(event.target as Node)) closeSessionContextMenu();
+});
+window.addEventListener("blur", closeSessionContextMenu);
+window.addEventListener("resize", closeSessionContextMenu);
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
+    if (!sessionContextMenu?.hidden) closeSessionContextMenu();
+    else if (!sessionDeleteOverlay?.hidden) closeDeleteSessionDialog();
+  }
+  if (!sessionContextMenu?.hidden && contextSession) {
+    if (event.key.toLowerCase() === "r") {
+      event.preventDefault();
+      const session = contextSession;
+      closeSessionContextMenu();
+      beginInlineSessionRename(session, session.item);
+    }
+    if (event.metaKey && event.key === "Backspace") {
+      event.preventDefault();
+      const session = contextSession;
+      closeSessionContextMenu();
+      openDeleteSessionDialog(session);
+    }
+  }
+});
 
 function updateActiveSessionHighlight() {
   const items = document.querySelectorAll(".sidebar__session-item");

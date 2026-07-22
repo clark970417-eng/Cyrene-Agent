@@ -77,6 +77,30 @@
       </div>
     </aside>
 
+    <div class="session-context-menu" id="session-context-menu" role="menu" aria-label="對話選單" hidden>
+      <div class="session-context-menu__title" id="session-context-title">對話</div>
+      <button type="button" role="menuitem" data-session-action="rename">
+        <span aria-hidden="true">✎</span><span>更改標題</span><kbd>R</kbd>
+      </button>
+      <button type="button" role="menuitem" class="is-danger" data-session-action="delete">
+        <span aria-hidden="true">⌫</span><span>刪除對話</span><kbd>⌘⌫</kbd>
+      </button>
+    </div>
+
+    <div class="session-delete-overlay" id="session-delete-overlay" hidden>
+      <section class="session-delete-dialog" role="alertdialog" aria-modal="true" aria-labelledby="session-delete-title" aria-describedby="session-delete-copy">
+        <div class="session-delete-dialog__mark" aria-hidden="true">⌫</div>
+        <div>
+          <h2 id="session-delete-title">刪除這段對話？</h2>
+          <p id="session-delete-copy">刪除後無法復原。</p>
+        </div>
+        <div class="session-delete-dialog__actions">
+          <button type="button" id="session-delete-cancel">保留對話</button>
+          <button type="button" class="is-danger" id="session-delete-confirm">刪除</button>
+        </div>
+      </section>
+    </div>
+
     <!-- 中間主內容區域 -->
     <main class="main-content">
       <header class="titlebar">
@@ -96,6 +120,7 @@
               <div class="ws-dropdown__item is-active" data-value="chat">協作</div>
               <div class="ws-dropdown__item" data-value="talk">日常聊天</div>
               <div class="ws-dropdown__item" data-value="study">學習模式</div>
+              <div class="ws-dropdown__item" data-value="game">遊戲模式</div>
             </div>
           </div>
 
