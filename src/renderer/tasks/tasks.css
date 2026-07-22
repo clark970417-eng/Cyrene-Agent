@@ -371,6 +371,7 @@ body {
   user-select: none;
 }
 
+html.is-embedded .tasks__titlebar,
 body.is-embedded .tasks__titlebar {
   display: none !important;
 }

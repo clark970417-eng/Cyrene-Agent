@@ -427,10 +427,12 @@ export function normalizeYtDlpResult(result: YtDlpResult, sourceUrl: string): Di
 
 export async function resolveDiscordMusicTracks(input: string): Promise<DiscordMusicTrack[]> {
   const trimmed = input.trim();
-  let sourceUrl = trimmed;
+  // Bilibili's share action prefixes the URL with 【video title】. Slash command
+  // options may therefore contain prose plus a valid link; always canonicalize it.
+  let sourceUrl = findDiscordMusicUrl(trimmed) ?? trimmed;
   let sourceHost = "";
   try {
-    const parsed = new URL(trimmed);
+    const parsed = new URL(sourceUrl);
     sourceHost = parsed.hostname;
   } catch {
     // /play 明確表示音樂請求；不是網址時交給 yt-dlp 搜尋第一個結果。
@@ -439,14 +441,14 @@ export async function resolveDiscordMusicTracks(input: string): Promise<DiscordM
   if (!trimmed) throw new Error("請輸入歌曲名稱或音樂連結。");
   const isBilibili = /(^|\.)bilibili\.com$|^b23\.tv$/i.test(sourceHost);
   const isSpotify = /^open\.spotify\.com$|^spotify\.link$/i.test(sourceHost);
-  if (isSpotify) return await resolveSpotifyReference(trimmed);
+  if (isSpotify) return await resolveSpotifyReference(sourceUrl);
   if (isBilibili) {
-    const season = await resolveBilibiliSeason(trimmed).catch((err) => {
+    const season = await resolveBilibiliSeason(sourceUrl).catch((err) => {
       console.warn("[DiscordMusicSource] Bilibili 合集解析失敗，改用 yt-dlp:", err instanceof Error ? err.message : err);
       return [];
     });
     if (season.length > 1) return season;
-    const pages = await resolveBilibiliPages(trimmed).catch((err) => {
+    const pages = await resolveBilibiliPages(sourceUrl).catch((err) => {
       console.warn("[DiscordMusicSource] Bilibili 分集解析失敗，改用 yt-dlp:", err instanceof Error ? err.message : err);
       return [];
     });
@@ -502,7 +504,7 @@ export async function resolveDiscordMusicTracks(input: string): Promise<DiscordM
       });
     }
   }
-  return normalizeYtDlpResult(result, trimmed);
+  return normalizeYtDlpResult(result, sourceUrl);
 }
 
 export async function searchDiscordMusicTracks(query: string, limit = 5): Promise<DiscordMusicTrack[]> {

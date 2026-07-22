@@ -3741,6 +3741,7 @@ body {
   word-break: break-word;
 }
 
+html.is-embedded .settings-titlebar,
 body.is-embedded .settings-titlebar {
   display: none !important;
 }

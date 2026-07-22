@@ -13,6 +13,8 @@ import { channelManager } from "./manager";
 import type { ChannelId, IncomingMessage } from "./types";
 
 const LOG = "[InboundServer]";
+// Spotify Developer Dashboard uses this fixed localhost OAuth redirect.
+const PREFERRED_LOCAL_PORT = 53854;
 
 /** 給定 channelId + raw payload → IncomingMessage。每個 adapter 自己註冊。 */
 export type NormalizeFn = (channel: ChannelId, raw: unknown) => IncomingMessage | null;
@@ -167,11 +169,11 @@ export async function startInboundServer(): Promise<InboundServerHandle> {
   }
 
   // 啟動策略：
-  // 1) 優先用 settings.inboundPort（如果非 0）
-  // 2) 被佔 → fallback 到 0（OS 隨機分）
-  // 3) 仍被佔 → 最多重試 3 次（每次都換 server 實例）
-  const tryPorts: Array<number | "random"> = [];
-  if (settings.inboundPort > 0) tryPorts.push(settings.inboundPort);
+  // 1) 優先使用 Spotify OAuth 已登記的固定 localhost port。
+  // 2) 被佔時才嘗試上次保存的備用 port，再 fallback 到 OS 隨機分配。
+  // 下次重啟仍會先回到固定 port，不讓暫時衝突永久破壞 OAuth callback。
+  const tryPorts: Array<number | "random"> = [PREFERRED_LOCAL_PORT];
+  if (settings.inboundPort > 0 && settings.inboundPort !== PREFERRED_LOCAL_PORT) tryPorts.push(settings.inboundPort);
   tryPorts.push("random");
 
   let lastErr: unknown = null;

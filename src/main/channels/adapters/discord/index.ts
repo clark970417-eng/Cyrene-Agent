@@ -301,9 +301,15 @@ export class DiscordAdapter implements ChannelAdapter {
   }
 
   private async handleSlashCommand(interaction: ChatInputCommandInteraction): Promise<void> {
+    // Discord interactions must be acknowledged within roughly three seconds. /play may
+    // parse large Bilibili collections, so acknowledge it before any disk/config work.
+    const playPredeferred = interaction.commandName === "play";
+    if (playPredeferred) await interaction.deferReply();
     const config = loadChannelsSettings().discord;
     if (!shouldHandleDiscordInteraction(interaction, config)) {
-      await interaction.reply({ content: "你不在 Cyrene 的 Discord 白名單中，或這個頻道／伺服器未被允許。", flags: MessageFlags.Ephemeral });
+      const content = "你不在 Cyrene 的 Discord 白名單中，或這個頻道／伺服器未被允許。";
+      if (interaction.deferred) await interaction.editReply({ content });
+      else await interaction.reply({ content, flags: MessageFlags.Ephemeral });
       return;
     }
     if (interaction.commandName === "chat") {
@@ -360,12 +366,13 @@ export class DiscordAdapter implements ChannelAdapter {
     const musicSessionActive = this.voiceCall?.getMusicState().active ?? false;
     const musicCommands = new Set(["play", "previous", "pause", "resume", "skip", "stop", "queue", "clear", "remove", "volume", "repeat", "mode", "autoplay", "leave"]);
     if (musicSessionActive && musicCommands.has(interaction.commandName) && !this.voiceCall?.canControlMusic(interaction.user.id)) {
-      await interaction.reply({ content: "這是其他人的播放工作階段，你不能控制她的音樂。", flags: MessageFlags.Ephemeral });
+      const content = "這是其他人的播放工作階段，你不能控制她的音樂。";
+      if (interaction.deferred) await interaction.editReply({ content });
+      else await interaction.reply({ content, flags: MessageFlags.Ephemeral });
       return;
     }
 
-    if (interaction.commandName === "play") await interaction.deferReply();
-    else await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    if (!playPredeferred) await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const message = await this.interactionAsMessage(interaction);
     if (interaction.commandName === "join") {
       await this.voiceCall?.handleCommand(message, "join");
@@ -574,7 +581,8 @@ export class DiscordAdapter implements ChannelAdapter {
 
   private musicRequestFromInteraction(interaction: ChatInputCommandInteraction) {
     if (interaction.commandName === "play") {
-      return { url: interaction.options.getString("url", true) };
+      const input = interaction.options.getString("url", true);
+      return { url: findDiscordMusicUrl(input) ?? input };
     }
     if (interaction.commandName === "pause") return { command: "pause" as const };
     if (interaction.commandName === "resume") return { command: "resume" as const };

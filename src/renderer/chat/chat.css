@@ -1944,6 +1944,7 @@ body {
   border-color: rgba(220,40,80,0.36);
 }
 
+html.is-embedded .chat__titlebar,
 body.is-embedded .chat__titlebar {
   display: none !important;
 }
