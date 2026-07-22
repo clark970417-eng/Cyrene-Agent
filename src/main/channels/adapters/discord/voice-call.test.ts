@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
-import { DiscordVoiceCall, formatDiscordMusicActivity, parseDiscordVoiceCommand, stereo48kToMono16k } from "./voice-call";
+import { DiscordVoiceCall, discordMusicVolumeGain, formatDiscordMusicActivity, parseDiscordVoiceCommand, stereo48kToMono16k } from "./voice-call";
 import * as musicSource from "./music-source";
 
 describe("Discord voice commands", () => {
@@ -49,6 +49,30 @@ describe("Discord music presence", () => {
 
   it("limits Discord activity names to 128 code points", () => {
     expect([...formatDiscordMusicActivity("歌".repeat(200))]).toHaveLength(128);
+  });
+});
+
+describe("Discord perceptual music volume", () => {
+  it("makes 25, 50 and 75 percent audibly distinct while preserving unity at 100", () => {
+    expect(discordMusicVolumeGain(0)).toBe(0);
+    expect(discordMusicVolumeGain(25)).toBeCloseTo(0.0625);
+    expect(discordMusicVolumeGain(50)).toBeCloseTo(0.25);
+    expect(discordMusicVolumeGain(75)).toBeCloseTo(0.5625);
+    expect(discordMusicVolumeGain(100)).toBe(1);
+    expect(discordMusicVolumeGain(150)).toBe(1.5);
+  });
+
+  it("uses the perceptual gain when changing an active player's volume", async () => {
+    const setVolume = vi.fn();
+    const voice = new DiscordVoiceCall({} as never, () => ({ enabled: true } as never), async () => null);
+    const internal = voice as unknown as Record<string, unknown>;
+    internal.mode = "music";
+    internal.connection = {};
+    internal.player = { state: { status: "playing" } };
+    internal.musicResource = { volume: { setVolume } };
+
+    expect((await voice.controlMusic("volume", 50)).ok).toBe(true);
+    expect(setVolume).toHaveBeenCalledWith(0.25);
   });
 });
 

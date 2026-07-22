@@ -34,6 +34,16 @@ import { toTraditionalTaiwan } from "../../../utils/opencc";
 const LOG = "[DiscordVoice]";
 const MAX_UTTERANCE_BYTES = 48_000 * 2 * 2 * 30;
 
+/**
+ * Human hearing is logarithmic, so a linear 25/50/75 gain sounds too similar.
+ * Square the 0–100 range for clearer perceived steps, while keeping the
+ * existing conservative boost above 100% to avoid excessive clipping.
+ */
+export function discordMusicVolumeGain(percent: number): number {
+  const normalized = Math.max(0, Math.min(150, percent)) / 100;
+  return normalized <= 1 ? normalized * normalized : normalized;
+}
+
 export interface DiscordVoiceServices {
   transcribe: (pcm16Mono16k: Buffer) => Promise<string>;
   synthesize: (text: string) => Promise<{ audio: Buffer; format: "wav" | "mp3" } | null>;
@@ -260,7 +270,7 @@ export class DiscordVoiceCall {
     if (command === "volume") {
       const volume = Math.max(0, Math.min(150, Math.round(value ?? 100)));
       this.musicVolume = volume;
-      this.musicResource?.volume?.setVolume(volume / 100);
+      this.musicResource?.volume?.setVolume(discordMusicVolumeGain(volume));
       this.notifyMusicStateChange();
       return { ok: true, message: `音量已調整為 ${volume}%。` };
     }
@@ -559,7 +569,7 @@ export class DiscordVoiceCall {
         inlineVolume: true,
         metadata: next,
       });
-      resource.volume?.setVolume(this.musicVolume / 100);
+      resource.volume?.setVolume(discordMusicVolumeGain(this.musicVolume));
       this.musicResource = resource;
       this.player.play(resource);
       this.scheduleNextMusicPrefetch();
