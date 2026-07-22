@@ -360,7 +360,7 @@ export class DiscordAdapter implements ChannelAdapter {
       return;
     }
     const handled = await this.voiceCall?.handleMusicRequest(message, request) ?? false;
-    if (handled && interaction.commandName === "play" && this.voiceCall?.hasMusicPlaylist()) {
+    if (handled && interaction.commandName === "play" && this.voiceCall?.getMusicState().active) {
       await interaction.editReply({
         components: [buildDiscordMusicControls(this.voiceCall.getMusicState().paused), buildDiscordVolumeControl()],
       }).catch(() => undefined);

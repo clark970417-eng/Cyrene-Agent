@@ -68,6 +68,22 @@ interface YtDlpResult extends YtDlpEntry {
   playlist_count?: number;
 }
 
+interface BilibiliSeasonEpisode {
+  title?: string;
+  bvid?: string;
+  arc?: { duration?: number; pic?: string };
+}
+
+interface BilibiliInitialState {
+  videoData?: {
+    ugc_season?: {
+      title?: string;
+      cover?: string;
+      sections?: Array<{ episodes?: BilibiliSeasonEpisode[] }>;
+    };
+  };
+}
+
 let ytDlpBinaryPromise: Promise<string> | null = null;
 
 function normalizeHost(hostname: string): string {
@@ -157,6 +173,53 @@ export function cleanDiscordMusicPlaylistTitle(title: string): string {
     .trim();
 }
 
+function cleanBilibiliEpisodeTitle(title: string): string {
+  return title.trim().replace(/^[“”"「『]+|[“”"」』]+$/g, "").trim();
+}
+
+export function parseBilibiliSeasonHtml(html: string, sourceUrl: string): DiscordMusicTrack[] {
+  const marker = "window.__INITIAL_STATE__=";
+  const start = html.indexOf(marker);
+  if (start < 0) return [];
+  const jsonStart = start + marker.length;
+  const jsonEnd = html.indexOf(";(function()", jsonStart);
+  if (jsonEnd < 0) return [];
+  let state: BilibiliInitialState;
+  try {
+    state = JSON.parse(html.slice(jsonStart, jsonEnd)) as BilibiliInitialState;
+  } catch {
+    return [];
+  }
+  const season = state.videoData?.ugc_season;
+  const episodes = season?.sections?.flatMap((section) => section.episodes ?? [])
+    .filter((episode): episode is BilibiliSeasonEpisode & { bvid: string } => !!episode.bvid)
+    .slice(0, MAX_PLAYLIST_ITEMS) ?? [];
+  if (episodes.length < 2) return [];
+  const currentBvid = new URL(sourceUrl).pathname.match(/\/video\/(BV[\w]+)/i)?.[1]?.toLowerCase();
+  const currentIndex = Math.max(0, episodes.findIndex((episode) => episode.bvid.toLowerCase() === currentBvid));
+  const playlistTitle = cleanDiscordMusicPlaylistTitle(season?.title?.trim() || "Bilibili 合集");
+  return episodes.slice(currentIndex).map((episode, offset) => ({
+    id: episode.bvid,
+    title: cleanBilibiliEpisodeTitle(episode.title || `第 ${currentIndex + offset + 1} 集`),
+    url: `https://www.bilibili.com/video/${episode.bvid}/`,
+    thumbnail: episode.arc?.pic?.replace(/^http:\/\//i, "https://") ?? season?.cover,
+    playlistTitle,
+    duration: episode.arc?.duration,
+    index: currentIndex + offset + 1,
+    total: episodes.length,
+  }));
+}
+
+async function resolveBilibiliSeason(url: string): Promise<DiscordMusicTrack[]> {
+  const response = await fetch(url, {
+    redirect: "follow",
+    headers: { "user-agent": "Mozilla/5.0 CyreneDiscordBot/1.0" },
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (!response.ok) return [];
+  return parseBilibiliSeasonHtml(await response.text(), response.url);
+}
+
 export function normalizeYtDlpResult(result: YtDlpResult, sourceUrl: string): DiscordMusicTrack[] {
   const rawEntries = result.entries?.filter((entry): entry is YtDlpEntry => !!entry) ?? [result];
   const start = Math.min(requestedStartIndex(sourceUrl), Math.max(0, rawEntries.length - 1));
@@ -182,6 +245,12 @@ export function normalizeYtDlpResult(result: YtDlpResult, sourceUrl: string): Di
 }
 
 export async function resolveDiscordMusicTracks(url: string): Promise<DiscordMusicTrack[]> {
+  const sourceHost = new URL(url).hostname;
+  const isBilibili = /(^|\.)bilibili\.com$|^b23\.tv$/i.test(sourceHost);
+  if (isBilibili) {
+    const season = await resolveBilibiliSeason(url).catch(() => []);
+    if (season.length > 1) return season;
+  }
   const binary = await ensureYtDlpBinary();
   const commonArgs = [
     "--dump-single-json",
@@ -198,7 +267,6 @@ export async function resolveDiscordMusicTracks(url: string): Promise<DiscordMus
     url,
   ]);
   const entries = result.entries?.filter((entry): entry is YtDlpEntry => !!entry) ?? [];
-  const isBilibili = /(^|\.)bilibili\.com$|^b23\.tv$/i.test(new URL(url).hostname);
   if (isBilibili && entries.length > 1 && entries.length <= 30 && entries.some((entry) => !entry.title)) {
     result = await runYtDlpJson(binary, [...commonArgs, url]);
   } else if (isBilibili && !entryThumbnail(entries[0] ?? result, result)) {

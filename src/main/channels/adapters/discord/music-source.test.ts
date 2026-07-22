@@ -6,6 +6,7 @@ import {
   cleanDiscordMusicPlaylistTitle,
   normalizeYtDlpResult,
   parseDiscordMusicRequest,
+  parseBilibiliSeasonHtml,
 } from "./music-source";
 
 describe("Discord music request parsing", () => {
@@ -44,6 +45,27 @@ describe("Discord music request parsing", () => {
 });
 
 describe("yt-dlp playlist normalization", () => {
+  it("expands a Bilibili UGC season into next-able videos", () => {
+    const state = {
+      videoData: {
+        ugc_season: {
+          title: "串烧推荐",
+          cover: "https://img.example/season.jpg",
+          sections: [{ episodes: [
+            { title: "“第一首串烧”", bvid: "BVFIRST", arc: { duration: 100, pic: "http://img.example/1.jpg" } },
+            { title: "“第二首串烧”", bvid: "BVSECOND", arc: { duration: 120, pic: "http://img.example/2.jpg" } },
+            { title: "“第三首串烧”", bvid: "BVTHIRD", arc: { duration: 140, pic: "http://img.example/3.jpg" } },
+          ] }],
+        },
+      },
+    };
+    const html = `<script>window.__INITIAL_STATE__=${JSON.stringify(state)};(function(){})</script>`;
+    const tracks = parseBilibiliSeasonHtml(html, "https://www.bilibili.com/video/BVSECOND/");
+    expect(tracks.map((track) => track.title)).toEqual(["第二首串烧", "第三首串烧"]);
+    expect(tracks[0]).toMatchObject({ playlistTitle: "串烧推荐", index: 2, total: 3, duration: 120 });
+    expect(tracks[0].thumbnail).toBe("https://img.example/2.jpg");
+  });
+
   it("removes source and quality metadata from a playlist title", () => {
     expect(cleanDiscordMusicPlaylistTitle("【音乐集】 葬送的芙莉莲 歌曲全收录 【Hi-Res/完整版/中日歌词】"))
       .toBe("葬送的芙莉莲 歌曲全收录");
