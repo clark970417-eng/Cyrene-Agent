@@ -751,6 +751,7 @@ async function renderSidebarSessionsList() {
       }
       li.dataset.sessionId = session.id;
       li.tabIndex = 0;
+      li.setAttribute("aria-haspopup", "menu");
       li.setAttribute("aria-label", `${session.title || "新對話"}，右鍵可管理`);
       
       const title = document.createElement("span");
@@ -777,6 +778,7 @@ async function renderSidebarSessionsList() {
         openSession();
       });
       li.addEventListener("contextmenu", (event) => {
+        if ((event.target as HTMLElement).closest("input")) return;
         event.preventDefault();
         openSessionContextMenu(event, { id: session.id, title: session.title || "新對話" }, li);
       });

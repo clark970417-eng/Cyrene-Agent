@@ -26,6 +26,7 @@ import {
   type DiscordMusicProcess,
   type DiscordMusicTrack,
 } from "./music-source";
+import { recordDiscordMusicInNotebook } from "./notebook-activity";
 
 const LOG = "[DiscordVoice]";
 const MAX_UTTERANCE_BYTES = 48_000 * 2 * 2 * 30;
@@ -411,6 +412,7 @@ export class DiscordVoiceCall {
     this.musicOwnerId = message.author.id;
     this.guildId = channel.guild.id;
     this.textChannelId = message.channelId;
+    this.activeUserName = message.member?.displayName ?? message.author.globalName ?? message.author.username;
     this.player = createAudioPlayer({ behaviors: { noSubscriber: NoSubscriberBehavior.Pause } });
     this.connection = joinVoiceChannel({
       channelId: channel.id,
@@ -504,6 +506,12 @@ export class DiscordVoiceCall {
       this.musicResource = resource;
       this.player.play(resource);
       this.setMusicPresence(next);
+      void recordDiscordMusicInNotebook({
+        title: next.title,
+        url: next.url,
+        playlistTitle: next.playlistTitle,
+        companionName: this.activeUserName,
+      });
     } catch (err) {
       console.error(LOG, "開始播放失敗:", err);
       await this.sendMusicStatus(`播放失敗：${this.musicErrorMessage(err)}`);

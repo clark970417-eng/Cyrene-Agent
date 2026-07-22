@@ -8,6 +8,7 @@ declare global {
     sidebar?: {
       readSharedNotebook: () => Promise<string>;
       openSharedNotebook: () => Promise<boolean>;
+      onSharedNotebookChanged?: (callback: () => void) => () => void;
     };
   }
 }
@@ -38,7 +39,15 @@ function parseMarkdown(md: string): string {
   let inList = false;
 
   for (let line of lines) {
-    const trimmed = line.trim();
+    let trimmed = line.trim();
+
+    // 自動日誌使用的去重標記不顯示在書頁上。
+    if (/^&lt;!--\s*cyrene-discord[^]*--&gt;$/.test(trimmed)) {
+      resultLines.push("");
+      continue;
+    }
+    line = line.replace(/\s*&lt;!--\s*cyrene-discord[^]*?--&gt;/g, "");
+    trimmed = line.trim();
 
     // Check blockquotes
     if (trimmed.startsWith("&gt;")) {
@@ -75,6 +84,8 @@ function parseMarkdown(md: string): string {
 
     // Bold text **word**
     line = line.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+    // 僅允許自動日誌產生的 http(s) 連結。
+    line = line.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noreferrer">$1</a>');
     
     resultLines.push(line);
   }
@@ -263,3 +274,6 @@ async function init() {
 }
 
 void init();
+window.sidebar?.onSharedNotebookChanged?.(() => {
+  void init();
+});

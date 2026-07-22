@@ -74,6 +74,11 @@ import { initChannels, shutdownChannels } from "./channels/init";
 import { setDispatcherBuildAndRunAgent, setDispatcherSynthesizeTts, setDispatcherBroadcastChat, setDispatcherLoadRecentHistory } from "./channels/dispatcher";
 import { setDiscordVoiceServices } from "./channels/adapters/discord/voice-call";
 import {
+  getSharedNotebookPath,
+  onSharedNotebookChanged,
+  recordDiscordToolActionsInNotebook,
+} from "./channels/adapters/discord/notebook-activity";
+import {
   buildAgentRunOptions,
   onAgentRunFinished,
   type BuildOptionsDeps,
@@ -98,6 +103,12 @@ let chatWindow: BrowserWindow | null = null;
 let sidebarWindow: BrowserWindow | null = null;
 let sidebarRestoreBounds: { x: number; y: number; width: number; height: number } | null = null;
 let isSidebarExpanded = false;
+
+onSharedNotebookChanged(() => {
+  if (sidebarWindow && !sidebarWindow.isDestroyed()) {
+    sidebarWindow.webContents.send("shared-notebook:changed");
+  }
+});
 let tasksWindow: BrowserWindow | null = null;
 let settingsWindow: BrowserWindow | null = null;
 let stickerManagerWindow: BrowserWindow | null = null;
@@ -3046,7 +3057,7 @@ ipcMain.on(IPC.SIDEBAR_SET_PET_DOCK_VISIBLE, (_event, visible: boolean) => {
 });
 
 ipcMain.handle("sidebar:read-shared-notebook", async () => {
-  const filePath = "/Users/clark/cy/我們共同的筆記本.md";
+  const filePath = getSharedNotebookPath();
   try {
     if (fs.existsSync(filePath)) {
       return fs.readFileSync(filePath, "utf-8");
@@ -3058,7 +3069,7 @@ ipcMain.handle("sidebar:read-shared-notebook", async () => {
 });
 
 ipcMain.handle("sidebar:open-shared-notebook", async () => {
-  const filePath = "/Users/clark/cy/我們共同的筆記本.md";
+  const filePath = getSharedNotebookPath();
   try {
     await shell.openPath(filePath);
     return true;
@@ -4337,6 +4348,11 @@ app.whenReady().then(async () => {
     });
     if (agent.lastResult) {
       await onAgentRunFinished(agent.lastResult, msg.text, onRunFinishedDeps, msg.channel);
+      if (msg.channel === "discord") {
+        void recordDiscordToolActionsInNotebook(agent.lastResult.toolResults, {
+          companionName: msg.senderName,
+        });
+      }
     }
     // 落歷史
     void indexConversationTurn(sessionId, msg.text, reply);

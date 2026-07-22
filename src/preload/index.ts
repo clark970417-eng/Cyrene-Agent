@@ -131,6 +131,11 @@ const sidebarApi = {
   setPetDockVisible: (visible: boolean) => ipcRenderer.send(IPC.SIDEBAR_SET_PET_DOCK_VISIBLE, visible),
   readSharedNotebook: () => ipcRenderer.invoke("sidebar:read-shared-notebook"),
   openSharedNotebook: () => ipcRenderer.invoke("sidebar:open-shared-notebook"),
+  onSharedNotebookChanged: (callback: () => void) => {
+    const handler = () => callback();
+    ipcRenderer.on("shared-notebook:changed", handler);
+    return () => ipcRenderer.removeListener("shared-notebook:changed", handler);
+  },
   reportSlotBounds: (bounds: { x: number; y: number; width: number; height: number; isDocked: boolean }) =>
     ipcRenderer.send("sidebar:report-slot-bounds", bounds),
   onPetDockChanged: (callback: (docked: boolean) => void) => {
