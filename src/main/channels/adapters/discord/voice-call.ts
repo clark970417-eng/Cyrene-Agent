@@ -27,6 +27,7 @@ import {
   type DiscordMusicTrack,
 } from "./music-source";
 import { recordDiscordMusicInNotebook } from "./notebook-activity";
+import { toTraditionalTaiwan } from "../../../utils/opencc";
 
 const LOG = "[DiscordVoice]";
 const MAX_UTTERANCE_BYTES = 48_000 * 2 * 2 * 30;
@@ -90,15 +91,17 @@ export function stereo48kToMono16k(input: Buffer): Buffer {
 }
 
 export function formatDiscordMusicActivity(title: string, playlistTitle?: string): string {
-  const cleaned = title.replace(/^.*?\sp\d{1,3}\s+/i, "").trim() || title.trim() || "音樂";
+  const traditionalTitle = toTraditionalTaiwan(title);
+  const traditionalPlaylistTitle = playlistTitle ? toTraditionalTaiwan(playlistTitle) : undefined;
+  const cleaned = traditionalTitle.replace(/^.*?\sp\d{1,3}\s+/i, "").trim() || traditionalTitle.trim() || "音樂";
   const tagged = cleaned.match(/^【([^】]+)】\s*(.+)$/);
   const song = tagged?.[2]?.trim() || cleaned;
   const category = tagged?.[1]?.trim();
-  const collection = playlistTitle
-    ?.replace(/\s*(?:歌曲)?全收[录錄]\s*$/i, "")
+  const collection = traditionalPlaylistTitle
+    ?.replace(/\s*(?:(?:歌曲)?全收[录錄]|音[乐樂]集)\s*$/i, "")
     .trim();
   const activity = [`🎧 ${song}`, category, collection].filter(Boolean).join("｜");
-  return [...activity].slice(0, 128).join("");
+  return [...toTraditionalTaiwan(activity)].slice(0, 128).join("");
 }
 
 export class DiscordVoiceCall {
@@ -442,9 +445,12 @@ export class DiscordVoiceCall {
       const current = this.currentMusicTrack
         ? `正在播放：${this.currentMusicTrack.title}${this.trackDurationLabel(this.currentMusicTrack)}`
         : "目前沒有正在播放的歌曲";
-      const upcoming = this.musicQueue.slice(0, 10)
+      const visibleQueue = playlist
+        ? this.musicQueue.filter((track) => track.playlistTitle === playlist)
+        : this.musicQueue;
+      const upcoming = visibleQueue.slice(0, 10)
         .map((track, index) => `${index + 1}. ${track.title}${this.trackDurationLabel(track)}`);
-      const more = this.musicQueue.length > 10 ? `\n…另外還有 ${this.musicQueue.length - 10} 首` : "";
+      const more = visibleQueue.length > 10 ? `\n…另外還有 ${visibleQueue.length - 10} 首` : "";
       await message.reply(`${playlist ? `播放清單：${playlist}\n` : ""}${current}\n${upcoming.length ? `接下來：\n${upcoming.join("\n")}${more}` : "佇列中沒有下一首。"}`);
       return true;
     }
@@ -579,11 +585,6 @@ export class DiscordVoiceCall {
       return `音樂播放中：${title}（佇列 ${this.musicQueue.length} 首，音量 ${this.musicVolume}%）`;
     }
     return "未加入語音頻道";
-  }
-
-  hasMusicPlaylist(): boolean {
-    return this.mode === "music"
-      && ((this.currentMusicTrack?.total ?? 1) > 1 || this.musicQueue.length > 0);
   }
 
   private captureUtterance(userId: string): void {

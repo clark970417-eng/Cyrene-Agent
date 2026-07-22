@@ -31,6 +31,9 @@ export async function initChannels(): Promise<void> {
   if (initialized) return;
   initialized = true;
 
+  // app.whenReady() 後才讀取含 safeStorage 密文的渠道設定。
+  channelDispatcher.reloadSettings();
+
   // 注入 dispatcher 到 manager
   channelManager.setDispatcher(async (msg) => {
     return await channelDispatcher.handleIncoming(msg);
@@ -78,7 +81,9 @@ function registerChannelsIpc(): void {
   ipcMain.handle(IPC.CHANNELS_GET_CONFIG, () => loadChannelsSettings());
 
   ipcMain.handle(IPC.CHANNELS_SAVE_CONFIG, (_e, patch: unknown) => {
-    return saveChannelsSettings(patch as Parameters<typeof saveChannelsSettings>[0]);
+    const saved = saveChannelsSettings(patch as Parameters<typeof saveChannelsSettings>[0]);
+    channelDispatcher.reloadSettings();
+    return saved;
   });
 
   ipcMain.handle(IPC.CHANNELS_LIST, () => channelManager.listChannels());

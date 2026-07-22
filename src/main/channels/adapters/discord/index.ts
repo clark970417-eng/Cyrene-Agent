@@ -25,6 +25,7 @@ import type {
 import { loadChannelsSettings, saveChannelsSettings, type DiscordChannelConfig } from "../../settings-store";
 import { DiscordVoiceCall, parseDiscordVoiceCommand, type DiscordMusicState } from "./voice-call";
 import { parseDiscordMusicRequest } from "./music-source";
+import { toTraditionalTaiwan } from "../../../utils/opencc";
 import {
   buildDiscordMusicControls,
   buildDiscordVolumeControl,
@@ -214,7 +215,7 @@ export class DiscordAdapter implements ChannelAdapter {
         console.error(LOG, "處理 Discord / 指令失敗:", err);
         const content = `指令執行失敗：${err instanceof Error ? err.message : String(err)}`;
         if (actionable.deferred || actionable.replied) await actionable.editReply({ content }).catch(() => undefined);
-        else await actionable.reply({ content, ephemeral: true }).catch(() => undefined);
+        else await actionable.reply({ content, flags: MessageFlags.Ephemeral }).catch(() => undefined);
       }
     });
     client.on("guildCreate", (guild) => {
@@ -293,7 +294,7 @@ export class DiscordAdapter implements ChannelAdapter {
   private async handleSlashCommand(interaction: ChatInputCommandInteraction): Promise<void> {
     const config = loadChannelsSettings().discord;
     if (!shouldHandleDiscordInteraction(interaction, config)) {
-      await interaction.reply({ content: "你不在 Cyrene 的 Discord 白名單中，或這個頻道／伺服器未被允許。", ephemeral: true });
+      await interaction.reply({ content: "你不在 Cyrene 的 Discord 白名單中，或這個頻道／伺服器未被允許。", flags: MessageFlags.Ephemeral });
       return;
     }
     if (interaction.commandName === "chat") {
@@ -309,7 +310,7 @@ export class DiscordAdapter implements ChannelAdapter {
           `所在伺服器：${client?.guilds.cache.size ?? 0}`,
           `語音狀態：${this.voiceCall?.getSessionSummary() ?? "未啟用"}`,
         ].join("\n"),
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
       return;
     }
@@ -322,7 +323,7 @@ export class DiscordAdapter implements ChannelAdapter {
           "`/queue`　`/remove`　`/clear`　`/volume`　`/repeat`　`/mode`",
           "`/status` 查看連線、延遲及目前播放狀態",
         ].join("\n"),
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
       return;
     }
@@ -377,7 +378,7 @@ export class DiscordAdapter implements ChannelAdapter {
     const playlistOnly = request.command === "queue";
     const accessConfig = playlistOnly ? { ...config, allowedUserIds: undefined } : config;
     if (!shouldHandleDiscordInteraction(interaction, accessConfig)) {
-      await interaction.reply({ content: "你沒有操作這個 Bot 的權限。", ephemeral: true });
+      await interaction.reply({ content: "你沒有操作這個 Bot 的權限。", flags: MessageFlags.Ephemeral });
       return;
     }
     if (!playlistOnly && !this.voiceCall?.canControlMusic(interaction.user.id)) {
@@ -408,7 +409,7 @@ export class DiscordAdapter implements ChannelAdapter {
   private async handleMusicVolumeSelect(interaction: StringSelectMenuInteraction): Promise<void> {
     if (interaction.customId !== "cyrene:music:volume") return;
     if (!shouldHandleDiscordInteraction(interaction, loadChannelsSettings().discord)) {
-      await interaction.reply({ content: "你沒有操作這個 Bot 的權限。", ephemeral: true });
+      await interaction.reply({ content: "你沒有操作這個 Bot 的權限。", flags: MessageFlags.Ephemeral });
       return;
     }
     if (!this.voiceCall?.canControlMusic(interaction.user.id)) {
@@ -471,7 +472,7 @@ export class DiscordAdapter implements ChannelAdapter {
           } as unknown as Message;
         }
         if (!interaction.replied && !interaction.deferred) {
-          await interaction.reply({ content, ephemeral: true });
+          await interaction.reply({ content, flags: MessageFlags.Ephemeral });
           return {
             edit: async (next: string) => {
               await interaction.editReply({ content: next });
@@ -479,7 +480,7 @@ export class DiscordAdapter implements ChannelAdapter {
             },
           } as unknown as Message;
         }
-        return await interaction.followUp({ content, fetchReply: true, ephemeral: true });
+        return await interaction.followUp({ content, fetchReply: true, flags: MessageFlags.Ephemeral });
       },
     } as unknown as Message;
   }
@@ -559,7 +560,7 @@ export class DiscordAdapter implements ChannelAdapter {
     const user = client?.user;
     if (!client?.isReady() || !user) throw new Error("Discord Gateway 尚未連接");
 
-    const username = update.username?.trim();
+    const username = update.username ? toTraditionalTaiwan(update.username.trim()) : undefined;
     if (username && username !== user.username) {
       if (username.length < 2 || username.length > 32) throw new Error("Bot 名稱需為 2–32 個字元");
       await user.setUsername(username);
@@ -568,7 +569,7 @@ export class DiscordAdapter implements ChannelAdapter {
     if (update.banner) await user.setBanner(update.banner);
 
     const status = update.status ?? (user.presence?.status === "offline" ? "online" : user.presence?.status) ?? "online";
-    const activityText = update.activityText?.trim() ?? "";
+    const activityText = toTraditionalTaiwan(update.activityText?.trim() ?? "");
     client.user.setPresence({
       status,
       activities: activityText ? [{ name: activityText, type: ActivityType.Playing }] : [],

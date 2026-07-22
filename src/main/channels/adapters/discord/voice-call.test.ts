@@ -36,12 +36,12 @@ describe("Discord PCM conversion", () => {
 describe("Discord music presence", () => {
   it("uses the song portion of a Bilibili multi-part title", () => {
     expect(formatDiscordMusicActivity("【音乐集】超时空辉夜姬 p01 【剧中歌】星降る海（繁星坠海）"))
-      .toBe("🎧 星降る海（繁星坠海）｜剧中歌");
+      .toBe("🎧 星降る海（繁星墜海）｜劇中歌");
   });
 
   it("adds the song role and work name without repeating playlist metadata", () => {
-    expect(formatDiscordMusicActivity("【第一季 OP】勇者", "葬送的芙莉莲 歌曲全收录"))
-      .toBe("🎧 勇者｜第一季 OP｜葬送的芙莉莲");
+    expect(formatDiscordMusicActivity("【第一季 OP】勇者", "葬送的芙莉莲 音乐集"))
+      .toBe("🎧 勇者｜第一季 OP｜葬送的芙莉蓮");
   });
 
   it("limits Discord activity names to 128 code points", () => {

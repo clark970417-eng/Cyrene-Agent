@@ -277,6 +277,11 @@ function normalize(input: Partial<ChannelsSettings> | null | undefined): Channel
   };
 }
 
+/** 不觸碰 Electron userData 或 safeStorage，可供 app ready 前建立安全的初始狀態。 */
+export function getDefaultChannelsSettings(): ChannelsSettings {
+  return normalize(DEFAULT_SETTINGS);
+}
+
 export function loadChannelsSettings(): ChannelsSettings {
   try {
     const p = filePath();

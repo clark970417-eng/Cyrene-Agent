@@ -415,6 +415,29 @@ interface SettingsApi {
   channelsDiscordUpdateProfile: (profile: { username: string; activityText: string; status: string; avatarPath?: string; bannerPath?: string }) => Promise<{ ok: boolean; profile?: DiscordBotProfile; error?: string }>;
   channelsDiscordPickAvatar: () => Promise<string | null>;
   channelsDiscordPickBanner: () => Promise<string | null>;
+  channelsGetConfig: () => Promise<ChannelsPreviewConfig>;
+  channelsSaveConfig: (patch: unknown) => Promise<unknown>;
+  channelsList: () => Promise<unknown[]>;
+  channelsGetStatus: () => Promise<Record<string, { phase: string; message?: string }>>;
+  channelsRestart: () => Promise<ChannelConnectionResult>;
+  channelsWechatInstall: () => Promise<ChannelConnectionResult>;
+  channelsWechatLoginStart: () => Promise<ChannelConnectionResult>;
+  channelsWechatLoginCancel: () => Promise<ChannelConnectionResult>;
+  channelsWechatPairingList: () => Promise<unknown[]>;
+  channelsWechatPairingApprove: (code: string) => Promise<ChannelConnectionResult>;
+  channelsWechatLogout: () => Promise<ChannelConnectionResult>;
+  channelsWechatRuntimeDetect: () => Promise<unknown>;
+  channelsWechatRuntimeInstall: () => Promise<ChannelConnectionResult>;
+  channelsWechatRuntimeUpdate: () => Promise<ChannelConnectionResult>;
+  channelsFeishuTestConnection: () => Promise<ChannelConnectionResult>;
+  channelsFeishuTestWebhookReachable: () => Promise<ChannelConnectionResult>;
+  channelsDiscordTestConnection: () => Promise<ChannelConnectionResult>;
+  channelsLogGet: (limit?: number) => Promise<unknown[]>;
+  channelsLogClear: () => Promise<unknown>;
+  onChannelsInstallProgress: (callback: (progress: { channel: string; phase: string; pct: number }) => void) => (() => void) | void;
+  onChannelsStatusChanged: (callback: (status: unknown) => void) => (() => void) | void;
+  onChannelsWechatQrcode: (callback: (dataUrl: string) => void) => (() => void) | void;
+  onChannelsWechatLoginDone: (callback: (payload: { ok: boolean; botId?: string; error?: string }) => void) => (() => void) | void;
   // main → settings：要求切到指定標籤（窗口已打開時由 main 發這個事件）
   onSwitchSection?: (callback: (section: string) => void) => (() => void) | void;
 }
@@ -468,6 +491,32 @@ interface DiscordMusicState {
 interface DiscordMusicControlInput {
   command: "previous" | "pause" | "resume" | "skip" | "stop" | "repeat-track" | "repeat-queue" | "repeat-off" | "shuffle" | "ordered" | "clear" | "remove" | "volume";
   value?: number;
+}
+
+interface ChannelsPreviewConfig {
+  wechat: { enabled: boolean };
+  feishu: { enabled: boolean; appId?: string; appSecret?: string };
+  discord: {
+    enabled: boolean;
+    botToken?: string;
+    allowedGuildIds?: string[];
+    allowedChannelIds?: string[];
+    allowedUserIds?: string[];
+    requireMention?: boolean;
+    voiceEnabled?: boolean;
+  };
+  rateLimitPerUser: number;
+  rateLimitPerChannel: number;
+  ttsEnabled: boolean;
+  stickerEnabled: boolean;
+  mirrorToDesktop: boolean;
+  toolSandbox: "safe-only" | "all";
+}
+
+interface ChannelConnectionResult {
+  ok: boolean;
+  message?: string;
+  error?: string;
 }
 
 declare global {
@@ -641,6 +690,43 @@ if (!window.settings) {
     channelsDiscordUpdateProfile: async () => ({ ok: false, error: "settings api unavailable" }),
     channelsDiscordPickAvatar: async () => null,
     channelsDiscordPickBanner: async () => null,
+    channelsGetConfig: async () => ({
+      wechat: { enabled: false },
+      feishu: { enabled: false },
+      discord: { enabled: false, requireMention: true, voiceEnabled: true },
+      rateLimitPerUser: 10,
+      rateLimitPerChannel: 100,
+      ttsEnabled: true,
+      stickerEnabled: true,
+      mirrorToDesktop: true,
+      toolSandbox: "safe-only",
+    }),
+    channelsSaveConfig: async () => ({}),
+    channelsList: async () => [],
+    channelsGetStatus: async () => ({
+      wechat: { phase: "offline", message: "預覽模式" },
+      feishu: { phase: "offline", message: "預覽模式" },
+      discord: { phase: "offline", message: "預覽模式" },
+    }),
+    channelsRestart: async () => ({ ok: false, error: "settings api unavailable" }),
+    channelsWechatInstall: async () => ({ ok: false, error: "settings api unavailable" }),
+    channelsWechatLoginStart: async () => ({ ok: false, error: "settings api unavailable" }),
+    channelsWechatLoginCancel: async () => ({ ok: false, error: "settings api unavailable" }),
+    channelsWechatPairingList: async () => [],
+    channelsWechatPairingApprove: async () => ({ ok: false, error: "settings api unavailable" }),
+    channelsWechatLogout: async () => ({ ok: false, error: "settings api unavailable" }),
+    channelsWechatRuntimeDetect: async () => ({ available: false }),
+    channelsWechatRuntimeInstall: async () => ({ ok: false, error: "settings api unavailable" }),
+    channelsWechatRuntimeUpdate: async () => ({ ok: false, error: "settings api unavailable" }),
+    channelsFeishuTestConnection: async () => ({ ok: false, error: "settings api unavailable" }),
+    channelsFeishuTestWebhookReachable: async () => ({ ok: false, error: "settings api unavailable" }),
+    channelsDiscordTestConnection: async () => ({ ok: false, error: "settings api unavailable" }),
+    channelsLogGet: async () => [],
+    channelsLogClear: async () => ({}),
+    onChannelsInstallProgress: () => () => {},
+    onChannelsStatusChanged: () => () => {},
+    onChannelsWechatQrcode: () => () => {},
+    onChannelsWechatLoginDone: () => () => {},
   };
 }
 
@@ -2907,7 +2993,11 @@ function renderDiscordMusic(state: DiscordMusicState): void {
 
   if (channelsDiscordMusicQueueEl) {
     channelsDiscordMusicQueueEl.replaceChildren();
-    const tracks = current ? [current, ...state.queue] : state.queue;
+    const activePlaylist = current?.playlistTitle ?? state.queue[0]?.playlistTitle;
+    const categoryQueue = activePlaylist
+      ? state.queue.filter((track) => track.playlistTitle === activePlaylist)
+      : state.queue;
+    const tracks = current ? [current, ...categoryQueue] : categoryQueue;
     if (!tracks.length) {
       const empty = document.createElement("li");
       empty.className = "is-empty";

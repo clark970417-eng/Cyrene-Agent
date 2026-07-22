@@ -24,9 +24,10 @@ import type {
   OutgoingPart,
 } from "./types";
 import { channelManager, type ChannelManager } from "./manager";
-import { loadChannelsSettings, type ChannelsSettings } from "./settings-store";
+import { getDefaultChannelsSettings, loadChannelsSettings, type ChannelsSettings } from "./settings-store";
 import { appendLog, reloadLogFromDisk } from "./message-log";
 import { appendHistory as appendChannelHistory } from "./history-log";
+import { toTraditionalTaiwan } from "../utils/opencc";
 
 /** Phase A：用於拼接歷史對話的輕量 ChatMessage 形狀（與 orchestrator ChatMessage 兼容）。 */
 interface ChatMessage {
@@ -46,6 +47,11 @@ export function shouldSynthesizeChannelTts(msg: IncomingMessage, ttsEnabled: boo
   const raw = msg._raw;
   return !!raw && typeof raw === "object"
     && (raw as { source?: unknown }).source === "discord-voice";
+}
+
+/** 所有外部渠道的 AI 顯示文字都統一為台灣繁體；不改動使用者的原始輸入。 */
+export function normalizeChannelReplyText(text: string): string {
+  return toTraditionalTaiwan(text);
 }
 
 const LOG = "[ChannelDispatcher]";
@@ -147,7 +153,9 @@ export class ChannelDispatcher {
 
   constructor(deps: DispatcherDeps) {
     this.deps = deps;
-    this.settings = loadChannelsSettings();
+    // 這個 singleton 可能早於 app.whenReady() 建立，此時不可讀 safeStorage。
+    // initChannels() 會在 Electron ready 後呼叫 reloadSettings()。
+    this.settings = getDefaultChannelsSettings();
     this.limiter = new RateLimiter(this.settings);
     reloadLogFromDisk();
   }
@@ -236,6 +244,8 @@ export class ChannelDispatcher {
       replyText = `[echo][${msg.channel}][${msg.senderId}] ${msg.text}`;
       console.log(LOG, "Phase 0 echo (無 buildAndRunAgent):", replyText);
     }
+
+    replyText = normalizeChannelReplyText(replyText);
 
     // 構造 OutgoingMessage parts
     const parts: OutgoingPart[] = [{ kind: "text", text: replyText }];

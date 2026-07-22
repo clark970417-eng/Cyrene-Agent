@@ -3,8 +3,10 @@ import { spawn, type ChildProcessByStdio } from "node:child_process";
 import type { Readable } from "node:stream";
 import { constants as fsConstants, promises as fs } from "node:fs";
 import { createHash } from "node:crypto";
+import { toTraditionalTaiwan } from "../../../utils/opencc";
 
-const MAX_PLAYLIST_ITEMS = 100;
+// 足以涵蓋 Bilibili 跨作品音樂合集，同時避免無界清單耗盡記憶體。
+const MAX_PLAYLIST_ITEMS = 500;
 const YT_DLP_RELEASE_BASE = "https://github.com/yt-dlp/yt-dlp/releases/latest/download";
 const SUPPORTED_HOSTS = new Set([
   "youtube.com",
@@ -156,25 +158,25 @@ function entryThumbnail(entry: YtDlpEntry, fallback?: YtDlpEntry): string | unde
 export function cleanDiscordMusicTrackTitle(title: string, playlistTitle?: string): string {
   const normalized = title.trim();
   const part = normalized.match(/\s+p\d{1,3}\s+(.+)$/i)?.[1]?.trim();
-  if (part) return part;
+  if (part) return toTraditionalTaiwan(part);
   if (playlistTitle && normalized.startsWith(playlistTitle)) {
     const remainder = normalized.slice(playlistTitle.length).replace(/^\s*[-–—:：|]\s*/, "").trim();
-    if (remainder) return remainder;
+    if (remainder) return toTraditionalTaiwan(remainder);
   }
-  return normalized;
+  return toTraditionalTaiwan(normalized);
 }
 
 export function cleanDiscordMusicPlaylistTitle(title: string): string {
-  return title
+  return toTraditionalTaiwan(title
     .trim()
     .replace(/^【(?:音[乐樂]集|歌曲集|合集)】\s*/i, "")
     .replace(/\s*【[^】]*(?:Hi-?Res|完整版|中日(?:歌[词詞]|字幕)|無損|无损)[^】]*】\s*$/i, "")
     .replace(/\s{2,}/g, " ")
-    .trim();
+    .trim());
 }
 
 function cleanBilibiliEpisodeTitle(title: string): string {
-  return title.trim().replace(/^[“”"「『]+|[“”"」』]+$/g, "").trim();
+  return toTraditionalTaiwan(title.trim().replace(/^[“”"「『]+|[“”"」』]+$/g, "").trim());
 }
 
 export function parseBilibiliSeasonHtml(html: string, sourceUrl: string): DiscordMusicTrack[] {
@@ -217,7 +219,44 @@ async function resolveBilibiliSeason(url: string): Promise<DiscordMusicTrack[]> 
     signal: AbortSignal.timeout(15_000),
   });
   if (!response.ok) return [];
-  return parseBilibiliSeasonHtml(await response.text(), response.url);
+  const episodes = parseBilibiliSeasonHtml(await response.text(), response.url);
+  if (episodes.length < 2) return [];
+  const expanded = await Promise.all(episodes.map(async (episode) => {
+    try {
+      const api = await fetch(`https://api.bilibili.com/x/web-interface/view?bvid=${encodeURIComponent(episode.id ?? "")}`, {
+        headers: { "user-agent": "Mozilla/5.0 CyreneDiscordBot/1.0", referer: "https://www.bilibili.com/" },
+        signal: AbortSignal.timeout(15_000),
+      });
+      if (!api.ok) return [episode];
+      const payload = await api.json() as {
+        code?: number;
+        data?: { pages?: Array<{ page?: number; part?: string; duration?: number; first_frame?: string }> };
+      };
+      const pages = payload.code === 0 ? payload.data?.pages?.slice(0, MAX_PLAYLIST_ITEMS) ?? [] : [];
+      if (pages.length <= 1) return [episode];
+      const base = cleanDiscordMusicPlaylistTitle(episode.title)
+        .replace(/\s*歌曲全收[录錄](?:[（(].*?[）)])?\s*$/i, "")
+        .trim();
+      const category = /音[乐樂]集$/i.test(base) ? base : `${base} 音樂集`;
+      return pages.map((page, index) => ({
+        id: `${episode.id}-p${page.page ?? index + 1}`,
+        title: cleanBilibiliEpisodeTitle(page.part || `第 ${index + 1} 首`),
+        url: `${episode.url}${episode.url.includes("?") ? "&" : "?"}p=${page.page ?? index + 1}`,
+        thumbnail: page.first_frame?.replace(/^http:\/\//i, "https://") ?? episode.thumbnail,
+        playlistTitle: category,
+        duration: page.duration,
+        index: index + 1,
+        total: pages.length,
+      }));
+    } catch {
+      return [episode];
+    }
+  }));
+  const hasNestedCategory = expanded.some((tracks) => tracks.length > 1);
+  if (!hasNestedCategory) return episodes;
+  const requestedPart = requestedStartIndex(url);
+  if (requestedPart > 0) expanded[0] = expanded[0].slice(Math.min(requestedPart, Math.max(0, expanded[0].length - 1)));
+  return expanded.flat().slice(0, MAX_PLAYLIST_ITEMS);
 }
 
 export function normalizeYtDlpResult(result: YtDlpResult, sourceUrl: string): DiscordMusicTrack[] {
@@ -248,7 +287,10 @@ export async function resolveDiscordMusicTracks(url: string): Promise<DiscordMus
   const sourceHost = new URL(url).hostname;
   const isBilibili = /(^|\.)bilibili\.com$|^b23\.tv$/i.test(sourceHost);
   if (isBilibili) {
-    const season = await resolveBilibiliSeason(url).catch(() => []);
+    const season = await resolveBilibiliSeason(url).catch((err) => {
+      console.warn("[DiscordMusicSource] Bilibili 合集解析失敗，改用 yt-dlp:", err instanceof Error ? err.message : err);
+      return [];
+    });
     if (season.length > 1) return season;
   }
   const binary = await ensureYtDlpBinary();

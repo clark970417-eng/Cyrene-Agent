@@ -1,6 +1,6 @@
 // dispatcher 核心單元測試：sessionId hash + 限速
 import { describe, it, expect } from "vitest";
-import { makeSessionId, lookupOriginalSender, shouldSynthesizeChannelTts } from "./dispatcher";
+import { makeSessionId, lookupOriginalSender, normalizeChannelReplyText, shouldSynthesizeChannelTts } from "./dispatcher";
 
 describe("channels/dispatcher", () => {
   it("makeSessionId: 同 channel + 同 sender → 同 sessionId", () => {
@@ -54,5 +54,10 @@ describe("channels/dispatcher", () => {
     };
     expect(shouldSynthesizeChannelTts(msg, true)).toBe(true);
     expect(shouldSynthesizeChannelTts(msg, false)).toBe(false);
+  });
+
+  it("把所有外部渠道的簡體 AI 回覆轉成台灣繁體", () => {
+    expect(normalizeChannelReplyText("我支持这个视频，也会继续播放列表。"))
+      .toBe("我支援這個影片，也會繼續播放列表。");
   });
 });

@@ -61,20 +61,29 @@ describe("yt-dlp playlist normalization", () => {
     };
     const html = `<script>window.__INITIAL_STATE__=${JSON.stringify(state)};(function(){})</script>`;
     const tracks = parseBilibiliSeasonHtml(html, "https://www.bilibili.com/video/BVSECOND/");
-    expect(tracks.map((track) => track.title)).toEqual(["第二首串烧", "第三首串烧"]);
-    expect(tracks[0]).toMatchObject({ playlistTitle: "串烧推荐", index: 2, total: 3, duration: 120 });
+    expect(tracks.map((track) => track.title)).toEqual(["第二首串燒", "第三首串燒"]);
+    expect(tracks[0]).toMatchObject({ playlistTitle: "串燒推薦", index: 2, total: 3, duration: 120 });
     expect(tracks[0].thumbnail).toBe("https://img.example/2.jpg");
   });
 
   it("removes source and quality metadata from a playlist title", () => {
     expect(cleanDiscordMusicPlaylistTitle("【音乐集】 葬送的芙莉莲 歌曲全收录 【Hi-Res/完整版/中日歌词】"))
-      .toBe("葬送的芙莉莲 歌曲全收录");
+      .toBe("葬送的芙莉蓮 歌曲全收錄");
   });
 
   it("separates a repeated Bilibili playlist prefix from each song title", () => {
     const playlist = "【音乐集】葬送的芙莉莲 歌曲全收录【Hi-Res/完整版/中日歌词】";
     expect(cleanDiscordMusicTrackTitle(`${playlist} p02 【第一季 ED】 Anytime Anywhere`, playlist))
       .toBe("【第一季 ED】 Anytime Anywhere");
+  });
+
+  it("converts Simplified Chinese metadata without changing URLs", () => {
+    const [track] = normalizeYtDlpResult({
+      title: "串烧推荐",
+      entries: [{ title: "戴上耳机，感受顶级串烧", webpage_url: "https://www.bilibili.com/video/BVTEST" }],
+    }, "https://www.bilibili.com/video/BVTEST");
+    expect(track.title).toBe("戴上耳機，感受頂級串燒");
+    expect(track.url).toBe("https://www.bilibili.com/video/BVTEST");
   });
 
   it("continues a Bilibili multi-part video from the requested part", () => {
@@ -90,6 +99,19 @@ describe("yt-dlp playlist normalization", () => {
 
     expect(tracks.map((track) => track.title)).toEqual(["第 5 首", "第 6 首"]);
     expect(tracks[0]).toMatchObject({ index: 5, total: 6, duration: 64 });
+  });
+
+  it("does not truncate a large cross-category collection at 100 tracks", () => {
+    const tracks = normalizeYtDlpResult({
+      playlist_count: 120,
+      entries: Array.from({ length: 120 }, (_, index) => ({
+        id: `track-${index + 1}`,
+        title: `第 ${index + 1} 首`,
+        webpage_url: `https://www.bilibili.com/video/BVTEST?p=${index + 1}`,
+      })),
+    }, "https://www.bilibili.com/video/BVTEST");
+    expect(tracks).toHaveLength(120);
+    expect(tracks.at(-1)).toMatchObject({ title: "第 120 首", index: 120, total: 120 });
   });
 
   it("formats durations for queue messages", () => {
