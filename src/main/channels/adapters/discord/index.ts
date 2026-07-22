@@ -29,10 +29,12 @@ import { toTraditionalTaiwan } from "../../../utils/opencc";
 import {
   buildDiscordMusicPlayer,
   buildDiscordMusicQueue,
+  buildDiscordMusicHistory,
   buildDiscordMusicSearchResults,
   DISCORD_SLASH_COMMANDS,
   musicRequestFromButton,
 } from "./slash-commands";
+import { loadDiscordMusicHistory } from "./music-history";
 
 const LOG = "[DiscordAdapter]";
 
@@ -327,7 +329,7 @@ export class DiscordAdapter implements ChannelAdapter {
           "**Cyrene Discord 指令**",
           "`/chat` AI 對話　`/join` 語音聊天　`/leave` 離開",
           "`/play` 搜尋或播放連結　`/nowplaying` 播放器　`/previous`　`/pause`　`/resume`　`/skip`　`/stop`",
-          "`/queue`　`/remove`　`/clear`　`/volume`　`/repeat`　`/mode`　`/autoplay`",
+          "`/queue`　`/history`　`/remove`　`/clear`　`/volume`　`/repeat`　`/mode`　`/autoplay`",
           "`/status` 查看連線、延遲及目前播放狀態",
         ].join("\n"),
         flags: MessageFlags.Ephemeral,
@@ -347,6 +349,11 @@ export class DiscordAdapter implements ChannelAdapter {
       await interaction.reply(state?.active
         ? { ...buildDiscordMusicQueue(state), flags: MessageFlags.Ephemeral }
         : { content: "目前沒有正在播放的音樂，請先使用 `/play`。", flags: MessageFlags.Ephemeral });
+      return;
+    }
+
+    if (interaction.commandName === "history") {
+      await interaction.reply({ ...buildDiscordMusicHistory(await loadDiscordMusicHistory(25)), flags: MessageFlags.Ephemeral });
       return;
     }
 
@@ -432,6 +439,10 @@ export class DiscordAdapter implements ChannelAdapter {
       await interaction.reply(state?.active
         ? { ...buildDiscordMusicQueue(state), flags: MessageFlags.Ephemeral }
         : { content: "目前沒有正在播放的音樂。", flags: MessageFlags.Ephemeral });
+      return;
+    }
+    if (request.command === "history") {
+      await interaction.reply({ ...buildDiscordMusicHistory(await loadDiscordMusicHistory(25)), flags: MessageFlags.Ephemeral });
       return;
     }
     if (request.command === "refresh") {

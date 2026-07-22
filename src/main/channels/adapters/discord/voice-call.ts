@@ -28,6 +28,7 @@ import {
   type DiscordMusicTrack,
 } from "./music-source";
 import { recordDiscordMusicInNotebook } from "./notebook-activity";
+import { recordDiscordMusicHistory } from "./music-history";
 import { toTraditionalTaiwan } from "../../../utils/opencc";
 
 const LOG = "[DiscordVoice]";
@@ -182,8 +183,7 @@ export class DiscordVoiceCall {
       if (this.currentMusicTrack) this.musicQueue.unshift(this.currentMusicTrack);
       this.musicQueue.unshift(previous);
       this.currentMusicTrack = null;
-      this.skipMusicRepeat = true;
-      player.stop(true);
+      this.stopPlayerAndAdvance(true);
       return { ok: true, message: "已回到上一首。" };
     }
     if (command === "pause") {
@@ -198,8 +198,7 @@ export class DiscordVoiceCall {
     }
     if (command === "skip") {
       if (!this.currentMusicTrack) return { ok: false, message: "目前沒有正在播放的音樂。" };
-      this.skipMusicRepeat = true;
-      player.stop(true);
+      this.stopPlayerAndAdvance(true);
       return { ok: true, message: "已切換到下一首。" };
     }
     if (command === "stop") {
@@ -419,9 +418,8 @@ export class DiscordVoiceCall {
       this.speaking = false;
       console.error(LOG, "audio player error:", err);
       if (this.mode === "music") {
-        this.skipMusicRepeat = true;
         void this.sendMusicStatus(`播放失敗，將跳到下一首：${err.message}`);
-        player.stop(true);
+        this.stopPlayerAndAdvance(true);
       }
     });
     player.on(AudioPlayerStatus.Idle, () => {
@@ -528,16 +526,14 @@ export class DiscordVoiceCall {
       process.once("error", (err) => {
         if (this.musicProcess !== process || this.mode !== "music") return;
         console.error(LOG, "啟動 yt-dlp 失敗:", err);
-        this.skipMusicRepeat = true;
         void this.sendMusicStatus(`無法播放「${next.title}」，將跳到下一首：${this.musicErrorMessage(err)}`);
-        this.player?.stop(true);
+        this.stopPlayerAndAdvance(true);
       });
       process.once("close", (code) => {
         if (code === 0 || this.musicProcess !== process || this.mode !== "music") return;
         console.error(LOG, `yt-dlp 結束 (code=${code}):`, stderr);
-        this.skipMusicRepeat = true;
         void this.sendMusicStatus(`無法播放「${next.title}」，將跳到下一首：${this.musicErrorMessage(stderr)}`);
-        this.player?.stop(true);
+        this.stopPlayerAndAdvance(true);
       });
       this.speaking = true;
       const resource = createAudioResource(process.stdout, {
@@ -556,11 +552,14 @@ export class DiscordVoiceCall {
         playlistTitle: next.playlistTitle,
         companionName: this.activeUserName,
       });
+      void recordDiscordMusicHistory(next);
     } catch (err) {
       console.error(LOG, "開始播放失敗:", err);
-      await this.sendMusicStatus(`播放失敗：${this.musicErrorMessage(err)}`);
-      this.skipMusicRepeat = true;
-      this.player?.stop(true);
+      this.currentMusicTrack = null;
+      this.musicResource = null;
+      this.stopMusicProcess();
+      void this.sendMusicStatus(`播放失敗，將跳到下一首：${this.musicErrorMessage(err)}`);
+      this.stopPlayerAndAdvance(true);
     } finally {
       this.advancingMusic = false;
     }
@@ -570,6 +569,19 @@ export class DiscordVoiceCall {
     const process = this.musicProcess;
     this.musicProcess = null;
     if (process?.exitCode === null && !process.killed) process.kill("SIGKILL");
+  }
+
+  /**
+   * AudioPlayer 在 Idle／Buffering 初期呼叫 stop() 可能回傳 false，且不會再發出 Idle。
+   * 這時直接排程 advance，避免壞掉的單曲讓整份播放清單永久卡住。
+   */
+  private stopPlayerAndAdvance(skipRepeat: boolean): void {
+    if (skipRepeat) this.skipMusicRepeat = true;
+    const stopped = this.player?.stop(true) ?? false;
+    if (stopped || this.mode !== "music") return;
+    const skip = this.skipMusicRepeat;
+    this.skipMusicRepeat = false;
+    queueMicrotask(() => void this.advanceMusic(skip));
   }
 
   private shuffleTracks<T>(tracks: T[]): void {

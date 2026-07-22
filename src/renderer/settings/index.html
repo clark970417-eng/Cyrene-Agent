@@ -952,6 +952,45 @@
             </div>
           </div>
 
+          <div class="channels-card channels-card--spotify" id="channels-spotify-card" tabindex="-1">
+            <div class="channels-card__header spotify-card__header">
+              <div class="spotify-card__brand"><span class="spotify-card__logo">●</span><div><h2>Spotify Premium</h2><small>CONNECT PLAYER</small></div></div>
+              <span class="spotify-card__badge" id="channels-spotify-plan">尚未連線</span>
+            </div>
+            <div class="channels-card__body">
+              <div class="spotify-player" id="channels-spotify-player">
+                <div class="spotify-player__cover"><img id="channels-spotify-cover" alt="Spotify 專輯封面" hidden /><span>♫</span></div>
+                <div class="spotify-player__meta">
+                  <span id="channels-spotify-device">等待 Spotify 裝置</span>
+                  <strong id="channels-spotify-title">連線後即可控制手機或電腦上的 Spotify</strong>
+                  <small id="channels-spotify-artist">Premium 播放控制</small>
+                  <div class="spotify-player__progress"><i id="channels-spotify-progress"></i></div>
+                </div>
+              </div>
+              <div class="spotify-player__controls" aria-label="Spotify 播放控制">
+                <button type="button" id="channels-spotify-previous" title="上一首" disabled>│◀</button>
+                <button type="button" id="channels-spotify-toggle" class="spotify-player__primary" title="播放或暫停" disabled>▶</button>
+                <button type="button" id="channels-spotify-next" title="下一首" disabled>▶│</button>
+                <select id="channels-spotify-device-select" class="form-input" aria-label="Spotify 播放裝置" disabled><option value="">沒有可用裝置</option></select>
+              </div>
+              <label class="spotify-player__volume" for="channels-spotify-volume"><span>音量</span><input type="range" id="channels-spotify-volume" min="0" max="100" value="50" disabled /><output id="channels-spotify-volume-value">50%</output></label>
+
+              <div class="spotify-connection-divider"><span>開發者連線</span></div>
+              <p class="channels-card__hint">使用 Spotify 官方 OAuth，只要求讀取歌單與控制播放。Client Secret 與授權 Token 會透過 macOS 鑰匙串加密保存。</p>
+              <div class="spotify-credentials">
+                <div class="form-row"><label class="form-label" for="channels-spotify-client-id">Client ID</label><input type="text" id="channels-spotify-client-id" class="form-input form-input--wide" autocomplete="off" /></div>
+                <div class="form-row"><label class="form-label" for="channels-spotify-client-secret">Client Secret</label><div class="form-input-with-action"><input type="password" id="channels-spotify-client-secret" class="form-input form-input--wide" autocomplete="off" /><button type="button" class="btn-reveal" id="channels-spotify-secret-reveal" title="顯示或隱藏">👁</button></div></div>
+              </div>
+              <p class="form-hint">Redirect URI：<code>http://127.0.0.1:53854/spotify/callback</code></p>
+              <div class="channels-card__actions">
+                <button type="button" class="btn-secondary btn-spotify" id="channels-spotify-connect">連接 Spotify</button>
+                <button type="button" class="btn-secondary" id="channels-spotify-disconnect" disabled>解除連線</button>
+                <a class="btn-secondary spotify-portal-link" href="https://developer.spotify.com/dashboard" target="_blank" rel="noopener">開啟 Developer Dashboard ↗</a>
+              </div>
+              <div class="channels-feedback" id="channels-spotify-feedback" aria-live="polite"></div>
+            </div>
+          </div>
+
           <div class="channels-card channels-card--discord" id="channels-discord-card" tabindex="-1">
             <div class="channels-card__header">
               <h2>Discord</h2>
@@ -1064,12 +1103,16 @@
 
                   <div class="discord-player__library">
                     <div class="discord-player__list-head">
-                      <div><span class="discord-identity__eyebrow">PLAYLIST</span><h4 id="channels-discord-music-playlist-title">播放清單</h4></div>
-                      <button type="button" id="channels-discord-music-clear">清空待播</button>
+                      <div><span class="discord-identity__eyebrow" id="channels-discord-music-library-kind">PLAYLIST</span><h4 id="channels-discord-music-playlist-title">播放清單</h4></div>
+                      <div class="discord-player__list-actions">
+                        <button type="button" id="channels-discord-music-history-toggle">播放歷史</button>
+                        <button type="button" id="channels-discord-music-clear">清空待播</button>
+                      </div>
                     </div>
                     <ol id="channels-discord-music-queue" class="discord-player__queue">
                       <li class="is-empty">播放清單會和 Discord 即時同步</li>
                     </ol>
+                    <ol id="channels-discord-music-history" class="discord-player__queue" hidden></ol>
                   </div>
                   <p class="channels-feedback" id="channels-discord-music-feedback" aria-live="polite"></p>
                 </section>

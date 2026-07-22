@@ -111,4 +111,17 @@ describe("channels/settings-store", () => {
     expect(after.discord.botToken).toBe(encryptedBefore);
     expect(after.discord.allowedUserIds).toEqual(["798893182883463179"]);
   });
+
+  it("Spotify: 加密保存 Client Secret 與 Refresh Token，並允許解除授權", () => {
+    saveChannelsSettings({ spotify: { enabled: true, clientId: "spotify-client", clientSecret: "spotify-secret", refreshToken: "spotify-refresh" } });
+    const p = path.join(os.tmpdir(), "channels-settings.json");
+    const raw = fs.readFileSync(p, "utf8");
+    expect(raw).toContain("spotify-client");
+    expect(raw).not.toContain("spotify-secret");
+    expect(raw).not.toContain("spotify-refresh");
+    expect(loadChannelsSettings().spotify.refreshToken).toBe("spotify-refresh");
+    saveChannelsSettings({ spotify: { enabled: false, refreshToken: "" } });
+    expect(loadChannelsSettings().spotify.refreshToken).toBe("");
+    expect(loadChannelsSettings().spotify.clientSecret).toBe("spotify-secret");
+  });
 });

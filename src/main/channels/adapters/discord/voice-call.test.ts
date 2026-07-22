@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { DiscordVoiceCall, formatDiscordMusicActivity, parseDiscordVoiceCommand, stereo48kToMono16k } from "./voice-call";
 
 describe("Discord voice commands", () => {
@@ -50,6 +50,25 @@ describe("Discord music presence", () => {
 });
 
 describe("Discord desktop music state", () => {
+  it("advances directly when a failed idle player cannot emit another Idle event", async () => {
+    const voice = new DiscordVoiceCall({} as never, () => ({ enabled: true } as never), async () => null);
+    const internal = voice as unknown as {
+      mode: "music";
+      player: { stop: ReturnType<typeof vi.fn> };
+      advanceMusic: ReturnType<typeof vi.fn>;
+      stopPlayerAndAdvance: (skipRepeat: boolean) => void;
+    };
+    internal.mode = "music";
+    internal.player = { stop: vi.fn(() => false) };
+    internal.advanceMusic = vi.fn(async () => undefined);
+
+    internal.stopPlayerAndAdvance(true);
+    await new Promise<void>((resolve) => queueMicrotask(() => resolve()));
+
+    expect(internal.player.stop).toHaveBeenCalledWith(true);
+    expect(internal.advanceMusic).toHaveBeenCalledWith(true);
+  });
+
   it("toggles automatic recommendations for an active session", async () => {
     const voice = new DiscordVoiceCall({} as never, () => ({ enabled: true } as never), async () => null);
     const internal = voice as unknown as Record<string, unknown>;

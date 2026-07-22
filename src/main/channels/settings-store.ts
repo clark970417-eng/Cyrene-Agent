@@ -168,6 +168,15 @@ export interface DiscordChannelConfig extends ChannelRuntimeConfig {
   activityText?: string;
 }
 
+/** Spotify Premium / Web API OAuth 設定。私密欄位一律加密落盤。 */
+export interface SpotifyConfig {
+  enabled: boolean;
+  clientId?: string;
+  clientSecret?: string;
+  refreshToken?: string;
+  accountName?: string;
+}
+
 /** 給上層用的明文 AppSecret 讀取器 */
 export function decryptFeishuSecret(cfg: FeishuChannelConfig | undefined): string {
   return decryptField(cfg?.appSecret ?? "");
@@ -177,6 +186,7 @@ export interface ChannelsSettings {
   wechat: WechatChannelConfig;
   feishu: FeishuChannelConfig;
   discord: DiscordChannelConfig;
+  spotify: SpotifyConfig;
   /** 入站 HTTP server 綁定的端口。0 = 隨機空閒。 */
   inboundPort: number;
   /** HMAC 共享密鑰。啟動時若為空則自動生成。 */
@@ -199,6 +209,7 @@ const DEFAULT_SETTINGS: ChannelsSettings = {
   wechat: { enabled: false },
   feishu: { enabled: false },
   discord: { enabled: false, requireMention: true, voiceEnabled: true },
+  spotify: { enabled: false },
   inboundPort: 0,
   sharedSecret: "",
   rateLimitPerUser: 10,
@@ -227,6 +238,7 @@ function normalize(input: Partial<ChannelsSettings> | null | undefined): Channel
   const w: Partial<WechatChannelConfig> | undefined = input?.wechat;
   const f: Partial<FeishuChannelConfig> | undefined = input?.feishu;
   const d: Partial<DiscordChannelConfig> | undefined = input?.discord;
+  const s: Partial<SpotifyConfig> | undefined = input?.spotify;
   const safeIds = (value: unknown): string[] => Array.isArray(value)
     ? [...new Set(value.filter((v): v is string => typeof v === "string").map((v) => v.trim()).filter(Boolean))]
     : [];
@@ -266,6 +278,13 @@ function normalize(input: Partial<ChannelsSettings> | null | undefined): Channel
         : {}),
       ...(typeof d?.activityText === "string" ? { activityText: d.activityText.slice(0, 128) } : {}),
     },
+    spotify: {
+      enabled: safeBool(s?.enabled, false),
+      clientId: typeof s?.clientId === "string" ? s.clientId.trim() : undefined,
+      clientSecret: typeof s?.clientSecret === "string" ? s.clientSecret : undefined,
+      refreshToken: typeof s?.refreshToken === "string" ? s.refreshToken : undefined,
+      accountName: typeof s?.accountName === "string" ? s.accountName.slice(0, 160) : undefined,
+    },
     inboundPort: safeNum(input?.inboundPort, 0, 0, 65535),
     sharedSecret: typeof input?.sharedSecret === "string" ? input.sharedSecret : "",
     rateLimitPerUser: safeNum(input?.rateLimitPerUser, 10, 1, 1000),
@@ -293,6 +312,8 @@ export function loadChannelsSettings(): ChannelsSettings {
       loaded.feishu.appSecret = decryptField(loaded.feishu.appSecret);
     }
     if (loaded.discord.botToken) loaded.discord.botToken = decryptField(loaded.discord.botToken);
+    if (loaded.spotify.clientSecret) loaded.spotify.clientSecret = decryptField(loaded.spotify.clientSecret);
+    if (loaded.spotify.refreshToken) loaded.spotify.refreshToken = decryptField(loaded.spotify.refreshToken);
     return loaded;
   } catch {
     return { ...DEFAULT_SETTINGS };
@@ -317,6 +338,7 @@ export function saveChannelsSettings(patch: Partial<ChannelsSettings>): Channels
   if (patch.wechat) merged.wechat = { ...existing.wechat, ...patch.wechat };
   if (patch.feishu) merged.feishu = { ...existing.feishu, ...patch.feishu };
   if (patch.discord) merged.discord = { ...existing.discord, ...patch.discord };
+  if (patch.spotify) merged.spotify = { ...existing.spotify, ...patch.spotify };
 
   // Partial save 沒帶私密字段時，直接沿用磁碟密文，不能依賴「解密後再加密」。
   // macOS Keychain 暫時不可用、renderer 延遲自動保存等情況下，load 可能拿到空字串；
@@ -326,6 +348,12 @@ export function saveChannelsSettings(patch: Partial<ChannelsSettings>): Channels
   }
   if (!patch.discord?.botToken && rawExisting.discord?.botToken) {
     merged.discord = { ...merged.discord!, botToken: rawExisting.discord.botToken };
+  }
+  if (!(patch.spotify && Object.prototype.hasOwnProperty.call(patch.spotify, "clientSecret")) && rawExisting.spotify?.clientSecret) {
+    merged.spotify = { ...merged.spotify!, clientSecret: rawExisting.spotify.clientSecret };
+  }
+  if (!(patch.spotify && Object.prototype.hasOwnProperty.call(patch.spotify, "refreshToken")) && rawExisting.spotify?.refreshToken) {
+    merged.spotify = { ...merged.spotify!, refreshToken: rawExisting.spotify.refreshToken };
   }
 
   // 私密字段加密邊界：UI 傳來的是明文，寫盤前要 wrap
@@ -340,6 +368,12 @@ export function saveChannelsSettings(patch: Partial<ChannelsSettings>): Channels
     const v = merged.discord.botToken;
     if (!v.startsWith(ENC_PREFIX) && !v.startsWith(OBF_PREFIX) && !v.startsWith(PLAIN_PREFIX)) {
       merged.discord.botToken = encryptField(v);
+    }
+  }
+  for (const key of ["clientSecret", "refreshToken"] as const) {
+    const value = merged.spotify?.[key];
+    if (typeof value === "string" && value && !value.startsWith(ENC_PREFIX) && !value.startsWith(OBF_PREFIX) && !value.startsWith(PLAIN_PREFIX)) {
+      merged.spotify = { ...merged.spotify!, [key]: encryptField(value) };
     }
   }
 
@@ -360,6 +394,11 @@ export function saveChannelsSettings(patch: Partial<ChannelsSettings>): Channels
       ...final.discord,
       botToken: decryptField(final.discord.botToken ?? ""),
     },
+    spotify: {
+      ...final.spotify,
+      clientSecret: decryptField(final.spotify.clientSecret ?? ""),
+      refreshToken: decryptField(final.spotify.refreshToken ?? ""),
+    },
   };
   return out;
 }
@@ -369,6 +408,7 @@ export type ChannelConfigPatch = Partial<{
   wechat: Partial<WechatChannelConfig>;
   feishu: Partial<FeishuChannelConfig>;
   discord: Partial<DiscordChannelConfig>;
+  spotify: Partial<SpotifyConfig>;
   inboundPort: number;
   sharedSecret: string;
   rateLimitPerUser: number;

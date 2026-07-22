@@ -277,10 +277,16 @@ export const IPC = {
   CHANNELS_DISCORD_TEST_CONNECTION: "channels:discord:test-connection",
   CHANNELS_DISCORD_GET_PROFILE: "channels:discord:get-profile",
   CHANNELS_DISCORD_GET_MUSIC_STATE: "channels:discord:get-music-state",
+  CHANNELS_DISCORD_GET_MUSIC_HISTORY: "channels:discord:get-music-history",
   CHANNELS_DISCORD_CONTROL_MUSIC: "channels:discord:control-music",
   CHANNELS_DISCORD_UPDATE_PROFILE: "channels:discord:update-profile",
   CHANNELS_DISCORD_PICK_AVATAR: "channels:discord:pick-avatar",
   CHANNELS_DISCORD_PICK_BANNER: "channels:discord:pick-banner",
+  // Spotify Premium / Connect
+  CHANNELS_SPOTIFY_AUTHORIZE: "channels:spotify:authorize",
+  CHANNELS_SPOTIFY_GET_STATUS: "channels:spotify:get-status",
+  CHANNELS_SPOTIFY_CONTROL: "channels:spotify:control",
+  CHANNELS_SPOTIFY_DISCONNECT: "channels:spotify:disconnect",
   // Phase 3.4：消息日誌
   CHANNELS_LOG_GET: "channels:log:get",
   CHANNELS_LOG_CLEAR: "channels:log:clear",

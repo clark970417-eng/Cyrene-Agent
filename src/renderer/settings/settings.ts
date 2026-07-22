@@ -411,10 +411,15 @@ interface SettingsApi {
   testVision?: (config: { baseUrl: string; apiKey: string; model: string }) => Promise<{ ok: boolean; latency: number; sample?: string; error?: string }>;
   channelsDiscordGetProfile: () => Promise<DiscordBotProfile>;
   channelsDiscordGetMusicState: () => Promise<DiscordMusicState>;
+  channelsDiscordGetMusicHistory: () => Promise<DiscordMusicHistoryEntry[]>;
   channelsDiscordControlMusic: (input: DiscordMusicControlInput) => Promise<{ ok: boolean; message: string; state?: DiscordMusicState }>;
   channelsDiscordUpdateProfile: (profile: { username: string; activityText: string; status: string; avatarPath?: string; bannerPath?: string }) => Promise<{ ok: boolean; profile?: DiscordBotProfile; error?: string }>;
   channelsDiscordPickAvatar: () => Promise<string | null>;
   channelsDiscordPickBanner: () => Promise<string | null>;
+  channelsSpotifyAuthorize: (input: { clientId?: string; clientSecret?: string }) => Promise<ChannelConnectionResult>;
+  channelsSpotifyGetStatus: () => Promise<SpotifyPlaybackStatus>;
+  channelsSpotifyControl: (input: { command: string; value?: number; deviceId?: string }) => Promise<{ ok: boolean; message: string }>;
+  channelsSpotifyDisconnect: () => Promise<ChannelConnectionResult>;
   channelsGetConfig: () => Promise<ChannelsPreviewConfig>;
   channelsSaveConfig: (patch: unknown) => Promise<unknown>;
   channelsList: () => Promise<unknown[]>;
@@ -494,6 +499,25 @@ interface DiscordMusicControlInput {
   value?: number;
 }
 
+interface DiscordMusicHistoryEntry {
+  id: string;
+  title: string;
+  url: string;
+  thumbnail?: string;
+  playlistTitle?: string;
+  playedAt: string;
+}
+
+interface SpotifyPlaybackStatus {
+  configured: boolean;
+  connected: boolean;
+  accountName?: string;
+  product?: string;
+  error?: string;
+  playback?: { active: boolean; paused: boolean; progressMs: number; durationMs: number; title?: string; artists?: string; album?: string; imageUrl?: string; deviceName?: string; volume?: number };
+  devices: Array<{ id: string; name: string; type: string; active: boolean; volume?: number }>;
+}
+
 interface ChannelsPreviewConfig {
   wechat: { enabled: boolean };
   feishu: { enabled: boolean; appId?: string; appSecret?: string };
@@ -506,6 +530,7 @@ interface ChannelsPreviewConfig {
     requireMention?: boolean;
     voiceEnabled?: boolean;
   };
+  spotify: { enabled: boolean; clientId?: string; clientSecret?: string; refreshToken?: string; accountName?: string };
   rateLimitPerUser: number;
   rateLimitPerChannel: number;
   ttsEnabled: boolean;
@@ -687,14 +712,20 @@ if (!window.settings) {
     listMcpServers: async () => [],
     channelsDiscordGetProfile: async () => ({ connected: false, guildCount: 0, guilds: [], voiceActive: false }),
     channelsDiscordGetMusicState: async () => ({ active: false, paused: false, current: null, queue: [], volume: 100, repeat: "off", shuffle: false, autoplay: false, elapsed: 0 }),
+    channelsDiscordGetMusicHistory: async () => [],
     channelsDiscordControlMusic: async () => ({ ok: false, message: "settings api unavailable" }),
     channelsDiscordUpdateProfile: async () => ({ ok: false, error: "settings api unavailable" }),
     channelsDiscordPickAvatar: async () => null,
     channelsDiscordPickBanner: async () => null,
+    channelsSpotifyAuthorize: async () => ({ ok: false, error: "settings api unavailable" }),
+    channelsSpotifyGetStatus: async () => ({ configured: false, connected: false, devices: [] }),
+    channelsSpotifyControl: async () => ({ ok: false, message: "settings api unavailable" }),
+    channelsSpotifyDisconnect: async () => ({ ok: false, error: "settings api unavailable" }),
     channelsGetConfig: async () => ({
       wechat: { enabled: false },
       feishu: { enabled: false },
       discord: { enabled: false, requireMention: true, voiceEnabled: true },
+      spotify: { enabled: false },
       rateLimitPerUser: 10,
       rateLimitPerChannel: 100,
       ttsEnabled: true,
@@ -2840,7 +2871,28 @@ const channelsDiscordMusicVolumeEl = document.getElementById("channels-discord-m
 const channelsDiscordMusicVolumeValueEl = document.getElementById("channels-discord-music-volume-value") as HTMLOutputElement | null;
 const channelsDiscordMusicQueueEl = document.getElementById("channels-discord-music-queue");
 const channelsDiscordMusicPlaylistTitleEl = document.getElementById("channels-discord-music-playlist-title");
+const channelsDiscordMusicLibraryKindEl = document.getElementById("channels-discord-music-library-kind");
+const channelsDiscordMusicHistoryToggleBtn = document.getElementById("channels-discord-music-history-toggle") as HTMLButtonElement | null;
+const channelsDiscordMusicHistoryEl = document.getElementById("channels-discord-music-history");
 const channelsDiscordMusicFeedbackEl = document.getElementById("channels-discord-music-feedback");
+const channelsSpotifyPlanEl = document.getElementById("channels-spotify-plan");
+const channelsSpotifyCoverEl = document.getElementById("channels-spotify-cover") as HTMLImageElement | null;
+const channelsSpotifyDeviceEl = document.getElementById("channels-spotify-device");
+const channelsSpotifyTitleEl = document.getElementById("channels-spotify-title");
+const channelsSpotifyArtistEl = document.getElementById("channels-spotify-artist");
+const channelsSpotifyProgressEl = document.getElementById("channels-spotify-progress") as HTMLElement | null;
+const channelsSpotifyPreviousBtn = document.getElementById("channels-spotify-previous") as HTMLButtonElement | null;
+const channelsSpotifyToggleBtn = document.getElementById("channels-spotify-toggle") as HTMLButtonElement | null;
+const channelsSpotifyNextBtn = document.getElementById("channels-spotify-next") as HTMLButtonElement | null;
+const channelsSpotifyDeviceSelectEl = document.getElementById("channels-spotify-device-select") as HTMLSelectElement | null;
+const channelsSpotifyVolumeEl = document.getElementById("channels-spotify-volume") as HTMLInputElement | null;
+const channelsSpotifyVolumeValueEl = document.getElementById("channels-spotify-volume-value") as HTMLOutputElement | null;
+const channelsSpotifyClientIdEl = document.getElementById("channels-spotify-client-id") as HTMLInputElement | null;
+const channelsSpotifyClientSecretEl = document.getElementById("channels-spotify-client-secret") as HTMLInputElement | null;
+const channelsSpotifySecretRevealBtn = document.getElementById("channels-spotify-secret-reveal") as HTMLButtonElement | null;
+const channelsSpotifyConnectBtn = document.getElementById("channels-spotify-connect") as HTMLButtonElement | null;
+const channelsSpotifyDisconnectBtn = document.getElementById("channels-spotify-disconnect") as HTMLButtonElement | null;
+const channelsSpotifyFeedbackEl = document.getElementById("channels-spotify-feedback");
 // 微信按鈕
 const channelsWechatLoginBtn = document.getElementById("channels-wechat-login");
 const channelsWechatRestartBtn = document.getElementById("channels-wechat-restart");
@@ -2855,6 +2907,9 @@ let pendingDiscordBannerPath: string | undefined;
 let discordMusicState: DiscordMusicState = { active: false, paused: false, current: null, queue: [], volume: 100, repeat: "off", shuffle: false, autoplay: false, elapsed: 0 };
 let discordMusicRefreshTimer: number | null = null;
 let discordMusicVolumeTimer: number | null = null;
+let spotifyStatus: SpotifyPlaybackStatus = { configured: false, connected: false, devices: [] };
+let spotifyRefreshTimer: number | null = null;
+let spotifyVolumeTimer: number | null = null;
 
 function setDiscordProfileFeedback(kind: "info" | "ok" | "err", message: string): void {
   if (!channelsDiscordProfileFeedbackEl) return;
@@ -2975,7 +3030,10 @@ function renderDiscordMusic(state: DiscordMusicState): void {
   }
   if (channelsDiscordMusicTitleEl) channelsDiscordMusicTitleEl.textContent = current?.title ?? "等待你在 Discord 使用 /play";
   if (channelsDiscordMusicPlaylistTitleEl) {
-    channelsDiscordMusicPlaylistTitleEl.textContent = current?.playlistTitle ?? state.queue[0]?.playlistTitle ?? "播放清單";
+    const showingHistory = channelsDiscordMusicHistoryEl ? !channelsDiscordMusicHistoryEl.hidden : false;
+    channelsDiscordMusicPlaylistTitleEl.textContent = showingHistory
+      ? "播放歷史"
+      : current?.playlistTitle ?? state.queue[0]?.playlistTitle ?? "播放清單";
     channelsDiscordMusicPlaylistTitleEl.title = channelsDiscordMusicPlaylistTitleEl.textContent;
   }
   if (channelsDiscordMusicToggleBtn) {
@@ -3045,6 +3103,45 @@ async function refreshDiscordMusic(): Promise<void> {
   }
 }
 
+async function toggleDiscordMusicHistory(): Promise<void> {
+  if (!channelsDiscordMusicHistoryEl || !channelsDiscordMusicQueueEl || !channelsDiscordMusicHistoryToggleBtn) return;
+  const showHistory = channelsDiscordMusicHistoryEl.hidden;
+  channelsDiscordMusicHistoryEl.hidden = !showHistory;
+  channelsDiscordMusicQueueEl.hidden = showHistory;
+  channelsDiscordMusicHistoryToggleBtn.textContent = showHistory ? "目前歌單" : "播放歷史";
+  channelsDiscordMusicHistoryToggleBtn.setAttribute("aria-pressed", String(showHistory));
+  if (channelsDiscordMusicLibraryKindEl) channelsDiscordMusicLibraryKindEl.textContent = showHistory ? "HISTORY" : "PLAYLIST";
+  if (channelsDiscordMusicPlaylistTitleEl && showHistory) {
+    channelsDiscordMusicPlaylistTitleEl.textContent = "播放歷史";
+    channelsDiscordMusicPlaylistTitleEl.title = "播放歷史";
+  }
+  if (!showHistory) {
+    renderDiscordMusic(discordMusicState);
+    return;
+  }
+  channelsDiscordMusicHistoryEl.replaceChildren();
+  const history = await window.settings.channelsDiscordGetMusicHistory();
+  if (!history.length) {
+    const empty = document.createElement("li");
+    empty.className = "is-empty";
+    empty.textContent = "歌曲或影片開始播放後會記錄在這裡";
+    channelsDiscordMusicHistoryEl.appendChild(empty);
+    return;
+  }
+  for (const entry of history) {
+    const item = document.createElement("li");
+    const icon = document.createElement("span");
+    icon.textContent = "♪";
+    const title = document.createElement("strong");
+    title.textContent = entry.title;
+    title.title = entry.url;
+    const time = document.createElement("small");
+    time.textContent = new Intl.DateTimeFormat("zh-TW", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(entry.playedAt));
+    item.append(icon, title, time);
+    channelsDiscordMusicHistoryEl.appendChild(item);
+  }
+}
+
 async function controlDiscordMusic(input: DiscordMusicControlInput, quiet = false): Promise<void> {
   try {
     const result = await window.settings.channelsDiscordControlMusic(input);
@@ -3053,6 +3150,59 @@ async function controlDiscordMusic(input: DiscordMusicControlInput, quiet = fals
   } catch (err) {
     setDiscordMusicFeedback("err", err instanceof Error ? err.message : String(err));
   }
+}
+
+function setSpotifyFeedback(kind: "info" | "ok" | "err", message: string): void {
+  if (!channelsSpotifyFeedbackEl) return;
+  channelsSpotifyFeedbackEl.textContent = message;
+  channelsSpotifyFeedbackEl.className = "channels-feedback";
+  channelsSpotifyFeedbackEl.classList.add(kind === "ok" ? "channels-feedback--ok" : kind === "err" ? "channels-feedback--err" : "channels-feedback--info");
+}
+
+function renderSpotify(status: SpotifyPlaybackStatus): void {
+  spotifyStatus = status;
+  const playback = status.playback;
+  const usable = status.connected && status.devices.length > 0;
+  if (channelsSpotifyPlanEl) {
+    channelsSpotifyPlanEl.textContent = status.connected ? `${status.accountName ?? "已連線"}${status.product ? ` · ${status.product}` : ""}` : "尚未連線";
+    channelsSpotifyPlanEl.classList.toggle("is-connected", status.connected);
+  }
+  if (channelsSpotifyConnectBtn) channelsSpotifyConnectBtn.textContent = status.connected ? "重新授權" : "連接 Spotify";
+  if (channelsSpotifyDisconnectBtn) channelsSpotifyDisconnectBtn.disabled = !status.connected;
+  for (const button of [channelsSpotifyPreviousBtn, channelsSpotifyToggleBtn, channelsSpotifyNextBtn]) if (button) button.disabled = !usable;
+  if (channelsSpotifyVolumeEl) channelsSpotifyVolumeEl.disabled = !usable;
+  if (channelsSpotifyDeviceSelectEl) {
+    const selected = channelsSpotifyDeviceSelectEl.value;
+    channelsSpotifyDeviceSelectEl.replaceChildren();
+    if (!status.devices.length) channelsSpotifyDeviceSelectEl.add(new Option("請先開啟 Spotify 播放器", ""));
+    else for (const device of status.devices) channelsSpotifyDeviceSelectEl.add(new Option(`${device.active ? "● " : ""}${device.name} · ${device.type}`, device.id));
+    channelsSpotifyDeviceSelectEl.disabled = !status.connected || !status.devices.length;
+    const active = status.devices.find((device) => device.active)?.id;
+    channelsSpotifyDeviceSelectEl.value = status.devices.some((device) => device.id === selected) ? selected : (active ?? status.devices[0]?.id ?? "");
+  }
+  if (channelsSpotifyTitleEl) channelsSpotifyTitleEl.textContent = playback?.title ?? (status.connected ? "Spotify 已連線，請先在任一裝置開始播放" : "連線後即可控制手機或電腦上的 Spotify");
+  if (channelsSpotifyArtistEl) channelsSpotifyArtistEl.textContent = playback?.artists ? `${playback.artists}${playback.album ? ` · ${playback.album}` : ""}` : "Premium 播放控制";
+  if (channelsSpotifyDeviceEl) channelsSpotifyDeviceEl.textContent = playback?.deviceName ?? (status.connected ? "目前沒有作用中的播放器" : "等待 Spotify 裝置");
+  if (channelsSpotifyToggleBtn) channelsSpotifyToggleBtn.textContent = playback?.active && !playback.paused ? "Ⅱ" : "▶";
+  if (channelsSpotifyProgressEl) channelsSpotifyProgressEl.style.width = playback?.durationMs ? `${Math.min(100, playback.progressMs / playback.durationMs * 100)}%` : "0%";
+  if (channelsSpotifyCoverEl) {
+    if (playback?.imageUrl) { if (channelsSpotifyCoverEl.src !== playback.imageUrl) channelsSpotifyCoverEl.src = playback.imageUrl; channelsSpotifyCoverEl.hidden = false; }
+    else { channelsSpotifyCoverEl.hidden = true; channelsSpotifyCoverEl.removeAttribute("src"); }
+  }
+  if (channelsSpotifyVolumeEl && document.activeElement !== channelsSpotifyVolumeEl && playback?.volume != null) channelsSpotifyVolumeEl.value = String(playback.volume);
+  if (channelsSpotifyVolumeValueEl && document.activeElement !== channelsSpotifyVolumeEl) channelsSpotifyVolumeValueEl.value = `${playback?.volume ?? Number(channelsSpotifyVolumeEl?.value ?? 50)}%`;
+  if (status.error) setSpotifyFeedback("err", status.error);
+}
+
+async function refreshSpotify(): Promise<void> {
+  try { renderSpotify(await window.settings.channelsSpotifyGetStatus()); }
+  catch (err) { setSpotifyFeedback("err", err instanceof Error ? err.message : String(err)); }
+}
+
+async function controlSpotifyUi(command: string, value?: number): Promise<void> {
+  const result = await window.settings.channelsSpotifyControl({ command, value, deviceId: channelsSpotifyDeviceSelectEl?.value || undefined });
+  if (!result.ok) setSpotifyFeedback("err", result.message);
+  await refreshSpotify();
 }
 
 function renderChannelStatus(el: HTMLElement | null, phase: string, message?: string): void {
@@ -3072,7 +3222,7 @@ function renderChannelStatus(el: HTMLElement | null, phase: string, message?: st
 
 async function loadChannelsPanel(): Promise<void> {
   if (channelsInitialized) {
-    await Promise.all([refreshDiscordProfile(), refreshDiscordMusic()]);
+    await Promise.all([refreshDiscordProfile(), refreshDiscordMusic(), refreshSpotify()]);
     return;
   }
   channelsInitialized = true;
@@ -3105,16 +3255,22 @@ async function loadChannelsPanel(): Promise<void> {
     if (channelsDiscordUserIdsEl) channelsDiscordUserIdsEl.value = (cfg.discord.allowedUserIds ?? []).join(", ");
     if (channelsDiscordRequireMentionEl) channelsDiscordRequireMentionEl.checked = cfg.discord.requireMention !== false;
     if (channelsDiscordVoiceEnabledEl) channelsDiscordVoiceEnabledEl.checked = cfg.discord.voiceEnabled !== false;
+    if (channelsSpotifyClientIdEl) channelsSpotifyClientIdEl.value = cfg.spotify.clientId ?? "";
+    if (channelsSpotifyClientSecretEl) {
+      channelsSpotifyClientSecretEl.value = "";
+      channelsSpotifyClientSecretEl.placeholder = cfg.spotify.clientSecret ? "已加密保存（輸入新值會覆蓋）" : "從 Spotify Developer Dashboard 複製";
+    }
 
     // 拉一次渠道狀態
     const status = (await window.settings.channelsGetStatus()) as Record<string, { phase: string; message?: string }>;
     renderChannelStatus(channelsWechatStatusEl, status.wechat?.phase ?? "offline", status.wechat?.message);
     renderChannelStatus(channelsFeishuStatusEl, status.feishu?.phase ?? "offline", status.feishu?.message);
     renderChannelStatus(channelsDiscordStatusEl, status.discord?.phase ?? "offline", status.discord?.message);
-    await Promise.all([refreshDiscordProfile(), refreshDiscordMusic()]);
+    await Promise.all([refreshDiscordProfile(), refreshDiscordMusic(), refreshSpotify()]);
     if (discordMusicRefreshTimer == null) {
       discordMusicRefreshTimer = window.setInterval(() => void refreshDiscordMusic(), 1000);
     }
+    if (spotifyRefreshTimer == null) spotifyRefreshTimer = window.setInterval(() => void refreshSpotify(), 3000);
     // Phase 3.4：拉一次消息日誌
     void refreshChannelsLog();
   } catch (err) {
@@ -3198,6 +3354,41 @@ async function loadChannelsPanel(): Promise<void> {
     } catch (err) {
       setFeishuFeedback("err", err instanceof Error ? err.message : String(err));
     }
+  });
+
+  // ===== Spotify Premium / Connect =====
+  channelsSpotifySecretRevealBtn?.addEventListener("click", () => {
+    if (channelsSpotifyClientSecretEl) channelsSpotifyClientSecretEl.type = channelsSpotifyClientSecretEl.type === "password" ? "text" : "password";
+  });
+  channelsSpotifyConnectBtn?.addEventListener("click", async () => {
+    const clientId = channelsSpotifyClientIdEl?.value.trim() ?? "";
+    if (!clientId) return setSpotifyFeedback("err", "請輸入 Spotify Client ID");
+    channelsSpotifyConnectBtn.disabled = true;
+    setSpotifyFeedback("info", "正在開啟 Spotify 授權頁…");
+    try {
+      const result = await window.settings.channelsSpotifyAuthorize({ clientId, clientSecret: channelsSpotifyClientSecretEl?.value || undefined });
+      if (!result.ok) throw new Error(result.error || "Spotify 授權無法啟動");
+      if (channelsSpotifyClientSecretEl?.value) { channelsSpotifyClientSecretEl.value = ""; channelsSpotifyClientSecretEl.placeholder = "已加密保存（輸入新值會覆蓋）"; }
+      setSpotifyFeedback("info", result.message || "請在瀏覽器完成 Spotify 授權");
+    } catch (err) { setSpotifyFeedback("err", err instanceof Error ? err.message : String(err)); }
+    finally { channelsSpotifyConnectBtn.disabled = false; }
+  });
+  channelsSpotifyDisconnectBtn?.addEventListener("click", async () => {
+    const confirmed = await showModal({ title: "解除 Spotify 連線？", message: "Cyrene 會刪除本機保存的 Spotify 授權；之後可隨時重新連線。", icon: "🎧", confirmText: "解除連線" });
+    if (!confirmed) return;
+    const result = await window.settings.channelsSpotifyDisconnect();
+    setSpotifyFeedback(result.ok ? "ok" : "err", result.message || result.error || "Spotify 已解除連線");
+    await refreshSpotify();
+  });
+  channelsSpotifyPreviousBtn?.addEventListener("click", () => void controlSpotifyUi("previous"));
+  channelsSpotifyNextBtn?.addEventListener("click", () => void controlSpotifyUi("next"));
+  channelsSpotifyToggleBtn?.addEventListener("click", () => void controlSpotifyUi(spotifyStatus.playback?.active && !spotifyStatus.playback.paused ? "pause" : "resume"));
+  channelsSpotifyDeviceSelectEl?.addEventListener("change", () => void controlSpotifyUi("transfer"));
+  channelsSpotifyVolumeEl?.addEventListener("input", () => {
+    const volume = Number(channelsSpotifyVolumeEl.value);
+    if (channelsSpotifyVolumeValueEl) channelsSpotifyVolumeValueEl.value = `${volume}%`;
+    if (spotifyVolumeTimer != null) window.clearTimeout(spotifyVolumeTimer);
+    spotifyVolumeTimer = window.setTimeout(() => void controlSpotifyUi("volume", volume), 160);
   });
 
   // ===== Discord Gateway =====
@@ -3369,6 +3560,7 @@ async function loadChannelsPanel(): Promise<void> {
     void controlDiscordMusic({ command: discordMusicState.autoplay ? "autoplay-off" : "autoplay-on" }, true);
   });
   channelsDiscordMusicClearBtn?.addEventListener("click", () => void controlDiscordMusic({ command: "clear" }));
+  channelsDiscordMusicHistoryToggleBtn?.addEventListener("click", () => void toggleDiscordMusicHistory());
   channelsDiscordMusicQueueEl?.addEventListener("click", (event) => {
     const button = (event.target as HTMLElement).closest<HTMLButtonElement>("button[data-queue-position]");
     const position = Number(button?.dataset.queuePosition);

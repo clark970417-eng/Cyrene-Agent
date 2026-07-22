@@ -19,6 +19,8 @@ import { FeishuAdapter } from "./adapters/feishu";
 import { ILinkBotAdapter, loadCredentials } from "./adapters/wechat/ilink-bot-adapter";
 import { DiscordAdapter } from "./adapters/discord";
 import { getRecentLog, clearLog } from "./message-log";
+import { loadDiscordMusicHistory } from "./adapters/discord/music-history";
+import { controlSpotify, disconnectSpotify, getSpotifyStatus, startSpotifyAuthorization } from "./spotify-control";
 
 const LOG = "[ChannelsInit]";
 
@@ -241,11 +243,13 @@ function registerChannelsIpc(): void {
     return adapter?.getMusicState() ?? { active: false, paused: false, current: null, queue: [], volume: 100, repeat: "off", shuffle: false, autoplay: false, elapsed: 0 };
   });
 
+  ipcMain.handle(IPC.CHANNELS_DISCORD_GET_MUSIC_HISTORY, () => loadDiscordMusicHistory(50));
+
   ipcMain.handle(IPC.CHANNELS_DISCORD_CONTROL_MUSIC, async (_event, raw: unknown) => {
     const adapter = channelManager.getAdapter("discord") as DiscordAdapter | undefined;
     if (!adapter) return { ok: false, message: "Discord adapter 未註冊" };
     const input = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
-    const allowed = new Set(["previous", "pause", "resume", "skip", "stop", "repeat-track", "repeat-queue", "repeat-off", "shuffle", "ordered", "clear", "remove", "volume"]);
+    const allowed = new Set(["previous", "pause", "resume", "skip", "stop", "repeat-track", "repeat-queue", "repeat-off", "shuffle", "ordered", "autoplay-on", "autoplay-off", "clear", "remove", "volume"]);
     if (typeof input.command !== "string" || !allowed.has(input.command)) return { ok: false, message: "不支援的播放控制" };
     return await adapter.controlMusic({
       command: input.command as Parameters<DiscordAdapter["controlMusic"]>[0]["command"],
@@ -303,6 +307,27 @@ function registerChannelsIpc(): void {
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) };
     }
+  });
+
+  ipcMain.handle(IPC.CHANNELS_SPOTIFY_AUTHORIZE, async (_event, raw: unknown) => {
+    const input = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+    return await startSpotifyAuthorization({
+      clientId: typeof input.clientId === "string" ? input.clientId : undefined,
+      clientSecret: typeof input.clientSecret === "string" ? input.clientSecret : undefined,
+    });
+  });
+  ipcMain.handle(IPC.CHANNELS_SPOTIFY_GET_STATUS, () => getSpotifyStatus());
+  ipcMain.handle(IPC.CHANNELS_SPOTIFY_CONTROL, async (_event, raw: unknown) => {
+    const input = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+    return await controlSpotify({
+      command: typeof input.command === "string" ? input.command : undefined,
+      value: typeof input.value === "number" ? input.value : undefined,
+      deviceId: typeof input.deviceId === "string" ? input.deviceId : undefined,
+    });
+  });
+  ipcMain.handle(IPC.CHANNELS_SPOTIFY_DISCONNECT, () => {
+    disconnectSpotify();
+    return { ok: true, message: "Spotify 已解除連線" };
   });
 
   // Phase 3.4：消息日誌

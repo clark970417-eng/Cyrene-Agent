@@ -55,7 +55,8 @@ export type DiscordMusicCommand =
   | "volume"
   | "refresh"
   | "autoplay-on"
-  | "autoplay-off";
+  | "autoplay-off"
+  | "history";
 
 export interface DiscordMusicRequest {
   url?: string;

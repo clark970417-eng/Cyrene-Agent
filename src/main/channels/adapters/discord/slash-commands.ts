@@ -9,6 +9,7 @@ import {
 } from "discord.js";
 import { formatMusicDuration, type DiscordMusicRequest, type DiscordMusicTrack } from "./music-source";
 import type { DiscordMusicState } from "./voice-call";
+import type { DiscordMusicHistoryEntry } from "./music-history";
 
 export const DISCORD_MUSIC_BUTTON_PREFIX = "cyrene:music:";
 
@@ -49,6 +50,11 @@ export function buildDiscordMusicModes(
       .setLabel("Auto play")
       .setEmoji("♾️")
       .setStyle(autoplay ? ButtonStyle.Success : ButtonStyle.Secondary),
+    new ButtonBuilder()
+      .setCustomId(`${DISCORD_MUSIC_BUTTON_PREFIX}history`)
+      .setLabel("History")
+      .setEmoji("🕘")
+      .setStyle(ButtonStyle.Secondary),
   );
 }
 
@@ -196,6 +202,34 @@ export function buildDiscordMusicSearchResults(
   return { content: "", embeds: [embed], components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select)] };
 }
 
+export function buildDiscordMusicHistory(entries: DiscordMusicHistoryEntry[]) {
+  const visible = entries.slice(0, 15);
+  const lines: string[] = [];
+  for (const [index, entry] of visible.entries()) {
+      const title = entry.title.replace(/[\[\]]/g, "").slice(0, 160);
+      const timestamp = Math.floor(Date.parse(entry.playedAt) / 1000);
+      const time = Number.isFinite(timestamp) ? ` · <t:${timestamp}:R>` : "";
+      const playlist = entry.playlistTitle ? `\n　　${entry.playlistTitle.slice(0, 100)}` : "";
+      const safeUrl = /^https?:\/\//i.test(entry.url) ? entry.url.slice(0, 1024) : "";
+      const linkedTitle = safeUrl ? `[${title}](${safeUrl})` : title;
+      const line = `\`${String(index + 1).padStart(2, "0")}\` ${linkedTitle}${time}${playlist}`;
+      // Discord embed description 上限為 4096；保留餘量，避免 API 拒絕整則互動回覆。
+      if ([...lines, line].join("\n").length > 3900) break;
+      lines.push(line);
+  }
+  const description = lines.length
+    ? lines.join("\n")
+    : "還沒有播放紀錄。使用 `/play` 播放歌曲後會自動保存在這裡。";
+  const embed = new EmbedBuilder()
+    .setColor(0x9d6be8)
+    .setAuthor({ name: "Cyrene Music  ·  PRIVATE HISTORY" })
+    .setTitle("最近聽過的歌曲與影片")
+    .setDescription(description)
+    .setFooter({ text: `只有你看得到  ·  顯示最近 ${lines.length} 筆` });
+  if (visible[0]?.thumbnail && /^https?:\/\//i.test(visible[0].thumbnail)) embed.setThumbnail(visible[0].thumbnail);
+  return { content: "", embeds: [embed], components: [] };
+}
+
 export function musicRequestFromButton(
   customId: string,
   paused = false,
@@ -212,6 +246,7 @@ export function musicRequestFromButton(
   }
   if (action === "refresh") return { command: "refresh" };
   if (action === "autoplay-toggle") return { command: autoplay ? "autoplay-off" : "autoplay-on" };
+  if (action === "history") return { command: "history" };
   if (["previous", "skip", "queue", "stop"].includes(action)) {
     return { command: action as "previous" | "skip" | "queue" | "stop" };
   }
@@ -234,6 +269,7 @@ const commands = [
   new SlashCommandBuilder().setName("skip").setDescription("跳過目前歌曲"),
   new SlashCommandBuilder().setName("stop").setDescription("停止音樂並離開語音頻道"),
   new SlashCommandBuilder().setName("queue").setDescription("查看目前歌曲與接下來的播放佇列"),
+  new SlashCommandBuilder().setName("history").setDescription("查看最近聽過的歌曲與影片"),
   new SlashCommandBuilder().setName("clear").setDescription("清空接下來的歌曲，但保留目前歌曲"),
   new SlashCommandBuilder()
     .setName("remove")

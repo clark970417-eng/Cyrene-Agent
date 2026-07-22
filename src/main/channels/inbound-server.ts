@@ -23,6 +23,12 @@ interface InboundRoute {
 }
 
 const routes: InboundRoute[] = [];
+const localGetRoutes = new Map<string, (req: http.IncomingMessage, res: http.ServerResponse) => Promise<void>>();
+
+/** 註冊只綁定 localhost 的 GET 回呼（例如 OAuth redirect）。 */
+export function registerLocalGetRoute(pathname: string, handler: (req: http.IncomingMessage, res: http.ServerResponse) => Promise<void>): void {
+  localGetRoutes.set(pathname, handler);
+}
 
 /** adapter 在 start() 時調用一次註冊自己的路由。重複註冊按 id 覆蓋。 */
 export function registerInboundRoute(channel: ChannelId, normalize: NormalizeFn): void {
@@ -72,6 +78,12 @@ async function handleRequest(
   res: http.ServerResponse,
   secret: string,
 ): Promise<void> {
+  const requestUrl = new URL(req.url || "/", "http://127.0.0.1");
+  const localHandler = req.method === "GET" ? localGetRoutes.get(requestUrl.pathname) : undefined;
+  if (localHandler) {
+    await localHandler(req, res);
+    return;
+  }
   // 健康檢查：免密鑰
   if (req.url === "/channels/healthz" && req.method === "GET") {
     sendJson(res, 200, { ok: true, channels: channelManager.listChannels() });

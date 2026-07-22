@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildDiscordMusicControls,
   buildDiscordMusicModes,
+  buildDiscordMusicHistory,
   buildDiscordMusicPlayer,
   buildDiscordMusicProgress,
   buildDiscordMusicQueue,
@@ -20,7 +21,7 @@ describe("Discord slash commands", () => {
   it("covers chat, voice, music controls, queue editing and status", () => {
     expect(DISCORD_SLASH_COMMAND_NAMES).toEqual(expect.arrayContaining([
       "chat", "join", "leave", "play", "nowplaying", "previous", "pause", "resume", "skip", "stop",
-      "queue", "clear", "remove", "volume", "repeat", "mode", "autoplay", "status", "help",
+      "queue", "history", "clear", "remove", "volume", "repeat", "mode", "autoplay", "status", "help",
     ]));
   });
 
@@ -69,7 +70,7 @@ describe("Discord slash commands", () => {
 
   it("reflects shuffle and repeat state in the mode buttons", () => {
     const row = buildDiscordMusicModes(true, "track").toJSON();
-    expect(row.components).toHaveLength(4);
+    expect(row.components).toHaveLength(5);
     expect("label" in row.components[0] ? row.components[0].label : undefined).toBe("Shuffle");
     expect("label" in row.components[1] ? row.components[1].label : undefined).toBe("Repeat one");
   });
@@ -79,6 +80,34 @@ describe("Discord slash commands", () => {
       .toEqual({ command: "autoplay-on" });
     expect(musicRequestFromButton("cyrene:music:autoplay-toggle", false, false, "off", true))
       .toEqual({ command: "autoplay-off" });
+  });
+
+  it("opens private listening history from the player", () => {
+    expect(musicRequestFromButton("cyrene:music:history")).toEqual({ command: "history" });
+    const payload = buildDiscordMusicHistory([{
+      id: "one",
+      title: "勇者",
+      url: "https://example.com/song",
+      playlistTitle: "葬送的芙莉蓮",
+      playedAt: "2026-07-22T12:00:00.000Z",
+    }]);
+    const embed = payload.embeds[0].toJSON();
+    expect(embed.author?.name).toContain("PRIVATE HISTORY");
+    expect(embed.description).toContain("[勇者](https://example.com/song)");
+    expect(embed.description).toContain("葬送的芙莉蓮");
+  });
+
+  it("keeps long or malformed history inside Discord embed limits", () => {
+    const payload = buildDiscordMusicHistory(Array.from({ length: 15 }, (_, index) => ({
+      id: String(index),
+      title: `歌曲 ${index} ${"很長".repeat(100)}`,
+      url: `https://example.com/${"path".repeat(200)}/${index}`,
+      playlistTitle: "播放清單".repeat(30),
+      playedAt: index === 0 ? "not-a-date" : "2026-07-22T12:00:00.000Z",
+    })));
+    const description = payload.embeds[0].toJSON().description ?? "";
+    expect(description.length).toBeLessThanOrEqual(3900);
+    expect(description).not.toContain("NaN");
   });
 
   it("offers preset volume levels without typing a command", () => {
