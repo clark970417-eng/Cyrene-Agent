@@ -50,6 +50,18 @@ describe("Discord music presence", () => {
 });
 
 describe("Discord desktop music state", () => {
+  it("toggles automatic recommendations for an active session", async () => {
+    const voice = new DiscordVoiceCall({} as never, () => ({ enabled: true } as never), async () => null);
+    const internal = voice as unknown as Record<string, unknown>;
+    internal.mode = "music";
+    internal.connection = {};
+    internal.player = { state: { status: "playing" } };
+    expect((await voice.controlMusic("autoplay-on")).ok).toBe(true);
+    expect(voice.getMusicState().autoplay).toBe(true);
+    expect((await voice.controlMusic("autoplay-off")).ok).toBe(true);
+    expect(voice.getMusicState().autoplay).toBe(false);
+  });
+
   it("reserves an active music session for the user who started it", () => {
     const voice = new DiscordVoiceCall({} as never, () => ({ enabled: true } as never), async () => null);
     expect(voice.canControlMusic("anyone")).toBe(true);
@@ -78,6 +90,7 @@ describe("Discord desktop music state", () => {
       volume: 75,
       repeat: "queue",
       shuffle: false,
+      autoplay: false,
       elapsed: 12,
     });
   });

@@ -17,12 +17,18 @@ const SUPPORTED_HOSTS = new Set([
   "www.bilibili.com",
   "m.bilibili.com",
   "b23.tv",
+  "soundcloud.com",
+  "www.soundcloud.com",
+  "open.spotify.com",
+  "spotify.link",
 ]);
 
 export interface DiscordMusicTrack {
   id?: string;
   title: string;
   url: string;
+  /** 實際交給 yt-dlp 的音源；Spotify 等來源保留 url 作為署名連結。 */
+  playbackUrl?: string;
   thumbnail?: string;
   playlistTitle?: string;
   duration?: number;
@@ -46,7 +52,10 @@ export type DiscordMusicCommand =
   | "ordered"
   | "clear"
   | "remove"
-  | "volume";
+  | "volume"
+  | "refresh"
+  | "autoplay-on"
+  | "autoplay-off";
 
 export interface DiscordMusicRequest {
   url?: string;
@@ -83,6 +92,21 @@ interface BilibiliInitialState {
       cover?: string;
       sections?: Array<{ episodes?: BilibiliSeasonEpisode[] }>;
     };
+  };
+}
+
+interface BilibiliViewPayload {
+  code?: number;
+  data?: {
+    bvid?: string;
+    title?: string;
+    pic?: string;
+    pages?: Array<{
+      page?: number;
+      part?: string;
+      duration?: number;
+      first_frame?: string;
+    }>;
   };
 }
 
@@ -175,8 +199,107 @@ export function cleanDiscordMusicPlaylistTitle(title: string): string {
     .trim());
 }
 
+export function buildSpotifySearchQuery(title: string, description = ""): string {
+  const artist = description.split("·")[0]?.trim();
+  return [title.trim(), artist].filter(Boolean).join(" ");
+}
+
+interface SpotifyEmbedTrack {
+  uri?: string;
+  title?: string;
+  subtitle?: string;
+  duration?: number;
+  isPlayable?: boolean;
+}
+
+interface SpotifyEmbedEntity extends SpotifyEmbedTrack {
+  type?: string;
+  name?: string;
+  id?: string;
+  coverArt?: { sources?: Array<{ url?: string }> };
+  trackList?: SpotifyEmbedTrack[];
+}
+
+export function parseSpotifyEmbedHtml(html: string): DiscordMusicTrack[] {
+  const raw = html.match(/<script[^>]+id=["']__NEXT_DATA__["'][^>]*>([\s\S]*?)<\/script>/i)?.[1];
+  if (!raw) return [];
+  let entity: SpotifyEmbedEntity | undefined;
+  try {
+    const data = JSON.parse(raw) as { props?: { pageProps?: { state?: { data?: { entity?: SpotifyEmbedEntity } } } } };
+    entity = data.props?.pageProps?.state?.data?.entity;
+  } catch {
+    return [];
+  }
+  if (!entity) return [];
+  const rawTracks = entity.trackList?.length ? entity.trackList : [entity];
+  const tracks = rawTracks.filter((track) => track.title && track.uri?.startsWith("spotify:track:"))
+    .slice(0, MAX_PLAYLIST_ITEMS);
+  const cover = entity.coverArt?.sources?.find((source) => source.url)?.url;
+  const playlistTitle = tracks.length > 1 ? toTraditionalTaiwan(entity.title ?? entity.name ?? "Spotify 播放清單") : undefined;
+  return tracks.map((track, index) => {
+    const id = track.uri!.split(":").at(-1)!;
+    const title = toTraditionalTaiwan(track.title!.trim());
+    const artist = toTraditionalTaiwan(track.subtitle?.trim() ?? "");
+    return {
+      id,
+      title: artist ? `${title} — ${artist}` : title,
+      url: `https://open.spotify.com/track/${id}`,
+      playbackUrl: `ytsearch1:${buildSpotifySearchQuery(title, artist)}`,
+      thumbnail: cover,
+      playlistTitle,
+      duration: typeof track.duration === "number" ? Math.round(track.duration / 1000) : undefined,
+      index: index + 1,
+      total: tracks.length,
+    };
+  });
+}
+
+async function resolveSpotifyReference(url: string): Promise<DiscordMusicTrack[]> {
+  const page = await fetch(url, {
+    redirect: "follow",
+    headers: { "user-agent": "Mozilla/5.0 CyreneDiscordBot/1.0" },
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (!page.ok) throw new Error(`Spotify 連結讀取失敗（HTTP ${page.status}）`);
+  const match = new URL(page.url).pathname.match(/^\/(track|album|playlist)\/([A-Za-z0-9]+)/i);
+  if (!match) throw new Error("目前支援 Spotify 單曲、專輯與播放清單連結。");
+  const embed = await fetch(`https://open.spotify.com/embed/${match[1]}/${match[2]}`, {
+    headers: { "user-agent": "Mozilla/5.0 CyreneDiscordBot/1.0" },
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (!embed.ok) throw new Error(`Spotify Embed 讀取失敗（HTTP ${embed.status}）`);
+  const tracks = parseSpotifyEmbedHtml(await embed.text());
+  if (!tracks.length) throw new Error("無法讀取這份 Spotify 清單；私人清單需要先在 Spotify 設為公開。 ");
+  return tracks;
+}
+
 function cleanBilibiliEpisodeTitle(title: string): string {
   return toTraditionalTaiwan(title.trim().replace(/^[“”"「『]+|[“”"」』]+$/g, "").trim());
+}
+
+export function normalizeBilibiliPages(
+  payload: BilibiliViewPayload,
+  sourceUrl: string,
+): DiscordMusicTrack[] {
+  if (payload.code !== 0 || !payload.data?.bvid) return [];
+  const pages = payload.data.pages?.slice(0, MAX_PLAYLIST_ITEMS) ?? [];
+  if (pages.length <= 1) return [];
+  const start = Math.min(requestedStartIndex(sourceUrl), pages.length - 1);
+  const playlistTitle = cleanDiscordMusicPlaylistTitle(payload.data.title?.trim() || "Bilibili 分集播放");
+  const fallbackThumbnail = payload.data.pic?.replace(/^http:\/\//i, "https://");
+  return pages.slice(start).map((page, offset) => {
+    const pageNumber = page.page ?? start + offset + 1;
+    return {
+      id: `${payload.data?.bvid}-p${pageNumber}`,
+      title: cleanBilibiliEpisodeTitle(page.part || `第 ${pageNumber} 首`),
+      url: `https://www.bilibili.com/video/${payload.data?.bvid}/?p=${pageNumber}`,
+      thumbnail: page.first_frame?.replace(/^http:\/\//i, "https://") ?? fallbackThumbnail,
+      playlistTitle,
+      duration: page.duration,
+      index: pageNumber,
+      total: pages.length,
+    };
+  });
 }
 
 export function parseBilibiliSeasonHtml(html: string, sourceUrl: string): DiscordMusicTrack[] {
@@ -259,6 +382,24 @@ async function resolveBilibiliSeason(url: string): Promise<DiscordMusicTrack[]> 
   return expanded.flat().slice(0, MAX_PLAYLIST_ITEMS);
 }
 
+async function resolveBilibiliPages(url: string): Promise<DiscordMusicTrack[]> {
+  const page = await fetch(url, {
+    redirect: "follow",
+    headers: { "user-agent": "Mozilla/5.0 CyreneDiscordBot/1.0" },
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (!page.ok) return [];
+  // b23.tv 等短網址需要先跟隨重新導向，才能取得真正的 BV 編號。
+  const bvid = page.url.match(/\/video\/(BV[\w]+)/i)?.[1];
+  if (!bvid) return [];
+  const api = await fetch(`https://api.bilibili.com/x/web-interface/view?bvid=${encodeURIComponent(bvid)}`, {
+    headers: { "user-agent": "Mozilla/5.0 CyreneDiscordBot/1.0", referer: "https://www.bilibili.com/" },
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (!api.ok) return [];
+  return normalizeBilibiliPages(await api.json() as BilibiliViewPayload, page.url);
+}
+
 export function normalizeYtDlpResult(result: YtDlpResult, sourceUrl: string): DiscordMusicTrack[] {
   const rawEntries = result.entries?.filter((entry): entry is YtDlpEntry => !!entry) ?? [result];
   const start = Math.min(requestedStartIndex(sourceUrl), Math.max(0, rawEntries.length - 1));
@@ -283,15 +424,32 @@ export function normalizeYtDlpResult(result: YtDlpResult, sourceUrl: string): Di
   });
 }
 
-export async function resolveDiscordMusicTracks(url: string): Promise<DiscordMusicTrack[]> {
-  const sourceHost = new URL(url).hostname;
+export async function resolveDiscordMusicTracks(input: string): Promise<DiscordMusicTrack[]> {
+  const trimmed = input.trim();
+  let sourceUrl = trimmed;
+  let sourceHost = "";
+  try {
+    const parsed = new URL(trimmed);
+    sourceHost = parsed.hostname;
+  } catch {
+    // /play 明確表示音樂請求；不是網址時交給 yt-dlp 搜尋第一個結果。
+    sourceUrl = `ytsearch1:${trimmed}`;
+  }
+  if (!trimmed) throw new Error("請輸入歌曲名稱或音樂連結。");
   const isBilibili = /(^|\.)bilibili\.com$|^b23\.tv$/i.test(sourceHost);
+  const isSpotify = /^open\.spotify\.com$|^spotify\.link$/i.test(sourceHost);
+  if (isSpotify) return await resolveSpotifyReference(trimmed);
   if (isBilibili) {
-    const season = await resolveBilibiliSeason(url).catch((err) => {
+    const season = await resolveBilibiliSeason(trimmed).catch((err) => {
       console.warn("[DiscordMusicSource] Bilibili 合集解析失敗，改用 yt-dlp:", err instanceof Error ? err.message : err);
       return [];
     });
     if (season.length > 1) return season;
+    const pages = await resolveBilibiliPages(trimmed).catch((err) => {
+      console.warn("[DiscordMusicSource] Bilibili 分集解析失敗，改用 yt-dlp:", err instanceof Error ? err.message : err);
+      return [];
+    });
+    if (pages.length > 1) return pages;
   }
   const binary = await ensureYtDlpBinary();
   const commonArgs = [
@@ -306,24 +464,62 @@ export async function resolveDiscordMusicTracks(url: string): Promise<DiscordMus
   let result = await runYtDlpJson(binary, [
     ...commonArgs,
     "--flat-playlist",
-    url,
+    sourceUrl,
   ]);
   const entries = result.entries?.filter((entry): entry is YtDlpEntry => !!entry) ?? [];
   if (isBilibili && entries.length > 1 && entries.length <= 30 && entries.some((entry) => !entry.title)) {
-    result = await runYtDlpJson(binary, [...commonArgs, url]);
+    result = await runYtDlpJson(binary, [...commonArgs, sourceUrl]);
   } else if (isBilibili && !entryThumbnail(entries[0] ?? result, result)) {
     const details = await runYtDlpJson(binary, [
       ...commonArgs,
       "--playlist-end",
       "1",
-      url,
+      sourceUrl,
     ]);
     const detailedEntry = details.entries?.find((entry): entry is YtDlpEntry => !!entry) ?? details;
     const thumbnail = entryThumbnail(detailedEntry, details);
     if (entries.length > 1) result.thumbnail = thumbnail;
     else result = details;
   }
-  return normalizeYtDlpResult(result, url);
+
+  // flat-playlist 對部分 YouTube／SoundCloud 項目不會附時長或封面；
+  // 補抓第一首的完整 metadata，避免明明是一般歌曲卻在播放器顯示 LIVE。
+  const first = result.entries?.find((entry): entry is YtDlpEntry => !!entry) ?? result;
+  if (typeof first.duration !== "number" || !entryThumbnail(first, result)) {
+    const detailUrl = entryUrl(first, sourceUrl);
+    const details = await runYtDlpJson(binary, [
+      ...commonArgs,
+      "--no-playlist",
+      detailUrl,
+    ]).catch(() => null);
+    if (details) {
+      const detailedEntry = details.entries?.find((entry): entry is YtDlpEntry => !!entry) ?? details;
+      Object.assign(first, {
+        duration: detailedEntry.duration ?? first.duration,
+        thumbnail: entryThumbnail(detailedEntry, details) ?? first.thumbnail,
+        webpage_url: detailedEntry.webpage_url ?? first.webpage_url,
+      });
+    }
+  }
+  return normalizeYtDlpResult(result, trimmed);
+}
+
+export async function searchDiscordMusicTracks(query: string, limit = 5): Promise<DiscordMusicTrack[]> {
+  const trimmed = query.trim();
+  if (!trimmed) return [];
+  const safeLimit = Math.max(1, Math.min(10, Math.floor(limit)));
+  const binary = await ensureYtDlpBinary();
+  const result = await runYtDlpJson(binary, [
+    "--dump-single-json",
+    "--no-warnings",
+    "--no-progress",
+    "--skip-download",
+    "--flat-playlist",
+    `ytsearch${safeLimit}:${trimmed}`,
+  ]);
+  return normalizeYtDlpResult(result, `ytsearch${safeLimit}:${trimmed}`)
+    .slice(0, safeLimit)
+    .map((track, index, tracks) => ({ ...track, playlistTitle: undefined, index: index + 1, total: tracks.length }));
 }
 
 function ytDlpAsset(): { asset: string; binary: string; archive: boolean } {
@@ -480,7 +676,7 @@ export async function spawnDiscordMusicStream(track: DiscordMusicTrack): Promise
     "bestaudio/best",
     "--output",
     "-",
-    track.url,
+    track.playbackUrl ?? track.url,
   ], { stdio: ["ignore", "pipe", "pipe"] });
 }
 

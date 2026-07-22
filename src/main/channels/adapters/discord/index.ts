@@ -24,11 +24,12 @@ import type {
 } from "../../types";
 import { loadChannelsSettings, saveChannelsSettings, type DiscordChannelConfig } from "../../settings-store";
 import { DiscordVoiceCall, parseDiscordVoiceCommand, type DiscordMusicState } from "./voice-call";
-import { parseDiscordMusicRequest } from "./music-source";
+import { findDiscordMusicUrl, parseDiscordMusicRequest, searchDiscordMusicTracks, type DiscordMusicTrack } from "./music-source";
 import { toTraditionalTaiwan } from "../../../utils/opencc";
 import {
-  buildDiscordMusicControls,
-  buildDiscordVolumeControl,
+  buildDiscordMusicPlayer,
+  buildDiscordMusicQueue,
+  buildDiscordMusicSearchResults,
   DISCORD_SLASH_COMMANDS,
   musicRequestFromButton,
 } from "./slash-commands";
@@ -59,7 +60,7 @@ export interface DiscordBotProfileUpdate {
 }
 
 export interface DiscordMusicControlInput {
-  command: "previous" | "pause" | "resume" | "skip" | "stop" | "repeat-track" | "repeat-queue" | "repeat-off" | "shuffle" | "ordered" | "clear" | "remove" | "volume";
+  command: "previous" | "pause" | "resume" | "skip" | "stop" | "repeat-track" | "repeat-queue" | "repeat-off" | "shuffle" | "ordered" | "clear" | "remove" | "volume" | "refresh" | "autoplay-on" | "autoplay-off";
   value?: number;
 }
 
@@ -151,6 +152,9 @@ export class DiscordAdapter implements ChannelAdapter {
 
   private client: Client | null = null;
   private voiceCall: DiscordVoiceCall | null = null;
+  private musicControllerMessage: Message | null = null;
+  private musicControllerRefreshTimer: ReturnType<typeof setInterval> | null = null;
+  private musicSearchSessions = new Map<string, { ownerId: string; tracks: DiscordMusicTrack[]; expiresAt: number }>();
   private status: ChannelStatus = { enabled: false, phase: "offline", message: "未啟用" };
 
   constructor(private readonly voiceDispatch?: MessageHandler) {}
@@ -183,6 +187,7 @@ export class DiscordAdapter implements ChannelAdapter {
       client,
       () => loadChannelsSettings().discord,
       async (msg) => await (this.voiceDispatch ?? this.onMessage)?.(msg) ?? null,
+      async (state) => await this.refreshMusicController(state),
     );
 
     client.on("messageCreate", async (message) => {
@@ -210,7 +215,7 @@ export class DiscordAdapter implements ChannelAdapter {
       try {
         if (actionable.isChatInputCommand()) await this.handleSlashCommand(actionable);
         else if (actionable.isButton()) await this.handleMusicButton(actionable);
-        else await this.handleMusicVolumeSelect(actionable);
+        else await this.handleMusicSelect(actionable);
       } catch (err) {
         console.error(LOG, "處理 Discord / 指令失敗:", err);
         const content = `指令執行失敗：${err instanceof Error ? err.message : String(err)}`;
@@ -259,6 +264,8 @@ export class DiscordAdapter implements ChannelAdapter {
   }
 
   private async stopClient(): Promise<void> {
+    this.stopMusicControllerRefresh();
+    this.musicControllerMessage = null;
     await this.voiceCall?.leave();
     this.voiceCall = null;
     if (!this.client) return;
@@ -319,8 +326,8 @@ export class DiscordAdapter implements ChannelAdapter {
         content: [
           "**Cyrene Discord 指令**",
           "`/chat` AI 對話　`/join` 語音聊天　`/leave` 離開",
-          "`/play` 播放 YouTube／Bilibili　`/previous`　`/pause`　`/resume`　`/skip`　`/stop`",
-          "`/queue`　`/remove`　`/clear`　`/volume`　`/repeat`　`/mode`",
+          "`/play` 搜尋或播放連結　`/nowplaying` 播放器　`/previous`　`/pause`　`/resume`　`/skip`　`/stop`",
+          "`/queue`　`/remove`　`/clear`　`/volume`　`/repeat`　`/mode`　`/autoplay`",
           "`/status` 查看連線、延遲及目前播放狀態",
         ].join("\n"),
         flags: MessageFlags.Ephemeral,
@@ -328,8 +335,23 @@ export class DiscordAdapter implements ChannelAdapter {
       return;
     }
 
+    if (interaction.commandName === "nowplaying") {
+      await interaction.deferReply();
+      if (this.voiceCall?.getMusicState().active) await this.showMusicController(interaction);
+      else await interaction.editReply({ content: "目前沒有正在播放的音樂，請先使用 `/play`。" });
+      return;
+    }
+
+    if (interaction.commandName === "queue") {
+      const state = this.voiceCall?.getMusicState();
+      await interaction.reply(state?.active
+        ? { ...buildDiscordMusicQueue(state), flags: MessageFlags.Ephemeral }
+        : { content: "目前沒有正在播放的音樂，請先使用 `/play`。", flags: MessageFlags.Ephemeral });
+      return;
+    }
+
     const musicSessionActive = this.voiceCall?.getMusicState().active ?? false;
-    const musicCommands = new Set(["play", "previous", "pause", "resume", "skip", "stop", "queue", "clear", "remove", "volume", "repeat", "mode", "leave"]);
+    const musicCommands = new Set(["play", "previous", "pause", "resume", "skip", "stop", "queue", "clear", "remove", "volume", "repeat", "mode", "autoplay", "leave"]);
     if (musicSessionActive && musicCommands.has(interaction.commandName) && !this.voiceCall?.canControlMusic(interaction.user.id)) {
       await interaction.reply({ content: "這是其他人的播放工作階段，你不能控制她的音樂。", flags: MessageFlags.Ephemeral });
       return;
@@ -352,6 +374,21 @@ export class DiscordAdapter implements ChannelAdapter {
       await interaction.editReply({ content: "找不到這個指令的功能。" });
       return;
     }
+    if (interaction.commandName === "play" && request.url && !findDiscordMusicUrl(request.url)) {
+      const tracks = await searchDiscordMusicTracks(request.url, 5);
+      if (!tracks.length) {
+        await interaction.editReply({ content: "找不到符合的歌曲，請換一組關鍵字。" });
+        return;
+      }
+      const sessionId = interaction.id;
+      this.musicSearchSessions.set(sessionId, {
+        ownerId: interaction.user.id,
+        tracks,
+        expiresAt: Date.now() + 10 * 60_000,
+      });
+      await interaction.editReply(buildDiscordMusicSearchResults(request.url, tracks, sessionId));
+      return;
+    }
     if (request.command && request.command !== "queue") {
       const result = this.voiceCall
         ? await this.voiceCall.controlMusic(request.command, request.value)
@@ -362,9 +399,7 @@ export class DiscordAdapter implements ChannelAdapter {
     }
     const handled = await this.voiceCall?.handleMusicRequest(message, request) ?? false;
     if (handled && interaction.commandName === "play" && this.voiceCall?.getMusicState().active) {
-      await interaction.editReply({
-        components: [buildDiscordMusicControls(this.voiceCall.getMusicState().paused), buildDiscordVolumeControl()],
-      }).catch(() => undefined);
+      await this.showMusicController(interaction);
     }
     if (!handled) {
       await interaction.editReply({ content: "目前沒有正在播放的音樂，請先使用 `/play`。" });
@@ -372,41 +407,53 @@ export class DiscordAdapter implements ChannelAdapter {
   }
 
   private async handleMusicButton(interaction: ButtonInteraction): Promise<void> {
-    const request = musicRequestFromButton(interaction.customId, this.voiceCall?.getMusicState().paused ?? false);
+    const state = this.voiceCall?.getMusicState();
+    const request = musicRequestFromButton(
+      interaction.customId,
+      state?.paused ?? false,
+      state?.shuffle ?? false,
+      state?.repeat ?? "off",
+      state?.autoplay ?? false,
+    );
     if (!request) return;
     const config = loadChannelsSettings().discord;
     const playlistOnly = request.command === "queue";
-    const accessConfig = playlistOnly ? { ...config, allowedUserIds: undefined } : config;
+    const passiveAction = playlistOnly || request.command === "refresh";
+    const accessConfig = passiveAction ? { ...config, allowedUserIds: undefined } : config;
     if (!shouldHandleDiscordInteraction(interaction, accessConfig)) {
       await interaction.reply({ content: "你沒有操作這個 Bot 的權限。", flags: MessageFlags.Ephemeral });
       return;
     }
-    if (!playlistOnly && !this.voiceCall?.canControlMusic(interaction.user.id)) {
+    if (!passiveAction && !this.voiceCall?.canControlMusic(interaction.user.id)) {
       await interaction.reply({ content: "這是其他人的播放工作階段，你不能使用這些控制按鈕。", flags: MessageFlags.Ephemeral });
       return;
     }
-    if (request.command !== "queue") {
-      await interaction.deferUpdate();
-      const result = this.voiceCall
-        ? await this.voiceCall.controlMusic(request.command!, request.value)
-        : { ok: false, message: "Discord 語音尚未啟用。" };
-      if (result.ok && interaction.customId.endsWith("toggle") && this.voiceCall) {
-        await interaction.editReply({
-          components: [buildDiscordMusicControls(this.voiceCall.getMusicState().paused), buildDiscordVolumeControl()],
-        });
-      }
-      if (!result.ok) await interaction.followUp({ content: result.message, flags: MessageFlags.Ephemeral });
+    if (request.command === "queue") {
+      await interaction.reply(state?.active
+        ? { ...buildDiscordMusicQueue(state), flags: MessageFlags.Ephemeral }
+        : { content: "目前沒有正在播放的音樂。", flags: MessageFlags.Ephemeral });
       return;
     }
-    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-    const message = await this.interactionAsMessage(interaction);
-    const handled = await this.voiceCall?.handleMusicRequest(message, request) ?? false;
-    if (!handled) {
-      await interaction.editReply({ content: "目前沒有正在播放的音樂。" });
+    if (request.command === "refresh") {
+      await interaction.deferUpdate();
+      this.musicControllerMessage = interaction.message;
+      if (state) await interaction.editReply(buildDiscordMusicPlayer(state));
+      return;
     }
+    await interaction.deferUpdate();
+    this.musicControllerMessage = interaction.message;
+    const result = this.voiceCall
+      ? await this.voiceCall.controlMusic(request.command!, request.value)
+      : { ok: false, message: "Discord 語音尚未啟用。" };
+    if (result.ok && this.voiceCall) await interaction.editReply(buildDiscordMusicPlayer(this.voiceCall.getMusicState()));
+    if (!result.ok) await interaction.followUp({ content: result.message, flags: MessageFlags.Ephemeral });
   }
 
-  private async handleMusicVolumeSelect(interaction: StringSelectMenuInteraction): Promise<void> {
+  private async handleMusicSelect(interaction: StringSelectMenuInteraction): Promise<void> {
+    if (interaction.customId.startsWith("cyrene:music:search:")) {
+      await this.handleMusicSearchSelect(interaction);
+      return;
+    }
     if (interaction.customId !== "cyrene:music:volume") return;
     if (!shouldHandleDiscordInteraction(interaction, loadChannelsSettings().discord)) {
       await interaction.reply({ content: "你沒有操作這個 Bot 的權限。", flags: MessageFlags.Ephemeral });
@@ -417,16 +464,106 @@ export class DiscordAdapter implements ChannelAdapter {
       return;
     }
     await interaction.deferUpdate();
+    this.musicControllerMessage = interaction.message;
     const value = Number.parseInt(interaction.values[0] ?? "100", 10);
     const result = this.voiceCall
       ? await this.voiceCall.controlMusic("volume", value)
       : { ok: false, message: "Discord 語音尚未啟用。" };
+    if (result.ok && this.voiceCall) await interaction.editReply(buildDiscordMusicPlayer(this.voiceCall.getMusicState()));
     if (!result.ok) await interaction.followUp({ content: result.message, flags: MessageFlags.Ephemeral });
+  }
+
+  private async handleMusicSearchSelect(interaction: StringSelectMenuInteraction): Promise<void> {
+    const sessionId = interaction.customId.slice("cyrene:music:search:".length);
+    const session = this.musicSearchSessions.get(sessionId);
+    if (!session || session.expiresAt < Date.now()) {
+      this.musicSearchSessions.delete(sessionId);
+      await interaction.reply({ content: "這份搜尋結果已過期，請重新使用 `/play`。", flags: MessageFlags.Ephemeral });
+      return;
+    }
+    if (session.ownerId !== interaction.user.id) {
+      await interaction.reply({ content: "只有發起搜尋的人可以選擇歌曲。", flags: MessageFlags.Ephemeral });
+      return;
+    }
+    if (!shouldHandleDiscordInteraction(interaction, loadChannelsSettings().discord)) {
+      await interaction.reply({ content: "你沒有操作這個 Bot 的權限。", flags: MessageFlags.Ephemeral });
+      return;
+    }
+    const index = Number.parseInt(interaction.values[0] ?? "-1", 10);
+    const track = session.tracks[index];
+    if (!track) {
+      await interaction.reply({ content: "找不到這首歌曲，請重新搜尋。", flags: MessageFlags.Ephemeral });
+      return;
+    }
+    this.musicSearchSessions.delete(sessionId);
+    await interaction.deferUpdate();
+    await interaction.editReply({ content: `🔎 正在讀取「${track.title}」…`, embeds: [], components: [] });
+    const message = await this.interactionAsMessage(interaction);
+    const handled = await this.voiceCall?.handleMusicRequest(message, { url: track.url }) ?? false;
+    if (!handled || !this.voiceCall?.getMusicState().active) {
+      await interaction.editReply({ content: "無法開始播放，請確認你已加入語音頻道。", embeds: [], components: [] });
+      return;
+    }
+    this.musicControllerMessage = interaction.message;
+    await interaction.editReply(buildDiscordMusicPlayer(this.voiceCall.getMusicState()));
+    this.startMusicControllerRefresh();
+  }
+
+  private stopMusicControllerRefresh(): void {
+    if (this.musicControllerRefreshTimer) clearInterval(this.musicControllerRefreshTimer);
+    this.musicControllerRefreshTimer = null;
+  }
+
+  private startMusicControllerRefresh(): void {
+    this.stopMusicControllerRefresh();
+    this.musicControllerRefreshTimer = setInterval(() => {
+      const state = this.voiceCall?.getMusicState();
+      if (state) void this.refreshMusicController(state);
+    }, 5_000);
+  }
+
+  private async showMusicController(interaction: ChatInputCommandInteraction): Promise<void> {
+    const state = this.voiceCall?.getMusicState();
+    if (!state) return;
+    const payload = buildDiscordMusicPlayer(state);
+    const existing = this.musicControllerMessage;
+    let updatedExisting = false;
+    if (existing && existing.channelId === interaction.channelId) {
+      updatedExisting = await existing.edit(payload).then(() => true).catch(() => false);
+      if (!updatedExisting) this.musicControllerMessage = null;
+    }
+    if (updatedExisting) {
+      await interaction.deleteReply().catch(() => undefined);
+    } else if (interaction.channel?.isSendable()) {
+      const sent = await interaction.channel.send(payload);
+      this.musicControllerMessage = sent;
+      await interaction.deleteReply().catch(() => undefined);
+    } else {
+      await interaction.editReply(payload);
+      this.musicControllerMessage = await interaction.fetchReply();
+    }
+    this.startMusicControllerRefresh();
+  }
+
+  private async refreshMusicController(state: DiscordMusicState): Promise<void> {
+    const message = this.musicControllerMessage;
+    if (!message) return;
+    try {
+      await message.edit(buildDiscordMusicPlayer(state));
+      if (!state.active) {
+        this.stopMusicControllerRefresh();
+        this.musicControllerMessage = null;
+      }
+    } catch (err) {
+      console.warn(LOG, "更新 Discord 音樂播放器失敗:", err);
+      this.stopMusicControllerRefresh();
+      this.musicControllerMessage = null;
+    }
   }
 
   private musicRequestFromInteraction(interaction: ChatInputCommandInteraction) {
     if (interaction.commandName === "play") {
-      return parseDiscordMusicRequest(interaction.options.getString("url", true));
+      return { url: interaction.options.getString("url", true) };
     }
     if (interaction.commandName === "pause") return { command: "pause" as const };
     if (interaction.commandName === "resume") return { command: "resume" as const };
@@ -447,6 +584,9 @@ export class DiscordAdapter implements ChannelAdapter {
     }
     if (interaction.commandName === "mode") {
       return { command: interaction.options.getString("type", true) === "shuffle" ? "shuffle" as const : "ordered" as const };
+    }
+    if (interaction.commandName === "autoplay") {
+      return { command: interaction.options.getBoolean("enabled", true) ? "autoplay-on" as const : "autoplay-off" as const };
     }
     return null;
   }
@@ -544,6 +684,7 @@ export class DiscordAdapter implements ChannelAdapter {
       volume: 100,
       repeat: "off",
       shuffle: false,
+      autoplay: false,
       elapsed: 0,
     };
   }

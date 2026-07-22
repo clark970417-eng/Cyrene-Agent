@@ -485,11 +485,12 @@ interface DiscordMusicState {
   volume: number;
   repeat: "off" | "track" | "queue";
   shuffle: boolean;
+  autoplay: boolean;
   elapsed: number;
 }
 
 interface DiscordMusicControlInput {
-  command: "previous" | "pause" | "resume" | "skip" | "stop" | "repeat-track" | "repeat-queue" | "repeat-off" | "shuffle" | "ordered" | "clear" | "remove" | "volume";
+  command: "previous" | "pause" | "resume" | "skip" | "stop" | "repeat-track" | "repeat-queue" | "repeat-off" | "shuffle" | "ordered" | "clear" | "remove" | "volume" | "autoplay-on" | "autoplay-off";
   value?: number;
 }
 
@@ -685,7 +686,7 @@ if (!window.settings) {
     removeMcpServer: async () => ({ ok: false, error: "settings api unavailable" }),
     listMcpServers: async () => [],
     channelsDiscordGetProfile: async () => ({ connected: false, guildCount: 0, guilds: [], voiceActive: false }),
-    channelsDiscordGetMusicState: async () => ({ active: false, paused: false, current: null, queue: [], volume: 100, repeat: "off", shuffle: false, elapsed: 0 }),
+    channelsDiscordGetMusicState: async () => ({ active: false, paused: false, current: null, queue: [], volume: 100, repeat: "off", shuffle: false, autoplay: false, elapsed: 0 }),
     channelsDiscordControlMusic: async () => ({ ok: false, message: "settings api unavailable" }),
     channelsDiscordUpdateProfile: async () => ({ ok: false, error: "settings api unavailable" }),
     channelsDiscordPickAvatar: async () => null,
@@ -2833,6 +2834,7 @@ const channelsDiscordMusicNextBtn = document.getElementById("channels-discord-mu
 const channelsDiscordMusicStopBtn = document.getElementById("channels-discord-music-stop") as HTMLButtonElement | null;
 const channelsDiscordMusicRepeatBtn = document.getElementById("channels-discord-music-repeat") as HTMLButtonElement | null;
 const channelsDiscordMusicShuffleBtn = document.getElementById("channels-discord-music-shuffle") as HTMLButtonElement | null;
+const channelsDiscordMusicAutoplayBtn = document.getElementById("channels-discord-music-autoplay") as HTMLButtonElement | null;
 const channelsDiscordMusicClearBtn = document.getElementById("channels-discord-music-clear") as HTMLButtonElement | null;
 const channelsDiscordMusicVolumeEl = document.getElementById("channels-discord-music-volume") as HTMLInputElement | null;
 const channelsDiscordMusicVolumeValueEl = document.getElementById("channels-discord-music-volume-value") as HTMLOutputElement | null;
@@ -2850,7 +2852,7 @@ let channelsInitialized = false;
 let channelsSaveTimer: number | null = null;
 let pendingDiscordAvatarPath: string | undefined;
 let pendingDiscordBannerPath: string | undefined;
-let discordMusicState: DiscordMusicState = { active: false, paused: false, current: null, queue: [], volume: 100, repeat: "off", shuffle: false, elapsed: 0 };
+let discordMusicState: DiscordMusicState = { active: false, paused: false, current: null, queue: [], volume: 100, repeat: "off", shuffle: false, autoplay: false, elapsed: 0 };
 let discordMusicRefreshTimer: number | null = null;
 let discordMusicVolumeTimer: number | null = null;
 
@@ -2943,7 +2945,7 @@ function setDiscordMusicFeedback(kind: "info" | "ok" | "err", message: string): 
 function renderDiscordMusic(state: DiscordMusicState): void {
   discordMusicState = state;
   const current = state.current;
-  const controls = [channelsDiscordMusicPreviousBtn, channelsDiscordMusicToggleBtn, channelsDiscordMusicNextBtn, channelsDiscordMusicStopBtn, channelsDiscordMusicRepeatBtn, channelsDiscordMusicShuffleBtn];
+  const controls = [channelsDiscordMusicPreviousBtn, channelsDiscordMusicToggleBtn, channelsDiscordMusicNextBtn, channelsDiscordMusicStopBtn, channelsDiscordMusicRepeatBtn, channelsDiscordMusicShuffleBtn, channelsDiscordMusicAutoplayBtn];
   for (const control of controls) if (control) control.disabled = !state.active;
   if (channelsDiscordMusicClearBtn) channelsDiscordMusicClearBtn.disabled = !state.queue.length;
   if (channelsDiscordMusicVolumeEl) {
@@ -2986,6 +2988,10 @@ function renderDiscordMusic(state: DiscordMusicState): void {
     channelsDiscordMusicRepeatBtn.title = state.repeat === "track" ? "單曲循環（點擊切換清單循環）" : state.repeat === "queue" ? "清單循環（點擊關閉）" : "開啟單曲循環";
   }
   if (channelsDiscordMusicShuffleBtn) channelsDiscordMusicShuffleBtn.setAttribute("aria-pressed", String(state.shuffle));
+  if (channelsDiscordMusicAutoplayBtn) {
+    channelsDiscordMusicAutoplayBtn.setAttribute("aria-pressed", String(state.autoplay));
+    channelsDiscordMusicAutoplayBtn.title = state.autoplay ? "自動推薦已開啟（點擊關閉）" : "佇列結束後自動推薦相近歌曲";
+  }
   const duration = current?.duration;
   if (channelsDiscordMusicElapsedEl) channelsDiscordMusicElapsedEl.textContent = formatDiscordMusicTime(state.elapsed);
   if (channelsDiscordMusicDurationEl) channelsDiscordMusicDurationEl.textContent = formatDiscordMusicTime(duration);
@@ -3358,6 +3364,9 @@ async function loadChannelsPanel(): Promise<void> {
   });
   channelsDiscordMusicShuffleBtn?.addEventListener("click", () => {
     void controlDiscordMusic({ command: discordMusicState.shuffle ? "ordered" : "shuffle" }, true);
+  });
+  channelsDiscordMusicAutoplayBtn?.addEventListener("click", () => {
+    void controlDiscordMusic({ command: discordMusicState.autoplay ? "autoplay-off" : "autoplay-on" }, true);
   });
   channelsDiscordMusicClearBtn?.addEventListener("click", () => void controlDiscordMusic({ command: "clear" }));
   channelsDiscordMusicQueueEl?.addEventListener("click", (event) => {

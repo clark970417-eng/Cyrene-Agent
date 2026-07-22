@@ -238,7 +238,7 @@ function registerChannelsIpc(): void {
 
   ipcMain.handle(IPC.CHANNELS_DISCORD_GET_MUSIC_STATE, () => {
     const adapter = channelManager.getAdapter("discord") as DiscordAdapter | undefined;
-    return adapter?.getMusicState() ?? { active: false, paused: false, current: null, queue: [], volume: 100, repeat: "off", shuffle: false, elapsed: 0 };
+    return adapter?.getMusicState() ?? { active: false, paused: false, current: null, queue: [], volume: 100, repeat: "off", shuffle: false, autoplay: false, elapsed: 0 };
   });
 
   ipcMain.handle(IPC.CHANNELS_DISCORD_CONTROL_MUSIC, async (_event, raw: unknown) => {

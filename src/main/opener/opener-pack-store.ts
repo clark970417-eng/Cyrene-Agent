@@ -53,11 +53,16 @@ export function pickItem(
   hour: number,
   recent: string[],
 ): ManifestItem | null {
-  const candidates = items.filter((it) => {
+  const eligible = items.filter((it) => {
     if (it.condition?.hourGte !== undefined && hour < it.condition.hourGte) return false;
-    if (recent.includes(it.id)) return false;
     return true;
   });
+  if (eligible.length === 0) return null;
+
+  // 文案數可能少於 recentAvoidN。全部都進過最近清單時允許重新循環，
+  // 否則 runner 會每分鐘重試同一場景並持續輸出「無可用文案」。
+  const fresh = eligible.filter((it) => !recent.includes(it.id));
+  const candidates = fresh.length > 0 ? fresh : eligible;
   if (candidates.length === 0) return null;
   return candidates[Math.floor(Math.random() * candidates.length)];
 }

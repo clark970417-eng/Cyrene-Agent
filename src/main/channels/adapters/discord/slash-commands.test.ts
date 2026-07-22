@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   buildDiscordMusicControls,
+  buildDiscordMusicModes,
+  buildDiscordMusicPlayer,
+  buildDiscordMusicProgress,
+  buildDiscordMusicQueue,
+  buildDiscordMusicSearchResults,
   buildDiscordVolumeControl,
   DISCORD_SLASH_COMMAND_NAMES,
   DISCORD_SLASH_COMMANDS,
@@ -14,8 +19,8 @@ describe("Discord slash commands", () => {
 
   it("covers chat, voice, music controls, queue editing and status", () => {
     expect(DISCORD_SLASH_COMMAND_NAMES).toEqual(expect.arrayContaining([
-      "chat", "join", "leave", "play", "previous", "pause", "resume", "skip", "stop",
-      "queue", "clear", "remove", "volume", "repeat", "mode", "status", "help",
+      "chat", "join", "leave", "play", "nowplaying", "previous", "pause", "resume", "skip", "stop",
+      "queue", "clear", "remove", "volume", "repeat", "mode", "autoplay", "status", "help",
     ]));
   });
 
@@ -54,7 +59,26 @@ describe("Discord slash commands", () => {
     expect(musicRequestFromButton("cyrene:music:toggle", false)).toEqual({ command: "pause" });
     expect(musicRequestFromButton("cyrene:music:toggle", true)).toEqual({ command: "resume" });
     expect(musicRequestFromButton("cyrene:music:skip")).toEqual({ command: "skip" });
+    expect(musicRequestFromButton("cyrene:music:shuffle-toggle", false, false)).toEqual({ command: "shuffle" });
+    expect(musicRequestFromButton("cyrene:music:shuffle-toggle", false, true)).toEqual({ command: "ordered" });
+    expect(musicRequestFromButton("cyrene:music:repeat-cycle", false, false, "off")).toEqual({ command: "repeat-queue" });
+    expect(musicRequestFromButton("cyrene:music:repeat-cycle", false, false, "queue")).toEqual({ command: "repeat-track" });
+    expect(musicRequestFromButton("cyrene:music:refresh")).toEqual({ command: "refresh" });
     expect(musicRequestFromButton("unrelated")).toBeNull();
+  });
+
+  it("reflects shuffle and repeat state in the mode buttons", () => {
+    const row = buildDiscordMusicModes(true, "track").toJSON();
+    expect(row.components).toHaveLength(4);
+    expect("label" in row.components[0] ? row.components[0].label : undefined).toBe("Shuffle");
+    expect("label" in row.components[1] ? row.components[1].label : undefined).toBe("Repeat one");
+  });
+
+  it("toggles auto play from the player", () => {
+    expect(musicRequestFromButton("cyrene:music:autoplay-toggle", false, false, "off", false))
+      .toEqual({ command: "autoplay-on" });
+    expect(musicRequestFromButton("cyrene:music:autoplay-toggle", false, false, "off", true))
+      .toEqual({ command: "autoplay-off" });
   });
 
   it("offers preset volume levels without typing a command", () => {
@@ -63,5 +87,84 @@ describe("Discord slash commands", () => {
     expect("options" in menu ? menu.options.map((option) => option.value) : []).toEqual([
       "0", "25", "50", "75", "100", "125", "150",
     ]);
+  });
+
+  it("builds a now-playing card with cover, progress and queue details", () => {
+    const payload = buildDiscordMusicPlayer({
+      active: true,
+      paused: false,
+      current: {
+        id: "song-1",
+        title: "勇者",
+        url: "https://www.bilibili.com/video/example",
+        thumbnail: "https://example.com/cover.jpg",
+        playlistTitle: "葬送的芙莉蓮 音樂集",
+        duration: 195,
+        index: 1,
+        total: 7,
+      },
+      queue: [{ title: "Anytime Anywhere", url: "https://example.com/2", index: 2, total: 7 }],
+      volume: 75,
+      repeat: "off",
+      shuffle: false,
+      autoplay: false,
+      elapsed: 42,
+    });
+    const embed = payload.embeds[0].toJSON();
+    expect(embed.title).toBe("勇者");
+    expect(embed.url).toContain("bilibili.com");
+    expect(embed.thumbnail?.url).toBe("https://example.com/cover.jpg");
+    expect(embed.description).toContain("葬送的芙莉蓮 音樂集");
+    expect(embed.description).toContain("00:42");
+    expect(embed.footer?.text).toContain("VOL 75%");
+    expect(payload.components).toHaveLength(3);
+  });
+
+  it("builds a compact private queue card", () => {
+    const payload = buildDiscordMusicQueue({
+      active: true,
+      paused: false,
+      current: { title: "勇者", url: "https://example.com/1", index: 1, total: 2, playlistTitle: "芙莉蓮" },
+      queue: [{ title: "Anytime Anywhere", url: "https://example.com/2", index: 2, total: 2, duration: 227 }],
+      volume: 100,
+      repeat: "off",
+      shuffle: false,
+      autoplay: false,
+      elapsed: 10,
+    });
+    const embed = payload.embeds[0].toJSON();
+    expect(embed.author?.name).toContain("PRIVATE QUEUE");
+    expect(embed.description).toContain("Anytime Anywhere · 03:47");
+    expect(embed.footer?.text).toContain("只有你看得到");
+  });
+
+  it("builds a selectable five-result music search card", () => {
+    const tracks = Array.from({ length: 5 }, (_, index) => ({
+      title: `Result ${index + 1}`,
+      url: `https://youtube.com/watch?v=result${index}`,
+      duration: 180 + index,
+      index: index + 1,
+      total: 5,
+    }));
+    const payload = buildDiscordMusicSearchResults("test song", tracks, "session-id");
+    const embed = payload.embeds[0].toJSON();
+    const row = payload.components[0].toJSON();
+    expect(embed.author?.name).toContain("SEARCH");
+    expect(embed.description).toContain("Result 1 · 3:00");
+    expect(row.components[0]).toMatchObject({ custom_id: "cyrene:music:search:session-id" });
+    expect("options" in row.components[0] ? row.components[0].options : []).toHaveLength(5);
+  });
+
+  it("renders a bounded Discord progress rail", () => {
+    expect(buildDiscordMusicProgress(30, 120)).toMatch(/^00:30 .+ 02:00$/);
+    expect(buildDiscordMusicProgress(999, 120)).toContain("02:00");
+  });
+
+  it("moves the progress marker even when a stream has no known duration", () => {
+    const initial = buildDiscordMusicProgress(0);
+    const later = buildDiscordMusicProgress(10);
+    expect(initial).toContain("串流中");
+    expect(later).toContain("串流中");
+    expect(later).not.toBe(initial);
   });
 });

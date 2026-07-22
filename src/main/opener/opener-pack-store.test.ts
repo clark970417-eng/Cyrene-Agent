@@ -45,8 +45,12 @@ describe("pickItem", () => {
     const picked = pickItem(items, 11, ["m01"]);
     expect(picked?.id).toBe("m02");
   });
-  it("全部被排除時返回 null", () => {
+  it("全部都在最近清單時重新循環，避免背景持續空轉", () => {
     const items = MANIFEST.packs.morning.items;
-    expect(pickItem(items, 11, ["m01", "m02"])).toBeNull();
+    expect(["m01", "m02"]).toContain(pickItem(items, 11, ["m01", "m02"])?.id);
+  });
+  it("條件真的沒有任何可用項目時返回 null", () => {
+    const conditionalOnly = [MANIFEST.packs.morning.items[1]];
+    expect(pickItem(conditionalOnly, 9, [])).toBeNull();
   });
 });

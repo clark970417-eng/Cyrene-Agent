@@ -1,12 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
   findDiscordMusicUrl,
+  buildSpotifySearchQuery,
   formatMusicDuration,
   cleanDiscordMusicTrackTitle,
   cleanDiscordMusicPlaylistTitle,
   normalizeYtDlpResult,
+  normalizeBilibiliPages,
   parseDiscordMusicRequest,
   parseBilibiliSeasonHtml,
+  parseSpotifyEmbedHtml,
 } from "./music-source";
 
 describe("Discord music request parsing", () => {
@@ -15,12 +18,46 @@ describe("Discord music request parsing", () => {
     "https://www.youtube.com/watch?v=abcdefghijk&list=PL123",
     "https://www.bilibili.com/video/BV1234567890?p=5",
     "https://b23.tv/abc123",
+    "https://soundcloud.com/example/song",
+    "https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT",
   ])("accepts a supported music URL: %s", (url) => {
     expect(findDiscordMusicUrl(`幫我播放 ${url}`)).toBe(url);
   });
 
   it("does not intercept unrelated links", () => {
     expect(findDiscordMusicUrl("看看 https://example.com/video")).toBeUndefined();
+  });
+
+  it("combines Spotify title and artist for an equivalent playable search", () => {
+    expect(buildSpotifySearchQuery("Never Gonna Give You Up", "Rick Astley · Whenever You Need Somebody · Song · 1987"))
+      .toBe("Never Gonna Give You Up Rick Astley");
+  });
+
+  it("turns a Spotify playlist embed into attributed playable queue entries", () => {
+    const data = {
+      props: { pageProps: { state: { data: { entity: {
+        type: "playlist",
+        title: "My Mix",
+        coverArt: { sources: [{ url: "https://i.scdn.co/image/cover" }] },
+        trackList: [
+          { uri: "spotify:track:ONE", title: "First Song", subtitle: "First Artist", duration: 183000 },
+          { uri: "spotify:track:TWO", title: "第二首歌", subtitle: "歌手", duration: 204500 },
+        ],
+      } } } } },
+    };
+    const html = `<script id="__NEXT_DATA__" type="application/json">${JSON.stringify(data)}</script>`;
+    const tracks = parseSpotifyEmbedHtml(html);
+    expect(tracks).toHaveLength(2);
+    expect(tracks[0]).toMatchObject({
+      title: "First Song — First Artist",
+      url: "https://open.spotify.com/track/ONE",
+      playbackUrl: "ytsearch1:First Song First Artist",
+      playlistTitle: "My Mix",
+      duration: 183,
+      index: 1,
+      total: 2,
+    });
+    expect(tracks[1].duration).toBe(205);
   });
 
   it.each([
@@ -45,6 +82,29 @@ describe("Discord music request parsing", () => {
 });
 
 describe("yt-dlp playlist normalization", () => {
+  it("uses the real Bilibili part names for a large multi-part video", () => {
+    const tracks = normalizeBilibiliPages({
+      code: 0,
+      data: {
+        bvid: "BVTEST",
+        title: "超級神仙の日語歌曲｜那些似曾相識的日語歌 無損音質 分集播放",
+        pic: "http://img.example/cover.jpg",
+        pages: [
+          { page: 1, part: "001. Cry For Me (feat. Ami) - Michita", duration: 220 },
+          { page: 2, part: "002. The Second Song", duration: 180, first_frame: "http://img.example/2.jpg" },
+        ],
+      },
+    }, "https://www.bilibili.com/video/BVTEST?p=1");
+
+    expect(tracks.map((track) => track.title)).toEqual([
+      "001. Cry For Me (feat. Ami) - Michita",
+      "002. The Second Song",
+    ]);
+    expect(tracks[0]).toMatchObject({ index: 1, total: 2, duration: 220 });
+    expect(tracks[0].thumbnail).toBe("https://img.example/cover.jpg");
+    expect(tracks[1].thumbnail).toBe("https://img.example/2.jpg");
+  });
+
   it("expands a Bilibili UGC season into next-able videos", () => {
     const state = {
       videoData: {
