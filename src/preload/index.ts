@@ -278,6 +278,7 @@ const settingsApi = {
   channelsDiscordGetProfile: () => ipcRenderer.invoke(IPC.CHANNELS_DISCORD_GET_PROFILE),
   channelsDiscordGetMusicState: () => ipcRenderer.invoke(IPC.CHANNELS_DISCORD_GET_MUSIC_STATE),
   channelsDiscordGetMusicHistory: () => ipcRenderer.invoke(IPC.CHANNELS_DISCORD_GET_MUSIC_HISTORY),
+  channelsDiscordGetMusicFavorites: () => ipcRenderer.invoke(IPC.CHANNELS_DISCORD_GET_MUSIC_FAVORITES),
   channelsDiscordControlMusic: (input: unknown) => ipcRenderer.invoke(IPC.CHANNELS_DISCORD_CONTROL_MUSIC, input),
   channelsDiscordUpdateProfile: (profile: unknown) => ipcRenderer.invoke(IPC.CHANNELS_DISCORD_UPDATE_PROFILE, profile),
   channelsDiscordPickAvatar: () => ipcRenderer.invoke(IPC.CHANNELS_DISCORD_PICK_AVATAR),

@@ -10,6 +10,7 @@ import {
   parseDiscordMusicRequest,
   parseBilibiliSeasonHtml,
   parseSpotifyEmbedHtml,
+  selectBilibiliTracks,
 } from "./music-source";
 
 describe("Discord music request parsing", () => {
@@ -103,6 +104,30 @@ describe("yt-dlp playlist normalization", () => {
     expect(tracks[0]).toMatchObject({ index: 1, total: 2, duration: 220 });
     expect(tracks[0].thumbnail).toBe("https://img.example/cover.jpg");
     expect(tracks[1].thumbnail).toBe("https://img.example/2.jpg");
+  });
+
+  it("does not let a partial Bilibili season truncate the complete page queue", () => {
+    const pages = Array.from({ length: 100 }, (_, index) => ({
+      id: `BVTEST-p${index + 1}`,
+      title: `第 ${index + 1} 首`,
+      url: `https://www.bilibili.com/video/BVTEST/?p=${index + 1}`,
+      playlistTitle: "完整歌單",
+      index: index + 1,
+      total: 100,
+    }));
+    const season = pages.slice(0, 15).map((track) => ({
+      ...track,
+      playlistTitle: "第一個音樂集",
+      total: 15,
+    }));
+
+    const tracks = selectBilibiliTracks(season, pages);
+
+    expect(tracks).toHaveLength(100);
+    expect(tracks[0].playlistTitle).toBe("第一個音樂集");
+    expect(tracks[14].playlistTitle).toBe("第一個音樂集");
+    expect(tracks[15].playlistTitle).toBe("完整歌單");
+    expect(tracks.at(-1)).toMatchObject({ title: "第 100 首", index: 100, total: 100 });
   });
 
   it("expands a Bilibili UGC season into next-able videos", () => {

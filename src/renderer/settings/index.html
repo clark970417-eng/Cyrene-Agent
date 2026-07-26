@@ -1113,13 +1113,18 @@
                     <div class="discord-player__list-head">
                       <div><span class="discord-identity__eyebrow" id="channels-discord-music-library-kind">PLAYLIST</span><h4 id="channels-discord-music-playlist-title">播放清單</h4></div>
                       <div class="discord-player__list-actions">
-                        <button type="button" id="channels-discord-music-history-toggle">播放歷史</button>
+                        <div class="discord-player__tabs" role="tablist" aria-label="音樂資料庫">
+                          <button type="button" id="channels-discord-music-queue-toggle" role="tab" aria-selected="true">待播</button>
+                          <button type="button" id="channels-discord-music-favorites-toggle" role="tab" aria-selected="false">♡ 收藏</button>
+                          <button type="button" id="channels-discord-music-history-toggle" role="tab" aria-selected="false">歷史</button>
+                        </div>
                         <button type="button" id="channels-discord-music-clear">清空待播</button>
                       </div>
                     </div>
                     <ol id="channels-discord-music-queue" class="discord-player__queue">
                       <li class="is-empty">播放清單會和 Discord 即時同步</li>
                     </ol>
+                    <ol id="channels-discord-music-favorites" class="discord-player__queue discord-player__favorites" hidden></ol>
                     <ol id="channels-discord-music-history" class="discord-player__queue" hidden></ol>
                   </div>
                   <p class="channels-feedback" id="channels-discord-music-feedback" aria-live="polite"></p>

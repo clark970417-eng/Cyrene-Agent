@@ -338,6 +338,48 @@ export class DiscordVoiceCall {
     return true;
   }
 
+  async handleResolvedMusicTracks(message: Message, tracks: DiscordMusicTrack[]): Promise<boolean> {
+    if (this.mode === "music" && !this.canControlMusic(message.author.id)) {
+      await message.reply("這個播放工作階段由其他人控制；你不能修改她的音樂。");
+      return true;
+    }
+    if (!tracks.length) return false;
+    if (this.getConfig().voiceEnabled === false) {
+      await message.reply("Discord 語音目前未啟用，請先到 Cyrene 的 Discord 設定開啟。");
+      return true;
+    }
+    const channel = message.member?.voice.channel;
+    if (!channel) {
+      await message.reply("你要先加入語音頻道，再選擇 Spotify 播放清單。");
+      return true;
+    }
+    const botMember = channel.guild.members.me;
+    const permissions = botMember ? channel.permissionsFor(botMember) : null;
+    if (!channel.joinable || !permissions?.has(PermissionFlagsBits.Connect) || !permissions.has(PermissionFlagsBits.Speak)) {
+      await message.reply("我沒有加入或播放音樂的權限，請替 Bot 開啟「連接」與「說話」。");
+      return true;
+    }
+    const progress = await message.reply(`🔎 正在加入 Spotify 播放清單「${tracks[0].playlistTitle ?? "Spotify"}」…`);
+    try {
+      if (this.mode !== "music" || this.guildId !== channel.guild.id || !this.connection || !this.player) {
+        await this.connectForMusic(message);
+      }
+      const queued = tracks.map((track) => ({ ...track, queueOrder: this.musicOrder++ }));
+      if (this.musicShuffle) this.shuffleTracks(queued);
+      this.musicQueue.push(...queued);
+      if (this.currentMusicTrack) this.scheduleNextMusicPrefetch();
+      this.notifyMusicStateChange();
+      await progress.edit(`🎶 **${tracks[0].playlistTitle ?? "Spotify"}**\n已加入 ${tracks.length} 首，從「${tracks[0].title}」開始播放。`);
+      if (!this.currentMusicTrack && this.player?.state.status === AudioPlayerStatus.Idle) {
+        void this.advanceMusic(false);
+      }
+    } catch (error) {
+      console.error(LOG, "加入 Spotify 播放清單失敗:", error);
+      await progress.edit(`無法播放 Spotify 清單：${this.musicErrorMessage(error)}`).catch(() => undefined);
+    }
+    return true;
+  }
+
   async handleCommand(message: Message, command: DiscordVoiceCommand): Promise<boolean> {
     if (!command) return false;
     if (command === "leave") {

@@ -56,7 +56,9 @@ export type DiscordMusicCommand =
   | "refresh"
   | "autoplay-on"
   | "autoplay-off"
-  | "history";
+  | "history"
+  | "favorite"
+  | "favorites";
 
 export interface DiscordMusicRequest {
   url?: string;
@@ -401,6 +403,34 @@ async function resolveBilibiliPages(url: string): Promise<DiscordMusicTrack[]> {
   return normalizeBilibiliPages(await api.json() as BilibiliViewPayload, page.url);
 }
 
+/**
+ * Bilibili may expose the same video as both a UGC season and a multi-page
+ * video.  The season payload is useful for category names, but it can contain
+ * only the currently expanded category.  Never let that partial result
+ * truncate the complete `pages` queue.
+ */
+export function selectBilibiliTracks(
+  season: DiscordMusicTrack[],
+  pages: DiscordMusicTrack[],
+): DiscordMusicTrack[] {
+  if (pages.length > season.length) {
+    const seasonById = new Map(
+      season
+        .filter((track) => track.id)
+        .map((track) => [track.id!.toLowerCase(), track] as const),
+    );
+    return pages.map((track) => {
+      const category = track.id ? seasonById.get(track.id.toLowerCase()) : undefined;
+      return category?.playlistTitle
+        ? { ...track, playlistTitle: category.playlistTitle }
+        : track;
+    });
+  }
+  if (season.length > 1) return season;
+  if (pages.length > 1) return pages;
+  return season.length ? season : pages;
+}
+
 export function normalizeYtDlpResult(result: YtDlpResult, sourceUrl: string): DiscordMusicTrack[] {
   const rawEntries = result.entries?.filter((entry): entry is YtDlpEntry => !!entry) ?? [result];
   const start = Math.min(requestedStartIndex(sourceUrl), Math.max(0, rawEntries.length - 1));
@@ -443,16 +473,18 @@ export async function resolveDiscordMusicTracks(input: string): Promise<DiscordM
   const isSpotify = /^open\.spotify\.com$|^spotify\.link$/i.test(sourceHost);
   if (isSpotify) return await resolveSpotifyReference(sourceUrl);
   if (isBilibili) {
-    const season = await resolveBilibiliSeason(sourceUrl).catch((err) => {
-      console.warn("[DiscordMusicSource] Bilibili 合集解析失敗，改用 yt-dlp:", err instanceof Error ? err.message : err);
-      return [];
-    });
-    if (season.length > 1) return season;
-    const pages = await resolveBilibiliPages(sourceUrl).catch((err) => {
-      console.warn("[DiscordMusicSource] Bilibili 分集解析失敗，改用 yt-dlp:", err instanceof Error ? err.message : err);
-      return [];
-    });
-    if (pages.length > 1) return pages;
+    const [season, pages] = await Promise.all([
+      resolveBilibiliSeason(sourceUrl).catch((err) => {
+        console.warn("[DiscordMusicSource] Bilibili 合集解析失敗，改用其他解析結果:", err instanceof Error ? err.message : err);
+        return [];
+      }),
+      resolveBilibiliPages(sourceUrl).catch((err) => {
+        console.warn("[DiscordMusicSource] Bilibili 分集解析失敗，改用其他解析結果:", err instanceof Error ? err.message : err);
+        return [];
+      }),
+    ]);
+    const bilibiliTracks = selectBilibiliTracks(season, pages);
+    if (bilibiliTracks.length > 1) return bilibiliTracks;
   }
   const binary = await ensureYtDlpBinary();
   const commonArgs = [

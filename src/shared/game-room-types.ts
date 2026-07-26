@@ -6,6 +6,7 @@ export const EXTRA_GAME_IDS = [
   "truth-cards",
   "story",
   "cyrene-quiz",
+  "ropebound",
 ] as const;
 
 export type ExtraGameId = typeof EXTRA_GAME_IDS[number];

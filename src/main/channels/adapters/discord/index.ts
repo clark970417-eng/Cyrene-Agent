@@ -24,17 +24,23 @@ import type {
 } from "../../types";
 import { loadChannelsSettings, saveChannelsSettings, type DiscordChannelConfig } from "../../settings-store";
 import { DiscordVoiceCall, parseDiscordVoiceCommand, type DiscordMusicState } from "./voice-call";
-import { findDiscordMusicUrl, parseDiscordMusicRequest, searchDiscordMusicTracks, type DiscordMusicTrack } from "./music-source";
+import { findDiscordMusicUrl, parseDiscordMusicRequest, resolveDiscordMusicTracks, searchDiscordMusicTracks, type DiscordMusicTrack } from "./music-source";
 import { toTraditionalTaiwan } from "../../../utils/opencc";
 import {
   buildDiscordMusicPlayer,
   buildDiscordMusicQueue,
   buildDiscordMusicHistory,
+  buildDiscordMusicFavorites,
+  buildDiscordSpotifyPlaylists,
+  buildDiscordSpotifyArtists,
+  buildDiscordHelp,
   buildDiscordMusicSearchResults,
   DISCORD_SLASH_COMMANDS,
   musicRequestFromButton,
 } from "./slash-commands";
 import { loadDiscordMusicHistory } from "./music-history";
+import { loadDiscordMusicFavorites, saveDiscordMusicFavorite } from "./music-favorites";
+import { getSpotifyArtistTopTracks, getSpotifyPlaylists, getSpotifyPlaylistTracks, searchSpotifyArtists } from "../../spotify-control";
 
 const LOG = "[DiscordAdapter]";
 
@@ -303,7 +309,7 @@ export class DiscordAdapter implements ChannelAdapter {
   private async handleSlashCommand(interaction: ChatInputCommandInteraction): Promise<void> {
     // Discord interactions must be acknowledged within roughly three seconds. /play may
     // parse large Bilibili collections, so acknowledge it before any disk/config work.
-    const playPredeferred = interaction.commandName === "play";
+    const playPredeferred = interaction.commandName === "play" || interaction.commandName === "favorite";
     if (playPredeferred) await interaction.deferReply();
     const config = loadChannelsSettings().discord;
     if (!shouldHandleDiscordInteraction(interaction, config)) {
@@ -331,13 +337,10 @@ export class DiscordAdapter implements ChannelAdapter {
     }
     if (interaction.commandName === "help") {
       await interaction.reply({
-        content: [
-          "**Cyrene Discord 指令**",
-          "`/chat` AI 對話　`/join` 語音聊天　`/leave` 離開",
-          "`/play` 搜尋或播放連結　`/nowplaying` 播放器　`/previous`　`/pause`　`/resume`　`/skip`　`/stop`",
-          "`/queue`　`/history`　`/remove`　`/clear`　`/volume`　`/repeat`　`/mode`　`/autoplay`",
-          "`/status` 查看連線、延遲及目前播放狀態",
-        ].join("\n"),
+        ...buildDiscordHelp({
+          username: this.client?.user?.username,
+          avatarUrl: this.client?.user?.displayAvatarURL({ size: 256 }),
+        }),
         flags: MessageFlags.Ephemeral,
       });
       return;
@@ -360,6 +363,62 @@ export class DiscordAdapter implements ChannelAdapter {
 
     if (interaction.commandName === "history") {
       await interaction.reply({ ...buildDiscordMusicHistory(await loadDiscordMusicHistory(25)), flags: MessageFlags.Ephemeral });
+      return;
+    }
+    if (interaction.commandName === "favorites") {
+      await interaction.reply({ ...buildDiscordMusicFavorites(await loadDiscordMusicFavorites(100)), flags: MessageFlags.Ephemeral });
+      return;
+    }
+    if (interaction.commandName === "spotify") {
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      try {
+        const artist = interaction.options.getString("artist")?.trim();
+        await interaction.editReply(artist
+          ? buildDiscordSpotifyArtists(artist, await searchSpotifyArtists(artist, 10))
+          : buildDiscordSpotifyPlaylists(await getSpotifyPlaylists(25)));
+      } catch (error) {
+        await interaction.editReply({ content: `無法讀取 Spotify 播放清單：${error instanceof Error ? error.message : String(error)}` });
+      }
+      return;
+    }
+    if (interaction.commandName === "save") {
+      const state = this.voiceCall?.getMusicState();
+      if (!state?.current) {
+        await interaction.reply({ content: "目前沒有正在播放的歌曲。", flags: MessageFlags.Ephemeral });
+        return;
+      }
+      if (!this.voiceCall?.canControlMusic(interaction.user.id)) {
+        await interaction.reply({ content: "這是其他人的播放工作階段，你不能修改她的收藏。", flags: MessageFlags.Ephemeral });
+        return;
+      }
+      const saved = await saveDiscordMusicFavorite(state.current);
+      await interaction.reply({
+        content: saved.added ? `❤️ 已將「${saved.entry.title}」加入收藏。` : `「${saved.entry.title}」已經在收藏中。`,
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+    if (interaction.commandName === "favorite") {
+      if (!this.voiceCall?.canControlMusic(interaction.user.id)) {
+        await interaction.editReply({ content: "這是其他人的播放工作階段，你不能修改她的收藏。" });
+        return;
+      }
+      try {
+        const input = interaction.options.getString("url")?.trim();
+        const track = input
+          ? (await resolveDiscordMusicTracks(findDiscordMusicUrl(input) ?? input))[0]
+          : this.voiceCall?.getMusicState().current;
+        if (!track) {
+          await interaction.editReply({ content: input ? "這個連結沒有找到可收藏的歌曲。" : "目前沒有正在播放的歌曲，請貼上單曲連結。" });
+          return;
+        }
+        const saved = await saveDiscordMusicFavorite(track);
+        await interaction.editReply({
+          content: saved.added ? `❤️ 已將「${saved.entry.title}」加入單曲收藏。` : `「${saved.entry.title}」已經在收藏中。`,
+        });
+      } catch (error) {
+        await interaction.editReply({ content: `無法收藏這個連結：${error instanceof Error ? error.message : String(error)}` });
+      }
       return;
     }
 
@@ -452,6 +511,22 @@ export class DiscordAdapter implements ChannelAdapter {
       await interaction.reply({ ...buildDiscordMusicHistory(await loadDiscordMusicHistory(25)), flags: MessageFlags.Ephemeral });
       return;
     }
+    if (request.command === "favorites") {
+      await interaction.reply({ ...buildDiscordMusicFavorites(await loadDiscordMusicFavorites(100)), flags: MessageFlags.Ephemeral });
+      return;
+    }
+    if (request.command === "favorite") {
+      if (!state?.current) {
+        await interaction.reply({ content: "目前沒有正在播放的歌曲。", flags: MessageFlags.Ephemeral });
+        return;
+      }
+      const saved = await saveDiscordMusicFavorite(state.current);
+      await interaction.reply({
+        content: saved.added ? `❤️ 已將「${saved.entry.title}」加入收藏。` : `「${saved.entry.title}」已經在收藏中。`,
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
     if (request.command === "refresh") {
       await interaction.deferUpdate();
       this.musicControllerMessage = interaction.message;
@@ -470,6 +545,18 @@ export class DiscordAdapter implements ChannelAdapter {
   private async handleMusicSelect(interaction: StringSelectMenuInteraction): Promise<void> {
     if (interaction.customId.startsWith("cyrene:music:search:")) {
       await this.handleMusicSearchSelect(interaction);
+      return;
+    }
+    if (interaction.customId === "cyrene:music:favorites-select") {
+      await this.handleMusicFavoriteSelect(interaction);
+      return;
+    }
+    if (interaction.customId === "cyrene:music:spotify-select") {
+      await this.handleSpotifyPlaylistSelect(interaction);
+      return;
+    }
+    if (interaction.customId === "cyrene:music:spotify-artist-select") {
+      await this.handleSpotifyArtistSelect(interaction);
       return;
     }
     if (interaction.customId !== "cyrene:music:volume") return;
@@ -525,6 +612,94 @@ export class DiscordAdapter implements ChannelAdapter {
     this.musicControllerMessage = interaction.message;
     await interaction.editReply(buildDiscordMusicPlayer(this.voiceCall.getMusicState()));
     this.startMusicControllerRefresh();
+  }
+
+  private async handleMusicFavoriteSelect(interaction: StringSelectMenuInteraction): Promise<void> {
+    if (!shouldHandleDiscordInteraction(interaction, loadChannelsSettings().discord)) {
+      await interaction.reply({ content: "你沒有操作這個 Bot 的權限。", flags: MessageFlags.Ephemeral });
+      return;
+    }
+    if (this.voiceCall?.getMusicState().active && !this.voiceCall.canControlMusic(interaction.user.id)) {
+      await interaction.reply({ content: "這是其他人的播放工作階段，你不能加入歌曲。", flags: MessageFlags.Ephemeral });
+      return;
+    }
+    const favorite = (await loadDiscordMusicFavorites(500))
+      .find((entry) => entry.id === interaction.values[0]);
+    if (!favorite) {
+      await interaction.reply({ content: "找不到這筆收藏，請重新開啟 `/favorites`。", flags: MessageFlags.Ephemeral });
+      return;
+    }
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    const message = await this.interactionAsMessage(interaction);
+    const handled = await this.voiceCall?.handleMusicRequest(message, { url: favorite.url }) ?? false;
+    if (!handled || !this.voiceCall?.getMusicState().active) {
+      await interaction.editReply({ content: "無法開始播放，請確認你已加入語音頻道。", embeds: [], components: [] });
+      return;
+    }
+    await interaction.editReply(buildDiscordMusicPlayer(this.voiceCall.getMusicState()));
+  }
+
+  private async handleSpotifyPlaylistSelect(interaction: StringSelectMenuInteraction): Promise<void> {
+    if (!shouldHandleDiscordInteraction(interaction, loadChannelsSettings().discord)) {
+      await interaction.reply({ content: "你沒有操作這個 Bot 的權限。", flags: MessageFlags.Ephemeral });
+      return;
+    }
+    if (this.voiceCall?.getMusicState().active && !this.voiceCall.canControlMusic(interaction.user.id)) {
+      await interaction.reply({ content: "這是其他人的播放工作階段，你不能加入歌曲。", flags: MessageFlags.Ephemeral });
+      return;
+    }
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    try {
+      const playlist = (await getSpotifyPlaylists(25)).find((item) => item.id === interaction.values[0]);
+      if (!playlist) {
+        await interaction.editReply({ content: "找不到這個 Spotify 播放清單，請重新使用 `/spotify`。" });
+        return;
+      }
+      await interaction.editReply({ content: `🔎 正在讀取「${playlist.name}」…` });
+      const tracks = await getSpotifyPlaylistTracks(playlist);
+      if (!tracks.length) {
+        await interaction.editReply({ content: "這份 Spotify 播放清單沒有可播放的歌曲。" });
+        return;
+      }
+      const message = await this.interactionAsMessage(interaction);
+      const handled = await this.voiceCall?.handleResolvedMusicTracks(message, tracks) ?? false;
+      if (!handled || !this.voiceCall?.getMusicState().active) {
+        await interaction.editReply({ content: "無法開始播放，請確認你已加入語音頻道。", embeds: [], components: [] });
+        return;
+      }
+      await interaction.editReply(buildDiscordMusicPlayer(this.voiceCall.getMusicState()));
+    } catch (error) {
+      await interaction.editReply({ content: `Spotify 播放清單讀取失敗：${error instanceof Error ? error.message : String(error)}` });
+    }
+  }
+
+  private async handleSpotifyArtistSelect(interaction: StringSelectMenuInteraction): Promise<void> {
+    if (!shouldHandleDiscordInteraction(interaction, loadChannelsSettings().discord)) {
+      await interaction.reply({ content: "你沒有操作這個 Bot 的權限。", flags: MessageFlags.Ephemeral });
+      return;
+    }
+    if (this.voiceCall?.getMusicState().active && !this.voiceCall.canControlMusic(interaction.user.id)) {
+      await interaction.reply({ content: "這是其他人的播放工作階段，你不能加入歌曲。", flags: MessageFlags.Ephemeral });
+      return;
+    }
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    try {
+      await interaction.editReply({ content: "🔎 正在讀取作者的熱門歌曲…" });
+      const tracks = await getSpotifyArtistTopTracks(interaction.values[0] ?? "");
+      if (!tracks.length) {
+        await interaction.editReply({ content: "這位作者目前沒有可播放的熱門歌曲。" });
+        return;
+      }
+      const message = await this.interactionAsMessage(interaction);
+      const handled = await this.voiceCall?.handleResolvedMusicTracks(message, tracks) ?? false;
+      if (!handled || !this.voiceCall?.getMusicState().active) {
+        await interaction.editReply({ content: "無法開始播放，請確認你已加入語音頻道。", embeds: [], components: [] });
+        return;
+      }
+      await interaction.editReply(buildDiscordMusicPlayer(this.voiceCall.getMusicState()));
+    } catch (error) {
+      await interaction.editReply({ content: `Spotify 作者歌曲讀取失敗：${error instanceof Error ? error.message : String(error)}` });
+    }
   }
 
   private stopMusicControllerRefresh(): void {

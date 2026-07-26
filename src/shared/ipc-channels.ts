@@ -278,6 +278,7 @@ export const IPC = {
   CHANNELS_DISCORD_GET_PROFILE: "channels:discord:get-profile",
   CHANNELS_DISCORD_GET_MUSIC_STATE: "channels:discord:get-music-state",
   CHANNELS_DISCORD_GET_MUSIC_HISTORY: "channels:discord:get-music-history",
+  CHANNELS_DISCORD_GET_MUSIC_FAVORITES: "channels:discord:get-music-favorites",
   CHANNELS_DISCORD_CONTROL_MUSIC: "channels:discord:control-music",
   CHANNELS_DISCORD_UPDATE_PROFILE: "channels:discord:update-profile",
   CHANNELS_DISCORD_PICK_AVATAR: "channels:discord:pick-avatar",

@@ -2,6 +2,8 @@ import { randomBytes } from "node:crypto";
 import { shell } from "electron";
 import { loadChannelsSettings, saveChannelsSettings } from "./settings-store";
 import { registerLocalGetRoute } from "./inbound-server";
+import { buildSpotifySearchQuery, type DiscordMusicTrack } from "./adapters/discord/music-source";
+import { toTraditionalTaiwan } from "../utils/opencc";
 
 export const SPOTIFY_REDIRECT_URI = "http://127.0.0.1:53854/spotify/callback";
 const SCOPES = [
@@ -40,6 +42,23 @@ export interface SpotifyPlaybackStatus {
     volume?: number;
   };
   devices: Array<{ id: string; name: string; type: string; active: boolean; volume?: number }>;
+}
+
+export interface SpotifyPlaylistSummary {
+  id: string;
+  name: string;
+  url: string;
+  imageUrl?: string;
+  total: number;
+  owner?: string;
+}
+
+export interface SpotifyArtistSummary {
+  id: string;
+  name: string;
+  url: string;
+  imageUrl?: string;
+  followers?: number;
 }
 
 let accessToken = "";
@@ -219,6 +238,149 @@ export function spotifyUriFromInput(input: string): string | null {
   } catch {
     return null;
   }
+}
+
+export async function getSpotifyPlaylists(limit = 25): Promise<SpotifyPlaylistSummary[]> {
+  const safeLimit = Math.max(1, Math.min(25, Math.floor(limit)));
+  const payload = await spotifyApi<{
+    items?: Array<{
+      id?: string;
+      name?: string;
+      external_urls?: { spotify?: string };
+      images?: Array<{ url?: string }>;
+      tracks?: { total?: number };
+      owner?: { display_name?: string };
+    } | null>;
+  }>(`/me/playlists?limit=${safeLimit}`);
+  return (payload?.items ?? [])
+    .filter((item): item is NonNullable<typeof item> & { id: string; name: string } => Boolean(item?.id && item.name))
+    .map((item) => ({
+      id: item.id,
+      name: toTraditionalTaiwan(item.name),
+      url: item.external_urls?.spotify ?? `https://open.spotify.com/playlist/${item.id}`,
+      imageUrl: item.images?.[0]?.url,
+      total: item.tracks?.total ?? 0,
+      owner: item.owner?.display_name ? toTraditionalTaiwan(item.owner.display_name) : undefined,
+    }));
+}
+
+export async function getSpotifyPlaylistTracks(
+  playlist: SpotifyPlaylistSummary,
+  maxItems = 500,
+): Promise<DiscordMusicTrack[]> {
+  const collected: Array<{
+    id: string;
+    name: string;
+    artists: string;
+    url: string;
+    imageUrl?: string;
+    duration?: number;
+  }> = [];
+  const safeMax = Math.max(1, Math.min(500, Math.floor(maxItems)));
+  for (let offset = 0; offset < safeMax; offset += 100) {
+    const limit = Math.min(100, safeMax - offset);
+    const payload = await spotifyApi<{
+      items?: Array<{
+        track?: {
+          id?: string;
+          name?: string;
+          duration_ms?: number;
+          artists?: Array<{ name?: string }>;
+          external_urls?: { spotify?: string };
+          album?: { images?: Array<{ url?: string }> };
+        } | null;
+      } | null>;
+      next?: string | null;
+    }>(`/playlists/${encodeURIComponent(playlist.id)}/tracks?limit=${limit}&offset=${offset}`);
+    const items = payload?.items ?? [];
+    for (const item of items) {
+      const track = item?.track;
+      if (!track?.id || !track.name) continue;
+      collected.push({
+        id: track.id,
+        name: toTraditionalTaiwan(track.name),
+        artists: toTraditionalTaiwan(track.artists?.map((artist) => artist.name).filter(Boolean).join("、") ?? ""),
+        url: track.external_urls?.spotify ?? `https://open.spotify.com/track/${track.id}`,
+        imageUrl: track.album?.images?.[0]?.url ?? playlist.imageUrl,
+        duration: typeof track.duration_ms === "number" ? Math.round(track.duration_ms / 1000) : undefined,
+      });
+    }
+    if (!payload?.next || items.length < limit) break;
+  }
+  return collected.map((track, index, tracks) => ({
+    id: track.id,
+    title: track.artists ? `${track.name} — ${track.artists}` : track.name,
+    url: track.url,
+    playbackUrl: `ytsearch1:${buildSpotifySearchQuery(track.name, track.artists)}`,
+    thumbnail: track.imageUrl,
+    playlistTitle: playlist.name,
+    duration: track.duration,
+    index: index + 1,
+    total: tracks.length,
+  }));
+}
+
+export async function searchSpotifyArtists(query: string, limit = 10): Promise<SpotifyArtistSummary[]> {
+  const safeQuery = query.trim();
+  if (!safeQuery) return [];
+  const safeLimit = Math.max(1, Math.min(10, Math.floor(limit)));
+  const params = new URLSearchParams({ q: safeQuery, type: "artist", limit: String(safeLimit), market: "TW" });
+  const payload = await spotifyApi<{
+    artists?: {
+      items?: Array<{
+        id?: string;
+        name?: string;
+        external_urls?: { spotify?: string };
+        images?: Array<{ url?: string }>;
+        followers?: { total?: number };
+      } | null>;
+    };
+  }>(`/search?${params}`);
+  return (payload?.artists?.items ?? [])
+    .filter((artist): artist is NonNullable<typeof artist> & { id: string; name: string } => Boolean(artist?.id && artist.name))
+    .map((artist) => ({
+      id: artist.id,
+      name: toTraditionalTaiwan(artist.name),
+      url: artist.external_urls?.spotify ?? `https://open.spotify.com/artist/${artist.id}`,
+      imageUrl: artist.images?.[0]?.url,
+      followers: artist.followers?.total,
+    }));
+}
+
+export async function getSpotifyArtistTopTracks(artistId: string): Promise<DiscordMusicTrack[]> {
+  const safeId = artistId.trim();
+  if (!/^[A-Za-z0-9]+$/.test(safeId)) throw new Error("Spotify 作者 ID 無效");
+  const [artist, payload] = await Promise.all([
+    spotifyApi<{ name?: string; images?: Array<{ url?: string }> }>(`/artists/${encodeURIComponent(safeId)}`),
+    spotifyApi<{
+      tracks?: Array<{
+        id?: string;
+        name?: string;
+        duration_ms?: number;
+        artists?: Array<{ name?: string }>;
+        external_urls?: { spotify?: string };
+        album?: { images?: Array<{ url?: string }> };
+      } | null>;
+    }>(`/artists/${encodeURIComponent(safeId)}/top-tracks?market=TW`),
+  ]);
+  const artistName = toTraditionalTaiwan(artist?.name?.trim() || "Spotify 作者熱門歌曲");
+  const tracks = (payload?.tracks ?? [])
+    .filter((track): track is NonNullable<typeof track> & { id: string; name: string } => Boolean(track?.id && track.name));
+  return tracks.map((track, index) => {
+    const title = toTraditionalTaiwan(track.name);
+    const artists = toTraditionalTaiwan(track.artists?.map((item) => item.name).filter(Boolean).join("、") ?? "");
+    return {
+      id: track.id,
+      title: artists ? `${title} — ${artists}` : title,
+      url: track.external_urls?.spotify ?? `https://open.spotify.com/track/${track.id}`,
+      playbackUrl: `ytsearch1:${buildSpotifySearchQuery(title, artists)}`,
+      thumbnail: track.album?.images?.[0]?.url ?? artist?.images?.[0]?.url,
+      playlistTitle: `${artistName} · 熱門歌曲`,
+      duration: typeof track.duration_ms === "number" ? Math.round(track.duration_ms / 1000) : undefined,
+      index: index + 1,
+      total: tracks.length,
+    };
+  });
 }
 
 async function resolveSpotifyPlaybackUri(query: string): Promise<string> {

@@ -412,6 +412,7 @@ interface SettingsApi {
   channelsDiscordGetProfile: () => Promise<DiscordBotProfile>;
   channelsDiscordGetMusicState: () => Promise<DiscordMusicState>;
   channelsDiscordGetMusicHistory: () => Promise<DiscordMusicHistoryEntry[]>;
+  channelsDiscordGetMusicFavorites: () => Promise<DiscordMusicFavoriteEntry[]>;
   channelsDiscordControlMusic: (input: DiscordMusicControlInput) => Promise<{ ok: boolean; message: string; state?: DiscordMusicState }>;
   channelsDiscordUpdateProfile: (profile: { username: string; activityText: string; status: string; avatarPath?: string; bannerPath?: string }) => Promise<{ ok: boolean; profile?: DiscordBotProfile; error?: string }>;
   channelsDiscordPickAvatar: () => Promise<string | null>;
@@ -506,6 +507,16 @@ interface DiscordMusicHistoryEntry {
   thumbnail?: string;
   playlistTitle?: string;
   playedAt: string;
+}
+
+interface DiscordMusicFavoriteEntry {
+  id: string;
+  title: string;
+  url: string;
+  thumbnail?: string;
+  playlistTitle?: string;
+  duration?: number;
+  savedAt: string;
 }
 
 interface SpotifyPlaybackStatus {
@@ -713,6 +724,7 @@ if (!window.settings) {
     channelsDiscordGetProfile: async () => ({ connected: false, guildCount: 0, guilds: [], voiceActive: false }),
     channelsDiscordGetMusicState: async () => ({ active: false, paused: false, current: null, queue: [], volume: 100, repeat: "off", shuffle: false, autoplay: false, elapsed: 0 }),
     channelsDiscordGetMusicHistory: async () => [],
+    channelsDiscordGetMusicFavorites: async () => [],
     channelsDiscordControlMusic: async () => ({ ok: false, message: "settings api unavailable" }),
     channelsDiscordUpdateProfile: async () => ({ ok: false, error: "settings api unavailable" }),
     channelsDiscordPickAvatar: async () => null,
@@ -2872,7 +2884,10 @@ const channelsDiscordMusicVolumeValueEl = document.getElementById("channels-disc
 const channelsDiscordMusicQueueEl = document.getElementById("channels-discord-music-queue");
 const channelsDiscordMusicPlaylistTitleEl = document.getElementById("channels-discord-music-playlist-title");
 const channelsDiscordMusicLibraryKindEl = document.getElementById("channels-discord-music-library-kind");
+const channelsDiscordMusicQueueToggleBtn = document.getElementById("channels-discord-music-queue-toggle") as HTMLButtonElement | null;
+const channelsDiscordMusicFavoritesToggleBtn = document.getElementById("channels-discord-music-favorites-toggle") as HTMLButtonElement | null;
 const channelsDiscordMusicHistoryToggleBtn = document.getElementById("channels-discord-music-history-toggle") as HTMLButtonElement | null;
+const channelsDiscordMusicFavoritesEl = document.getElementById("channels-discord-music-favorites");
 const channelsDiscordMusicHistoryEl = document.getElementById("channels-discord-music-history");
 const channelsDiscordMusicFeedbackEl = document.getElementById("channels-discord-music-feedback");
 const channelsSpotifyPlanEl = document.getElementById("channels-spotify-plan");
@@ -2907,6 +2922,7 @@ let channelsSaveTimer: number | null = null;
 let pendingDiscordAvatarPath: string | undefined;
 let pendingDiscordBannerPath: string | undefined;
 let discordMusicState: DiscordMusicState = { active: false, paused: false, current: null, queue: [], volume: 100, repeat: "off", shuffle: false, autoplay: false, elapsed: 0 };
+let discordMusicLibraryView: "queue" | "favorites" | "history" = "queue";
 let discordMusicRefreshTimer: number | null = null;
 let discordMusicVolumeTimer: number | null = null;
 let spotifyStatus: SpotifyPlaybackStatus = { configured: false, connected: false, devices: [] };
@@ -3032,10 +3048,11 @@ function renderDiscordMusic(state: DiscordMusicState): void {
   }
   if (channelsDiscordMusicTitleEl) channelsDiscordMusicTitleEl.textContent = current?.title ?? "等待你在 Discord 使用 /play";
   if (channelsDiscordMusicPlaylistTitleEl) {
-    const showingHistory = channelsDiscordMusicHistoryEl ? !channelsDiscordMusicHistoryEl.hidden : false;
-    channelsDiscordMusicPlaylistTitleEl.textContent = showingHistory
+    channelsDiscordMusicPlaylistTitleEl.textContent = discordMusicLibraryView === "history"
       ? "播放歷史"
-      : current?.playlistTitle ?? state.queue[0]?.playlistTitle ?? "播放清單";
+      : discordMusicLibraryView === "favorites"
+        ? "我喜歡的歌"
+        : current?.playlistTitle ?? state.queue[0]?.playlistTitle ?? "播放清單";
     channelsDiscordMusicPlaylistTitleEl.title = channelsDiscordMusicPlaylistTitleEl.textContent;
   }
   if (channelsDiscordMusicToggleBtn) {
@@ -3105,22 +3122,8 @@ async function refreshDiscordMusic(): Promise<void> {
   }
 }
 
-async function toggleDiscordMusicHistory(): Promise<void> {
-  if (!channelsDiscordMusicHistoryEl || !channelsDiscordMusicQueueEl || !channelsDiscordMusicHistoryToggleBtn) return;
-  const showHistory = channelsDiscordMusicHistoryEl.hidden;
-  channelsDiscordMusicHistoryEl.hidden = !showHistory;
-  channelsDiscordMusicQueueEl.hidden = showHistory;
-  channelsDiscordMusicHistoryToggleBtn.textContent = showHistory ? "目前歌單" : "播放歷史";
-  channelsDiscordMusicHistoryToggleBtn.setAttribute("aria-pressed", String(showHistory));
-  if (channelsDiscordMusicLibraryKindEl) channelsDiscordMusicLibraryKindEl.textContent = showHistory ? "HISTORY" : "PLAYLIST";
-  if (channelsDiscordMusicPlaylistTitleEl && showHistory) {
-    channelsDiscordMusicPlaylistTitleEl.textContent = "播放歷史";
-    channelsDiscordMusicPlaylistTitleEl.title = "播放歷史";
-  }
-  if (!showHistory) {
-    renderDiscordMusic(discordMusicState);
-    return;
-  }
+async function renderDiscordMusicHistory(): Promise<void> {
+  if (!channelsDiscordMusicHistoryEl) return;
   channelsDiscordMusicHistoryEl.replaceChildren();
   const history = await window.settings.channelsDiscordGetMusicHistory();
   if (!history.length) {
@@ -3142,6 +3145,94 @@ async function toggleDiscordMusicHistory(): Promise<void> {
     item.append(icon, title, time);
     channelsDiscordMusicHistoryEl.appendChild(item);
   }
+}
+
+function discordFavoriteSource(url: string): { label: string; className: string } {
+  if (/open\.spotify\.com/i.test(url)) return { label: "Spotify", className: "is-spotify" };
+  if (/(?:bilibili\.com|b23\.tv)/i.test(url)) return { label: "Bilibili", className: "is-bilibili" };
+  if (/(?:youtube\.com|youtu\.be)/i.test(url)) return { label: "YouTube", className: "is-youtube" };
+  return { label: "Music", className: "is-music" };
+}
+
+async function renderDiscordMusicFavorites(): Promise<void> {
+  if (!channelsDiscordMusicFavoritesEl) return;
+  channelsDiscordMusicFavoritesEl.replaceChildren();
+  const favorites = await window.settings.channelsDiscordGetMusicFavorites();
+  if (!favorites.length) {
+    const empty = document.createElement("li");
+    empty.className = "is-empty discord-player__favorites-empty";
+    empty.textContent = "還沒有收藏歌曲。在 Discord 播放器按 ❤️ Save，或使用 /favorite。";
+    channelsDiscordMusicFavoritesEl.appendChild(empty);
+    return;
+  }
+  for (const entry of favorites) {
+    const source = discordFavoriteSource(entry.url);
+    const item = document.createElement("li");
+    item.className = `discord-player__favorite ${source.className}`;
+
+    const cover = document.createElement("div");
+    cover.className = "discord-player__favorite-cover";
+    cover.textContent = "♪";
+    if (entry.thumbnail) {
+      const image = document.createElement("img");
+      image.src = entry.thumbnail;
+      image.alt = "";
+      image.loading = "lazy";
+      image.addEventListener("error", () => image.remove(), { once: true });
+      cover.appendChild(image);
+    }
+
+    const copy = document.createElement("div");
+    copy.className = "discord-player__favorite-copy";
+    const meta = document.createElement("div");
+    meta.className = "discord-player__favorite-meta";
+    const badge = document.createElement("span");
+    badge.textContent = source.label;
+    const saved = document.createElement("time");
+    saved.dateTime = entry.savedAt;
+    saved.textContent = new Intl.DateTimeFormat("zh-TW", { month: "numeric", day: "numeric" }).format(new Date(entry.savedAt));
+    meta.append(badge, saved);
+    const title = document.createElement("a");
+    title.href = entry.url;
+    title.target = "_blank";
+    title.rel = "noopener";
+    title.textContent = entry.title;
+    title.title = `開啟 ${entry.title}`;
+    const detail = document.createElement("small");
+    detail.textContent = [entry.playlistTitle, entry.duration ? formatDiscordMusicTime(entry.duration) : ""].filter(Boolean).join(" · ") || "單曲收藏";
+    copy.append(meta, title, detail);
+
+    const open = document.createElement("a");
+    open.className = "discord-player__favorite-open";
+    open.href = entry.url;
+    open.target = "_blank";
+    open.rel = "noopener";
+    open.textContent = "↗";
+    open.title = "開啟原始連結";
+    item.append(cover, copy, open);
+    channelsDiscordMusicFavoritesEl.appendChild(item);
+  }
+}
+
+async function showDiscordMusicLibrary(view: "queue" | "favorites" | "history"): Promise<void> {
+  discordMusicLibraryView = view;
+  if (channelsDiscordMusicQueueEl) channelsDiscordMusicQueueEl.hidden = view !== "queue";
+  if (channelsDiscordMusicFavoritesEl) channelsDiscordMusicFavoritesEl.hidden = view !== "favorites";
+  if (channelsDiscordMusicHistoryEl) channelsDiscordMusicHistoryEl.hidden = view !== "history";
+  const tabs = [
+    [channelsDiscordMusicQueueToggleBtn, "queue"],
+    [channelsDiscordMusicFavoritesToggleBtn, "favorites"],
+    [channelsDiscordMusicHistoryToggleBtn, "history"],
+  ] as const;
+  for (const [button, name] of tabs) {
+    button?.setAttribute("aria-selected", String(name === view));
+    button?.setAttribute("aria-pressed", String(name === view));
+  }
+  if (channelsDiscordMusicClearBtn) channelsDiscordMusicClearBtn.hidden = view !== "queue";
+  if (channelsDiscordMusicLibraryKindEl) channelsDiscordMusicLibraryKindEl.textContent = view === "queue" ? "PLAYLIST" : view === "favorites" ? "FAVORITES" : "HISTORY";
+  if (view === "favorites") await renderDiscordMusicFavorites();
+  else if (view === "history") await renderDiscordMusicHistory();
+  renderDiscordMusic(discordMusicState);
 }
 
 async function controlDiscordMusic(input: DiscordMusicControlInput, quiet = false): Promise<void> {
@@ -3581,7 +3672,9 @@ async function loadChannelsPanel(): Promise<void> {
     void controlDiscordMusic({ command: discordMusicState.autoplay ? "autoplay-off" : "autoplay-on" }, true);
   });
   channelsDiscordMusicClearBtn?.addEventListener("click", () => void controlDiscordMusic({ command: "clear" }));
-  channelsDiscordMusicHistoryToggleBtn?.addEventListener("click", () => void toggleDiscordMusicHistory());
+  channelsDiscordMusicQueueToggleBtn?.addEventListener("click", () => void showDiscordMusicLibrary("queue"));
+  channelsDiscordMusicFavoritesToggleBtn?.addEventListener("click", () => void showDiscordMusicLibrary("favorites"));
+  channelsDiscordMusicHistoryToggleBtn?.addEventListener("click", () => void showDiscordMusicLibrary("history"));
   channelsDiscordMusicQueueEl?.addEventListener("click", (event) => {
     const button = (event.target as HTMLElement).closest<HTMLButtonElement>("button[data-queue-position]");
     const position = Number(button?.dataset.queuePosition);

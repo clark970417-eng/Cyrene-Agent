@@ -29,6 +29,7 @@ describe("game room stats", () => {
         "truth-cards": { played: 0, userWins: 0, cyreneWins: 0, draws: 0 },
         story: { played: 0, userWins: 0, cyreneWins: 0, draws: 0 },
         "cyrene-quiz": { played: 0, userWins: 0, cyreneWins: 0, draws: 0 },
+        ropebound: { played: 0, userWins: 0, cyreneWins: 0, draws: 0 },
       },
     });
   });

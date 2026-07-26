@@ -20,6 +20,7 @@ import { ILinkBotAdapter, loadCredentials } from "./adapters/wechat/ilink-bot-ad
 import { DiscordAdapter } from "./adapters/discord";
 import { getRecentLog, clearLog } from "./message-log";
 import { loadDiscordMusicHistory } from "./adapters/discord/music-history";
+import { loadDiscordMusicFavorites } from "./adapters/discord/music-favorites";
 import { controlSpotify, disconnectSpotify, getSpotifyStatus, startSpotifyAuthorization } from "./spotify-control";
 
 const LOG = "[ChannelsInit]";
@@ -244,6 +245,7 @@ function registerChannelsIpc(): void {
   });
 
   ipcMain.handle(IPC.CHANNELS_DISCORD_GET_MUSIC_HISTORY, () => loadDiscordMusicHistory(50));
+  ipcMain.handle(IPC.CHANNELS_DISCORD_GET_MUSIC_FAVORITES, () => loadDiscordMusicFavorites(500));
 
   ipcMain.handle(IPC.CHANNELS_DISCORD_CONTROL_MUSIC, async (_event, raw: unknown) => {
     const adapter = channelManager.getAdapter("discord") as DiscordAdapter | undefined;

@@ -3,6 +3,7 @@ import type { ExtraGameId, GameId, GameOutcome, GameResult, GameRoomStats } from
 import { chooseCyreneMove, getWinner, type Cell } from "./game-logic";
 import { setupExtraGames } from "./extra-games";
 import { setupCyreneQuiz } from "./cyrene-quiz";
+import { setupRopeboundGame } from "./ropebound-game";
 import "./game-room.css";
 
 type GameRoomApi = {
@@ -59,6 +60,7 @@ const EXTRA_CONTAINERS: Record<ExtraGameId, string> = {
   "truth-cards": "truth-game",
   story: "story-game",
   "cyrene-quiz": "quiz-game",
+  ropebound: "ropebound-game",
 };
 
 function shuffledQuestions(): typeof QUESTIONS[number][] {
@@ -86,6 +88,7 @@ function showStage(): void {
 function hideAllGames(): void {
   resonanceGame.hidden = true;
   ticGame.hidden = true;
+  playStage.classList.remove("play-stage--wide");
   document.querySelectorAll<HTMLElement>(".extra-game").forEach((game) => { game.hidden = true; });
 }
 
@@ -314,6 +317,11 @@ const extraStarts: Record<ExtraGameId, () => void> = {
     activate: (title, kicker, pill) => activateExtraGame("cyrene-quiz", title, kicker, pill),
     setLine,
     record: (outcome) => recordExtraResult("cyrene-quiz", outcome),
+  }),
+  ropebound: setupRopeboundGame({
+    activate: (title, kicker, pill) => activateExtraGame("ropebound", title, kicker, pill),
+    setLine,
+    record: (outcome) => recordExtraResult("ropebound", outcome),
   }),
 } as Record<ExtraGameId, () => void>;
 
