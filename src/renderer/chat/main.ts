@@ -937,6 +937,74 @@ function setAvatar(slot: HTMLElement, role: Role): void {
   slot.appendChild(img);
 }
 
+function buildCodexImageHandoff(request: string): string | null {
+  const cleanRequest = request.replace(/\[sticker:[^\]]+\]/g, "").trim();
+  if (!cleanRequest) return null;
+
+  const actionPattern = /(幫我|請|想要|可以|能不能|替我|給我|來一張|做一張|生成|產生|畫|繪製|製作)/i;
+  const imagePattern = /(圖片|照片|插畫|圖像|繪圖|桌布|壁紙|頭像|立繪|角色圖|anime|image|photo|illustration)/i;
+  if (!actionPattern.test(cleanRequest) || !imagePattern.test(cleanRequest)) return null;
+
+  return [
+    "請使用 imagegen 技能直接生成圖片。",
+    "",
+    `原始要求：${cleanRequest}`,
+    "",
+    "請保留使用者指定的人物、服裝、姿勢、場景、風格與畫面比例；未指定的細節可合理補全。",
+    "若要求涉及既有角色，請以使用者在對話中提供的參考圖為準；如參考圖未隨訊息帶入，提醒使用者重新附上。",
+    "生成完成後直接顯示圖片，並提供可下載的檔案連結。",
+  ].join("\n");
+}
+
+function createCodexImageHandoffCard(request: string): HTMLElement | null {
+  const handoffPrompt = buildCodexImageHandoff(request);
+  if (!handoffPrompt) return null;
+
+  const card = document.createElement("section");
+  card.className = "codex-handoff";
+  card.setAttribute("aria-label", "交給 Codex 生成圖片");
+
+  const orbit = document.createElement("div");
+  orbit.className = "codex-handoff__orbit";
+  orbit.setAttribute("aria-hidden", "true");
+  orbit.innerHTML = "<span>CY</span><i></i><b>✦</b>";
+
+  const copy = document.createElement("div");
+  copy.className = "codex-handoff__copy";
+  const eyebrow = document.createElement("span");
+  eyebrow.className = "codex-handoff__eyebrow";
+  eyebrow.textContent = "IMAGE HANDOFF";
+  const title = document.createElement("strong");
+  title.textContent = "交給 Codex 繪製";
+  const description = document.createElement("small");
+  description.textContent = "複製完整委託後，貼到目前的 Codex 對話即可生成。";
+  copy.append(eyebrow, title, description);
+
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "codex-handoff__button";
+  button.textContent = "複製給 Codex";
+  button.addEventListener("click", () => {
+    void copyTextToClipboard(handoffPrompt).then((ok) => {
+      if (!ok) {
+        button.textContent = "複製失敗，請重試";
+        button.classList.add("is-error");
+        return;
+      }
+      button.textContent = "已複製 · 到 Codex 貼上";
+      button.classList.remove("is-error");
+      button.classList.add("is-copied");
+      window.setTimeout(() => {
+        button.textContent = "複製給 Codex";
+        button.classList.remove("is-copied");
+      }, 3200);
+    });
+  });
+
+  card.append(orbit, copy, button);
+  return card;
+}
+
 function render(): void {
   // 空態：當前會話還沒有消息時（新建/全清）顯示"昔漣期待與你聊天哦 ✨"佔位
   // thinking 狀態（昔漣主動開場/流式回覆中）也算有消息，膠囊應立即消失
@@ -1005,6 +1073,11 @@ function render(): void {
     time.textContent = formatTime(m.at);
 
     if (!bubble.hidden) body.appendChild(bubble);
+
+    if (m.role === "user" && !m.thinking) {
+      const handoffCard = createCodexImageHandoffCard(m.content);
+      if (handoffCard) body.appendChild(handoffCard);
+    }
 
     // 如果消息帶有互動網頁或小遊戲，在氣泡下方渲染沙盒卡片
     if ((m as any).htmlCodeForSandbox) {

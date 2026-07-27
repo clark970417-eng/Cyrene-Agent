@@ -421,6 +421,9 @@ interface SettingsApi {
   channelsSpotifyGetStatus: () => Promise<SpotifyPlaybackStatus>;
   channelsSpotifyControl: (input: { command: string; value?: number; deviceId?: string; query?: string }) => Promise<{ ok: boolean; message: string }>;
   channelsSpotifyDisconnect: () => Promise<ChannelConnectionResult>;
+  channelsBilibiliConnect: () => Promise<ChannelConnectionResult & { profilePath?: string; title?: string }>;
+  channelsBilibiliGetStatus: () => Promise<BilibiliConnectionStatus>;
+  channelsBilibiliDisconnect: () => Promise<ChannelConnectionResult>;
   channelsGetConfig: () => Promise<ChannelsPreviewConfig>;
   channelsSaveConfig: (patch: unknown) => Promise<unknown>;
   channelsList: () => Promise<unknown[]>;
@@ -529,6 +532,12 @@ interface SpotifyPlaybackStatus {
   devices: Array<{ id: string; name: string; type: string; active: boolean; volume?: number }>;
 }
 
+interface BilibiliConnectionStatus {
+  connected: boolean;
+  browser: string;
+  profilePath: string;
+}
+
 interface ChannelsPreviewConfig {
   wechat: { enabled: boolean };
   feishu: { enabled: boolean; appId?: string; appSecret?: string };
@@ -538,10 +547,12 @@ interface ChannelsPreviewConfig {
     allowedGuildIds?: string[];
     allowedChannelIds?: string[];
     allowedUserIds?: string[];
+    codexImageOwnerId?: string;
     requireMention?: boolean;
     voiceEnabled?: boolean;
   };
   spotify: { enabled: boolean; clientId?: string; clientSecret?: string; refreshToken?: string; accountName?: string };
+  bilibili: { enabled: boolean; browser?: "opera-gx" };
   rateLimitPerUser: number;
   rateLimitPerChannel: number;
   ttsEnabled: boolean;
@@ -733,11 +744,15 @@ if (!window.settings) {
     channelsSpotifyGetStatus: async () => ({ configured: false, connected: false, devices: [] }),
     channelsSpotifyControl: async () => ({ ok: false, message: "settings api unavailable" }),
     channelsSpotifyDisconnect: async () => ({ ok: false, error: "settings api unavailable" }),
+    channelsBilibiliConnect: async () => ({ ok: false, error: "settings api unavailable" }),
+    channelsBilibiliGetStatus: async () => ({ connected: false, browser: "Opera GX", profilePath: "" }),
+    channelsBilibiliDisconnect: async () => ({ ok: false, error: "settings api unavailable" }),
     channelsGetConfig: async () => ({
       wechat: { enabled: false },
       feishu: { enabled: false },
       discord: { enabled: false, requireMention: true, voiceEnabled: true },
       spotify: { enabled: false },
+      bilibili: { enabled: false, browser: "opera-gx" },
       rateLimitPerUser: 10,
       rateLimitPerChannel: 100,
       ttsEnabled: true,
@@ -905,6 +920,7 @@ const NAV_LABELS: Record<string, { emoji: string; title: string; hint: string }>
   general: { emoji: "⚙️", title: "設置", hint: "通用偏好與外觀" },
   api: { emoji: "🔑", title: "API 設置", hint: "選擇預設後只需要填寫 API Key。" },
   cyrene: { emoji: "🌸", title: "昔漣設置", hint: "管理 Agent 行為、記憶、RAG 與權限" },
+  channels: { emoji: "📱", title: "連接手機", hint: "管理 Discord、Spotify、飛書與微信連線" },
   tts: { emoji: "🎙️", title: "TTS 設置", hint: "語音合成與朗讀偏好" },
   asr: { emoji: "🎧", title: "ASR 設置", hint: "語音識別與通話配置" },
   tokens: { emoji: "📊", title: "Token 用量", hint: "查看 API 調用統計與消耗" },
@@ -2842,6 +2858,7 @@ const channelsDiscordTokenRevealBtn = document.getElementById("channels-discord-
 const channelsDiscordGuildIdsEl = document.getElementById("channels-discord-guild-ids") as HTMLInputElement | null;
 const channelsDiscordChannelIdsEl = document.getElementById("channels-discord-channel-ids") as HTMLInputElement | null;
 const channelsDiscordUserIdsEl = document.getElementById("channels-discord-user-ids") as HTMLInputElement | null;
+const channelsDiscordCodexOwnerIdEl = document.getElementById("channels-discord-codex-owner-id") as HTMLInputElement | null;
 const channelsDiscordRequireMentionEl = document.getElementById("channels-discord-require-mention") as HTMLInputElement | null;
 const channelsDiscordVoiceEnabledEl = document.getElementById("channels-discord-voice-enabled") as HTMLInputElement | null;
 const channelsDiscordSaveBtn = document.getElementById("channels-discord-save");
@@ -2910,6 +2927,13 @@ const channelsSpotifySecretRevealBtn = document.getElementById("channels-spotify
 const channelsSpotifyConnectBtn = document.getElementById("channels-spotify-connect") as HTMLButtonElement | null;
 const channelsSpotifyDisconnectBtn = document.getElementById("channels-spotify-disconnect") as HTMLButtonElement | null;
 const channelsSpotifyFeedbackEl = document.getElementById("channels-spotify-feedback");
+const channelsBilibiliCardEl = document.getElementById("channels-bilibili-card");
+const channelsBilibiliStatusEl = document.getElementById("channels-bilibili-status");
+const channelsBilibiliSessionTitleEl = document.getElementById("channels-bilibili-session-title");
+const channelsBilibiliSessionDetailEl = document.getElementById("channels-bilibili-session-detail");
+const channelsBilibiliConnectBtn = document.getElementById("channels-bilibili-connect") as HTMLButtonElement | null;
+const channelsBilibiliDisconnectBtn = document.getElementById("channels-bilibili-disconnect") as HTMLButtonElement | null;
+const channelsBilibiliFeedbackEl = document.getElementById("channels-bilibili-feedback");
 // 微信按鈕
 const channelsWechatLoginBtn = document.getElementById("channels-wechat-login");
 const channelsWechatRestartBtn = document.getElementById("channels-wechat-restart");
@@ -3304,6 +3328,32 @@ async function controlSpotifyUi(command: string, value?: number, query?: string)
   await refreshSpotify();
 }
 
+function setBilibiliFeedback(kind: "info" | "ok" | "err", message: string): void {
+  if (!channelsBilibiliFeedbackEl) return;
+  channelsBilibiliFeedbackEl.textContent = message;
+  channelsBilibiliFeedbackEl.className = "channels-feedback";
+  channelsBilibiliFeedbackEl.classList.add(kind === "ok" ? "channels-feedback--ok" : kind === "err" ? "channels-feedback--err" : "channels-feedback--info");
+}
+
+function renderBilibili(status: BilibiliConnectionStatus): void {
+  channelsBilibiliCardEl?.classList.toggle("is-connected", status.connected);
+  if (channelsBilibiliStatusEl) {
+    channelsBilibiliStatusEl.textContent = status.connected ? "已連接 · Opera GX" : "尚未連接";
+    channelsBilibiliStatusEl.classList.toggle("is-connected", status.connected);
+  }
+  if (channelsBilibiliSessionTitleEl) channelsBilibiliSessionTitleEl.textContent = status.connected ? "Opera GX 登入狀態已連接" : "連接你的 Opera GX 登入狀態";
+  if (channelsBilibiliSessionDetailEl) channelsBilibiliSessionDetailEl.textContent = status.connected
+    ? "Discord 收到 Bilibili 連結時，會自動使用這台 Mac 的瀏覽器登入狀態。"
+    : "連接後，Discord 播放 Bilibili 連結時會自動讀取你的本機登入狀態。";
+  if (channelsBilibiliConnectBtn) channelsBilibiliConnectBtn.textContent = status.connected ? "重新驗證" : "連接 Bilibili";
+  if (channelsBilibiliDisconnectBtn) channelsBilibiliDisconnectBtn.disabled = !status.connected;
+}
+
+async function refreshBilibili(): Promise<void> {
+  try { renderBilibili(await window.settings.channelsBilibiliGetStatus()); }
+  catch (err) { setBilibiliFeedback("err", err instanceof Error ? err.message : String(err)); }
+}
+
 function renderChannelStatus(el: HTMLElement | null, phase: string, message?: string): void {
   if (!el) return;
   const dot = el.querySelector(".channels-status__dot");
@@ -3321,7 +3371,7 @@ function renderChannelStatus(el: HTMLElement | null, phase: string, message?: st
 
 async function loadChannelsPanel(): Promise<void> {
   if (channelsInitialized) {
-    await Promise.all([refreshDiscordProfile(), refreshDiscordMusic(), refreshSpotify()]);
+    await Promise.all([refreshDiscordProfile(), refreshDiscordMusic(), refreshSpotify(), refreshBilibili()]);
     return;
   }
   channelsInitialized = true;
@@ -3352,6 +3402,7 @@ async function loadChannelsPanel(): Promise<void> {
     if (channelsDiscordGuildIdsEl) channelsDiscordGuildIdsEl.value = (cfg.discord.allowedGuildIds ?? []).join(", ");
     if (channelsDiscordChannelIdsEl) channelsDiscordChannelIdsEl.value = (cfg.discord.allowedChannelIds ?? []).join(", ");
     if (channelsDiscordUserIdsEl) channelsDiscordUserIdsEl.value = (cfg.discord.allowedUserIds ?? []).join(", ");
+    if (channelsDiscordCodexOwnerIdEl) channelsDiscordCodexOwnerIdEl.value = cfg.discord.codexImageOwnerId ?? "";
     if (channelsDiscordRequireMentionEl) channelsDiscordRequireMentionEl.checked = cfg.discord.requireMention !== false;
     if (channelsDiscordVoiceEnabledEl) channelsDiscordVoiceEnabledEl.checked = cfg.discord.voiceEnabled !== false;
     if (channelsSpotifyClientIdEl) channelsSpotifyClientIdEl.value = cfg.spotify.clientId ?? "";
@@ -3365,7 +3416,7 @@ async function loadChannelsPanel(): Promise<void> {
     renderChannelStatus(channelsWechatStatusEl, status.wechat?.phase ?? "offline", status.wechat?.message);
     renderChannelStatus(channelsFeishuStatusEl, status.feishu?.phase ?? "offline", status.feishu?.message);
     renderChannelStatus(channelsDiscordStatusEl, status.discord?.phase ?? "offline", status.discord?.message);
-    await Promise.all([refreshDiscordProfile(), refreshDiscordMusic(), refreshSpotify()]);
+    await Promise.all([refreshDiscordProfile(), refreshDiscordMusic(), refreshSpotify(), refreshBilibili()]);
     if (discordMusicRefreshTimer == null) {
       discordMusicRefreshTimer = window.setInterval(() => void refreshDiscordMusic(), 1000);
     }
@@ -3501,6 +3552,27 @@ async function loadChannelsPanel(): Promise<void> {
     if (channelsSpotifyVolumeValueEl) channelsSpotifyVolumeValueEl.value = `${volume}%`;
     if (spotifyVolumeTimer != null) window.clearTimeout(spotifyVolumeTimer);
     spotifyVolumeTimer = window.setTimeout(() => void controlSpotifyUi("volume", volume), 160);
+  });
+
+  // ===== Bilibili / Opera GX browser session =====
+  channelsBilibiliConnectBtn?.addEventListener("click", async () => {
+    channelsBilibiliConnectBtn.disabled = true;
+    setBilibiliFeedback("info", "正在驗證 Opera GX 的 Bilibili 登入狀態…");
+    try {
+      const result = await window.settings.channelsBilibiliConnect();
+      if (!result.ok) throw new Error(result.error || "Bilibili 連接失敗");
+      setBilibiliFeedback("ok", result.message || "Bilibili 已連接");
+      await refreshBilibili();
+    } catch (err) {
+      setBilibiliFeedback("err", err instanceof Error ? err.message : String(err));
+    } finally {
+      channelsBilibiliConnectBtn.disabled = false;
+    }
+  });
+  channelsBilibiliDisconnectBtn?.addEventListener("click", async () => {
+    const result = await window.settings.channelsBilibiliDisconnect();
+    setBilibiliFeedback(result.ok ? "ok" : "err", result.message || result.error || "Bilibili 已解除連接");
+    await refreshBilibili();
   });
 
   // ===== Discord Gateway =====
@@ -3693,6 +3765,7 @@ async function loadChannelsPanel(): Promise<void> {
       allowedGuildIds: parseIds(channelsDiscordGuildIdsEl?.value),
       allowedChannelIds: parseIds(channelsDiscordChannelIdsEl?.value),
       allowedUserIds: parseIds(channelsDiscordUserIdsEl?.value),
+      codexImageOwnerId: channelsDiscordCodexOwnerIdEl?.value.trim() || undefined,
       requireMention: channelsDiscordRequireMentionEl?.checked ?? true,
       voiceEnabled: channelsDiscordVoiceEnabledEl?.checked ?? true,
     };

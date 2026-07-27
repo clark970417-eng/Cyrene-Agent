@@ -40,7 +40,7 @@ import { buildStickerEmbeddingIndex, matchSticker } from "./sticker-embedder";
 import type { StickerEmbeddingEntry } from "./sticker-embedder";
 import { buildSceneIndex } from "./scene-embedder";
 import type { SceneIndex } from "./scene-embedder";
-import { loadUserStickerManifest, addUserSticker, deleteUserSticker, getAllStickerConfig, isStickerIdTaken, getStickersDir } from "./sticker-storage";
+import { loadUserStickerManifest, addUserSticker, deleteUserSticker, getAllStickerConfig, isStickerIdTaken, getStickersDir, resolveStickerImagePath } from "./sticker-storage";
 import { parseLocalStickerFileFromUrl, resolveLocalStickerPath } from "./sticker-protocol";
 import { normalizeWindowVisibilitySettings } from "./window-visibility-settings";
 import type { StickerConfigItem } from "../shared/sticker-types";
@@ -51,6 +51,7 @@ import { entityGraph } from "./memory/entity-graph";
 import { buildMemoryGraphView } from "./memory/memory-views";
 import { registerChatsIpc } from "./chats/chats-ipc";
 import { recordUsage, getUsage, getUsageByModel, flush as flushTokenUsage } from "./token-usage-store";
+import { getCallUsage, flushCallUsage } from "./call-usage-store";
 import { uploadFile as ttsUploadFile, cloneVoice as ttsCloneVoice, synthesize as ttsSynthesize } from "./tts/minimax-engine";
 import { synthesize as gptsovitsSynthesize } from "./tts/gptsovits-engine";
 import { synthesize as customCloudSynthesize } from "./tts/custom-cloud-engine";
@@ -2174,6 +2175,7 @@ async function requestModelReply(inputMessages: unknown, styleFile = "01_default
     if (provider) {
       const matchResult = await matchSticker(chatContent + "\n" + latestUserText, provider, stickerEmbeddingIndex, settings.stickerSimilarityThreshold);
       sticker = matchResult?.id ?? null;
+      if (sticker && loadStickerSettings()[sticker] === false) sticker = null;
     }
   }
 
@@ -3569,6 +3571,9 @@ app.whenReady().then(async () => {
   ipcMain.handle(IPC.TOKEN_USAGE_GET, (_event, days: number) => {
     return getUsage(Math.max(1, Math.min(90, Number(days) || 7)));
   });
+  ipcMain.handle(IPC.CALL_USAGE_GET, (_event, days: number) => {
+    return getCallUsage(Math.max(1, Math.min(90, Number(days) || 7)));
+  });
   ipcMain.handle(IPC.AGENT_ACTIVITY_GET, (_event, days: number) => {
     const safeDays = Math.max(1, Math.min(90, Number(days) || 7));
     const memory = process.memoryUsage();
@@ -4347,12 +4352,26 @@ app.whenReady().then(async () => {
       });
     });
     if (agent.lastResult) {
-      await onAgentRunFinished(agent.lastResult, msg.text, onRunFinishedDeps, msg.channel);
+      const stickerId = await onAgentRunFinished(agent.lastResult, msg.text, onRunFinishedDeps, msg.channel);
       if (msg.channel === "discord") {
         void recordDiscordToolActionsInNotebook(agent.lastResult.toolResults, {
           companionName: msg.senderName,
         });
       }
+      // Dispatcher 會依渠道能力把這個 part 交給 Discord；其他不支援的渠道會自動略過。
+      const stickerPath = msg.channel === "discord" && stickerId
+        ? resolveStickerImagePath(stickerId)
+        : null;
+      if (stickerId && !stickerPath) {
+        console.warn(`[stickers] 找不到表情包圖片，略過渠道發送: ${stickerId}`);
+      }
+      void indexConversationTurn(sessionId, msg.text, reply);
+      return {
+        text: reply,
+        ...(stickerId && stickerPath
+          ? { sticker: { id: stickerId, imagePath: stickerPath } }
+          : {}),
+      };
     }
     // 落歷史
     void indexConversationTurn(sessionId, msg.text, reply);
@@ -4573,7 +4592,9 @@ app.whenReady().then(async () => {
   };
   registerAgUiIpc(
     async (input: AguiRunInput) => buildAgentRunOptions(input, buildOptionsDeps),
-    async (result, latestUserText) => onAgentRunFinished(result, latestUserText, onRunFinishedDeps),
+    async (result, latestUserText) => {
+      await onAgentRunFinished(result, latestUserText, onRunFinishedDeps);
+    },
     () => chatWindow,
   );
 
@@ -4653,7 +4674,7 @@ app.whenReady().then(async () => {
     console.error("[SceneEmbedding] Init failed:", (err as Error).message);
   }
 
-  // 昔漣的創作工作台 (NovelAI 繪圖) IPC 處理器
+  // 昔漣的創作工作台（OpenRouter / Gemini 圖片生成）IPC 處理器
   ipcMain.handle("paint:build-prompt", async (_event, description: string) => {
     try {
       const settings = loadModelSettings();
@@ -4664,7 +4685,7 @@ app.whenReady().then(async () => {
       const promptMessages = [
         {
           role: "system" as const,
-          content: "You are a translation assistant that converts natural language Chinese description of characters, clothing, scenes, and actions into NovelAI/Stable Diffusion prompt tags. Output only comma-separated English tags (danbooru style). Do not output any explanation, markdown, or extra text. You must prepend these core character tags at the very beginning of the output: '1girl, seele, anime style, soft pink hair, blue eyes, hair flower, cute, sweet smile' to represent the character 昔漣."
+          content: "You convert Traditional Chinese image briefs into concise, production-ready English prompts for modern image generation models. Preserve the user's requested subject, clothing, pose, camera, lighting, mood, and style. Use natural descriptive English rather than Danbooru keyword spam. Output only the final prompt with no markdown, commentary, headings, or quotation marks. Do not invent nudity or sexual content."
         },
         {
           role: "user" as const,
@@ -4686,89 +4707,196 @@ app.whenReady().then(async () => {
     }
   });
 
-  ipcMain.handle("paint:generate-image", async (_event, payload: { prompt: string; model: string; width: number; height: number; token: string }) => {
+  const getPaintCredentials = () => {
+    const settings = loadModelSettings();
+    const openRouterProfile = settings.perProvider?.Custom;
+    const geminiProfile = settings.perProvider?.["Gemini（Google）"];
+    return {
+      openrouter: {
+        apiKey: openRouterProfile?.apiKey || process.env.OPENROUTER_API_KEY || "",
+        baseUrl: (openRouterProfile?.baseUrl || "https://openrouter.ai/api/v1").replace(/\/$/, ""),
+        model: openRouterProfile?.model || "google/gemini-3.1-flash-image",
+      },
+      gemini: {
+        apiKey: geminiProfile?.apiKey || process.env.GEMINI_API_KEY || "",
+        model: geminiProfile?.model || "gemini-3.1-flash-image",
+      },
+    };
+  };
+
+  ipcMain.handle("paint:get-connections", () => {
+    const credentials = getPaintCredentials();
+    return [
+      {
+        provider: "openrouter",
+        label: "OpenRouter Image API",
+        connected: Boolean(credentials.openrouter.apiKey),
+        model: credentials.openrouter.model,
+      },
+      {
+        provider: "gemini",
+        label: "Gemini 原生圖片 API",
+        connected: Boolean(credentials.gemini.apiKey),
+        model: credentials.gemini.model,
+      },
+    ];
+  });
+
+  type PaintImagePayload = {
+    provider: "openrouter" | "gemini";
+    prompt: string;
+    model: string;
+    aspectRatio: string;
+    resolution: "1K" | "2K" | "4K";
+    quality: "auto" | "low" | "medium" | "high";
+    references?: Array<{ dataUrl: string; mimeType: string }>;
+  };
+
+  const parseDataUrl = (dataUrl: string, fallbackMimeType: string) => {
+    const match = /^data:([^;,]+);base64,(.+)$/s.exec(dataUrl);
+    if (!match) throw new Error("參考圖格式無效，請重新選擇 PNG、JPEG 或 WebP 圖片。");
+    return { mimeType: match[1] || fallbackMimeType, data: match[2] };
+  };
+
+  const readErrorResponse = async (response: Response) => {
+    const body = await response.text();
     try {
-      if (!payload.token) {
-        throw new Error("請先在連接面板中設定 NovelAI API Token");
+      const parsed = JSON.parse(body) as { error?: { message?: string } | string; message?: string };
+      if (typeof parsed.error === "string") return parsed.error;
+      return parsed.error?.message || parsed.message || body;
+    } catch {
+      return body || `HTTP ${response.status}`;
+    }
+  };
+
+  const savePaintImage = (bytes: Uint8Array, mimeType = "image/png") => {
+    const extension = mimeType.includes("jpeg") ? "jpg" : mimeType.includes("webp") ? "webp" : "png";
+    const outputDir = path.join(app.getPath("pictures"), "Cyrene Studio");
+    fs.mkdirSync(outputDir, { recursive: true });
+    const savedPath = path.join(outputDir, `cyrene-${Date.now()}.${extension}`);
+    fs.writeFileSync(savedPath, bytes);
+    return savedPath;
+  };
+
+  const savePaintBase64 = (data: string, mimeType = "image/png") =>
+    savePaintImage(Buffer.from(data, "base64"), mimeType);
+
+  const savePaintUrl = async (url: string) => {
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(`下載生成圖片失敗：HTTP ${response.status}`);
+    const mimeType = response.headers.get("content-type") || "image/png";
+    return savePaintImage(new Uint8Array(await response.arrayBuffer()), mimeType);
+  };
+
+  const findGeminiImage = (value: unknown, depth = 0): { data: string; mimeType: string } | null => {
+    if (depth > 7 || value == null) return null;
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        const found = findGeminiImage(item, depth + 1);
+        if (found) return found;
       }
-      
-      const response = await fetch("https://image.novelai.net/ai/generate-image", {
+      return null;
+    }
+    if (typeof value !== "object") return null;
+    const record = value as Record<string, unknown>;
+    const data = typeof record.data === "string" ? record.data : undefined;
+    const mimeType = typeof record.mime_type === "string"
+      ? record.mime_type
+      : typeof record.mimeType === "string"
+        ? record.mimeType
+        : undefined;
+    if (data && (!mimeType || mimeType.startsWith("image/"))) {
+      return { data, mimeType: mimeType || "image/png" };
+    }
+    for (const child of Object.values(record)) {
+      const found = findGeminiImage(child, depth + 1);
+      if (found) return found;
+    }
+    return null;
+  };
+
+  ipcMain.handle("paint:generate-image", async (_event, payload: PaintImagePayload) => {
+    try {
+      if (!payload?.prompt?.trim()) throw new Error("繪圖 Prompt 不可為空。");
+      const credentials = getPaintCredentials();
+      const references = (payload.references || []).slice(0, 4);
+
+      if (payload.provider === "openrouter") {
+        const apiKey = credentials.openrouter.apiKey;
+        if (!apiKey) throw new Error("尚未設定 OpenRouter API Key，請到設定頁完成連接。");
+        const inputReferences = references.map((reference) => ({
+          type: "image_url",
+          image_url: { url: reference.dataUrl },
+        }));
+        const response = await fetch(`${credentials.openrouter.baseUrl}/images`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            "Content-Type": "application/json",
+            "HTTP-Referer": "https://cyrene.local",
+            "X-Title": "Cyrene Painting Studio",
+          },
+          body: JSON.stringify({
+            model: payload.model || "google/gemini-3.1-flash-image",
+            prompt: payload.prompt,
+            n: 1,
+            aspect_ratio: payload.aspectRatio || "1:1",
+            resolution: payload.resolution || "1K",
+            quality: payload.quality || "auto",
+            output_format: "png",
+            ...(inputReferences.length > 0 ? { input_references: inputReferences } : {}),
+          }),
+        });
+        if (!response.ok) throw new Error(`OpenRouter：${await readErrorResponse(response)}`);
+        const result = await response.json() as { data?: Array<{ b64_json?: string; media_type?: string; url?: string }> };
+        const image = result.data?.[0];
+        if (image?.b64_json) {
+          const mimeType = image.media_type || "image/png";
+          return {
+            dataUrl: `data:${mimeType};base64,${image.b64_json}`,
+            savedPath: savePaintBase64(image.b64_json, mimeType),
+          };
+        }
+        if (image?.url) return { dataUrl: image.url, savedPath: await savePaintUrl(image.url) };
+        throw new Error("OpenRouter 回應中沒有圖片資料。");
+      }
+
+      const apiKey = credentials.gemini.apiKey;
+      if (!apiKey) throw new Error("尚未設定 Gemini API Key，請到設定頁完成連接。");
+      const model = payload.model || "gemini-3.1-flash-image";
+      const imageSize = model.includes("flash-lite-image") ? "1K" : payload.resolution || "1K";
+      const input: Array<Record<string, string>> = [{ type: "text", text: payload.prompt }];
+      for (const reference of references) {
+        const parsed = parseDataUrl(reference.dataUrl, reference.mimeType);
+        input.push({ type: "image", mime_type: parsed.mimeType, data: parsed.data });
+      }
+      const response = await fetch("https://generativelanguage.googleapis.com/v1beta/interactions", {
         method: "POST",
         headers: {
-          "Authorization": `Bearer ${payload.token}`,
+          "x-goog-api-key": apiKey,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          input: payload.prompt,
-          model: payload.model || "nai-diffusion-4-5-full",
-          action: "generate",
-          parameters: {
-            width: Number(payload.width) || 1024,
-            height: Number(payload.height) || 1024,
-            scale: 5,
-            sampler: "k_euler_ancestral",
-            steps: 28,
-            n_samples: 1,
-            uc: "nsfw, lowres, bad anatomy, bad hands, text, error, missing fingers, extra digit, fewer digits, cropped, worst quality, low quality",
-            seed: -1
-          }
-        })
+          model,
+          input,
+          response_format: {
+            type: "image",
+            mime_type: "image/jpeg",
+            aspect_ratio: payload.aspectRatio || "1:1",
+            image_size: imageSize,
+          },
+        }),
       });
-      
-      if (!response.ok) {
-        const errText = await response.text();
-        throw new Error(`NovelAI 錯誤: ${errText}`);
-      }
-      
-      const arrayBuffer = await response.arrayBuffer();
-      const buffer = Buffer.from(arrayBuffer);
-      
-      const zipPath = path.join(app.getPath("temp"), "nai_response.zip");
-      const extractDir = path.join(app.getPath("temp"), "nai_extracted");
-      fs.writeFileSync(zipPath, buffer);
-      
-      if (fs.existsSync(extractDir)) {
-        fs.rmSync(extractDir, { recursive: true, force: true });
-      }
-      fs.mkdirSync(extractDir, { recursive: true });
-      
-      const execSync = require("child_process").execSync;
-      execSync(`unzip -o "${zipPath}" -d "${extractDir}"`);
-      
-      const files = fs.readdirSync(extractDir);
-      const imgFile = files.find(f => f.endsWith(".png") || f.endsWith(".webp"));
-      if (!imgFile) {
-        throw new Error("NovelAI 返回的 ZIP 文件中沒有找到圖像。");
-      }
-      
-      const imgPath = path.join(extractDir, imgFile);
-      const imgBuffer = fs.readFileSync(imgPath);
-      const base64 = imgBuffer.toString("base64");
-      const mimeType = imgFile.endsWith(".webp") ? "image/webp" : "image/png";
-      
-      return `data:${mimeType};base64,${base64}`;
+      if (!response.ok) throw new Error(`Gemini：${await readErrorResponse(response)}`);
+      const result = await response.json() as unknown;
+      const image = findGeminiImage(result);
+      if (!image) throw new Error("Gemini 回應中沒有圖片資料。");
+      return {
+        dataUrl: `data:${image.mimeType};base64,${image.data}`,
+        savedPath: savePaintBase64(image.data, image.mimeType),
+      };
     } catch (err: any) {
       console.error("[Paint] generate-image error:", err?.message || err);
-      throw err;
-    }
-  });
-
-  ipcMain.handle("paint:generate-free-image", async (_event, payload: { prompt: string; width: number; height: number }) => {
-    try {
-      const seed = Math.floor(Math.random() * 100000000);
-      const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(payload.prompt)}?width=${payload.width}&height=${payload.height}&nologo=true&seed=${seed}`;
-      
-      const response = await fetch(url);
-      if (!response.ok) {
-        throw new Error(`Pollinations AI 伺服器回傳狀態錯誤: ${response.status}`);
-      }
-      
-      const arrayBuffer = await response.arrayBuffer();
-      const buffer = Buffer.from(arrayBuffer);
-      const base64 = buffer.toString("base64");
-      return `data:image/jpeg;base64,${base64}`;
-    } catch (err: any) {
-      console.error("[Paint] generate-free-image error:", err?.message || err);
       throw err;
     }
   });
@@ -4776,13 +4904,18 @@ app.whenReady().then(async () => {
   schedulerEngine.start();
 });
 
-app.on("window-all-closed", () => {});
+// 雲端 Discord Bot 會持續在線；桌面視窗全關閉時也應真正結束本機程序，
+// 避免隱藏在背景的 Discord client 與雲端同時搶同一個 interaction。
+app.on("window-all-closed", () => {
+  app.quit();
+});
 
 // 應用退出前把 token 用量緩存落盤（防抖未觸發的最後一次寫）
 app.on("before-quit", () => {
   schedulerEngine?.stop();
   stopOpener();
   flushTokenUsage();
+  flushCallUsage();
   void shutdownChannels();
 });
 

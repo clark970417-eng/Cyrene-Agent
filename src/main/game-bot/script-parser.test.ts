@@ -3,6 +3,26 @@ import { describe, it, expect } from "vitest";
 import { parseRecipe } from "./script-parser";
 
 describe("parseRecipe", () => {
+  it("vlm_select 支援帶 retry/settle 的對象格式", () => {
+    const result = parseRecipe('name: x\nexe: y\nsteps:\n  - vlm_select: { desc: "開始遊戲", retry: 4, settle: 2s }');
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.recipe.steps[0]).toEqual({
+        type: "vlm_select",
+        desc: "開始遊戲",
+        retry: 4,
+        settle: 2000,
+      });
+    }
+  });
+
+  it("click 支援 0 到 1 的螢幕比例座標", () => {
+    const result = parseRecipe('name: x\nexe: y\nsteps:\n  - click: { ratio_x: 0.8, ratio_y: 0.86 }');
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.recipe.steps[0]).toEqual({ type: "click", target: { ratioX: 0.8, ratioY: 0.86 } });
+    }
+  });
   it("解析合法完整腳本（含所有原語 + branch 嵌套）", () => {
     const yaml = [
       'name: star-rail-daily',

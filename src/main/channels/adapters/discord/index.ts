@@ -1,15 +1,27 @@
+import * as path from "path";
 import {
+  ActionRowBuilder,
+  ApplicationCommandType,
+  ApplicationFlags,
+  ApplicationIntegrationType,
+  EntryPointCommandHandlerType,
   AttachmentBuilder,
   ActivityType,
   Client,
   EmbedBuilder,
   GatewayIntentBits,
+  InteractionContextType,
   MessageFlags,
+  ModalBuilder,
   Partials,
+  Routes,
+  TextInputBuilder,
+  TextInputStyle,
   type ButtonInteraction,
   type ChatInputCommandInteraction,
   type GuildMember,
   type Message,
+  type ModalSubmitInteraction,
   type SendableChannels,
   type StringSelectMenuInteraction,
 } from "discord.js";
@@ -35,12 +47,20 @@ import {
   buildDiscordSpotifyArtists,
   buildDiscordHelp,
   buildDiscordMusicSearchResults,
+  DISCORD_MUSIC_BUTTON_PREFIX,
   DISCORD_SLASH_COMMANDS,
   musicRequestFromButton,
 } from "./slash-commands";
 import { loadDiscordMusicHistory } from "./music-history";
-import { loadDiscordMusicFavorites, saveDiscordMusicFavorite } from "./music-favorites";
+import { deleteDiscordMusicFavorites, loadDiscordMusicFavorites, moveDiscordMusicFavorite, saveDiscordMusicFavorite, type DiscordMusicFavoriteEntry } from "./music-favorites";
 import { getSpotifyArtistTopTracks, getSpotifyPlaylists, getSpotifyPlaylistTracks, searchSpotifyArtists } from "../../spotify-control";
+import {
+  createCodexImageJob,
+  listCodexImageDeliveries,
+  markCodexImageDeliveryProcessed,
+  validateCodexImageOutput,
+} from "./codex-image-queue";
+import { enqueueOnDemandCodexImageWorker } from "./codex-image-worker";
 
 const LOG = "[DiscordAdapter]";
 
@@ -72,6 +92,15 @@ export interface DiscordMusicControlInput {
   value?: number;
 }
 
+export const DISCORD_ACTIVITY_ENTRY_POINT = {
+  name: "launch",
+  description: "由昔漣開啟《繩結同行》",
+  type: ApplicationCommandType.PrimaryEntryPoint,
+  handler: EntryPointCommandHandlerType.DiscordLaunchActivity,
+  integrationTypes: [ApplicationIntegrationType.GuildInstall, ApplicationIntegrationType.UserInstall],
+  contexts: [InteractionContextType.Guild, InteractionContextType.BotDM, InteractionContextType.PrivateChannel],
+} as const;
+
 const DISCORD_CAPABILITY: ChannelCapability = {
   text: true,
   image: true,
@@ -99,7 +128,7 @@ export function shouldHandleDiscordInteraction(
 }
 
 export function shouldHandleDiscordMessage(
-  message: Pick<Message, "author" | "guildId" | "channelId" | "mentions">,
+  message: Pick<Message, "author" | "guildId" | "channelId" | "mentions" | "content">,
   config: DiscordChannelConfig,
   botUserId: string,
 ): boolean {
@@ -107,8 +136,74 @@ export function shouldHandleDiscordMessage(
   if (!isAllowed(config.allowedUserIds, message.author.id)) return false;
   if (!isAllowed(config.allowedChannelIds, message.channelId)) return false;
   if (message.guildId && !isAllowed(config.allowedGuildIds, message.guildId)) return false;
-  if (message.guildId && config.requireMention !== false && !message.mentions.users.has(botUserId)) return false;
+  const invokedWithSlash = message.content.trimStart().startsWith("/");
+  if (
+    message.guildId
+    && config.requireMention !== false
+    && !message.mentions.users.has(botUserId)
+    && !invokedWithSlash
+  ) return false;
   return true;
+}
+
+export function isCodexImageOwner(config: DiscordChannelConfig, userId: string): boolean {
+  return Boolean(config.codexImageOwnerId && config.codexImageOwnerId === userId);
+}
+
+export function extractOwnerCodexImageRequest(
+  text: string,
+  config: DiscordChannelConfig,
+  userId: string,
+): string | null {
+  if (!isCodexImageOwner(config, userId)) return null;
+  const normalized = text.replace(/\s+/g, " ").trim();
+  if (!normalized || normalized.length > 1800) return null;
+  const cyreneFirstPerson = /^(?:我想看你|想看你|讓我看看你)(?:穿|換上|換成|戴|拿著|抱著|躺|坐|站|在|做)/;
+  // 「我想看白絲」這類省略「你穿」的說法，在角色對話中仍是明確的服裝生圖請求。
+  const cyreneImplicitOutfit = /^(?:我想看|想看|讓我看看)(?:你)?\s*(?:黑絲|白絲|絲襪|褲襪|網襪|過膝襪|長襪|泳裝|睡衣|制服|女僕裝|禮服|裙裝|洋裝)(?:$|[，。！？~～♪]|\s)/i;
+  const explicitImage = /(?:幫我|請|可以|能不能|替我|給我|來一張|生成|產生|畫|繪製|做一張).{0,18}(?:圖片|照片|插畫|圖像|繪圖|桌布|壁紙|頭像|立繪|角色圖)/i;
+  const imperativeDraw = /^(?:幫我|請|替我)?\s*(?:畫|繪製|生成|產生|做)(?:一張|張)?\s*.+/i;
+  return cyreneFirstPerson.test(normalized) || cyreneImplicitOutfit.test(normalized) || explicitImage.test(normalized) || imperativeDraw.test(normalized)
+    ? normalized
+    : null;
+}
+
+/** 以昔漣的原作語氣回覆正在準備圖片，避免顯示生硬的系統佇列文案。 */
+export function buildCyreneImageQueuedReply(prompt: string): string {
+  const normalized = prompt.replace(/\s+/g, " ").trim();
+  if (/(?:穿|換上|換成|服裝|衣服|裙|禮服|制服|睡衣|泳裝|絲襪|黑絲|白絲|褲襪)/i.test(normalized)) {
+    return [
+      "嗯……等我一下喔，我正在換衣服呢。可不許偷看呀♪",
+      "等人家準備好，就把這片小小的「記憶」送到你手上。",
+    ].join("\n");
+  }
+  if (/(?:躺|坐|站|跪|抱|拿著|牽手|回眸|跳舞|姿勢|動作)/i.test(normalized)) {
+    return [
+      "好呀，稍等我一下……人家正在想，要用什麼模樣出現在你眼前呢♪",
+      "等這道光凝成畫面，我就帶著它回來找你。",
+    ].join("\n");
+  }
+  if (/(?:花園|星空|房間|臥室|海邊|街道|咖啡|教室|場景|背景|夜晚|黃昏)/i.test(normalized)) {
+    return [
+      "等我一下呀，我先去你說的那片風景裡走一走。",
+      "等星光和花瓣都落在對的位置，我就把它帶回來給你♪",
+    ].join("\n");
+  }
+  return [
+    "好呀……等我把你的願望，慢慢織成一幅畫。",
+    "稍等人家一下，等這圈漣漪有了模樣，我就回來找你♪",
+  ].join("\n");
+}
+
+/** 移除 @Bot 或文字消息開頭的單一 `/` 呼叫前綴。 */
+export function normalizeDiscordInvocationText(content: string, botUserId: string): string {
+  const mentionPattern = new RegExp(`<@!?${botUserId}>`, "g");
+  const withoutMention = content.replace(mentionPattern, "").trim();
+  if (!withoutMention.startsWith("/")) return withoutMention;
+
+  // 這三個是既有的文字模式切換命令，必須保留斜線交給 dispatcher 判斷。
+  if (/^\/(study|talk|collab)$/i.test(withoutMention)) return withoutMention.toLowerCase();
+  return withoutMention.slice(1).trimStart() || "嗨";
 }
 
 function normalizeDiscordMessage(message: Message, botUserId: string): IncomingMessage {
@@ -123,8 +218,7 @@ function normalizeDiscordMessage(message: Message, botUserId: string): IncomingM
     attachments.push({ kind, url: item.url, mime, caption: item.name });
     attachmentLines.push(`[附件: ${item.name} ${item.url}]`);
   }
-  const mentionPattern = new RegExp(`<@!?${botUserId}>`, "g");
-  const content = message.content.replace(mentionPattern, "").trim();
+  const content = normalizeDiscordInvocationText(message.content, botUserId);
   return {
     channel: "discord",
     senderId: message.author.id,
@@ -152,6 +246,62 @@ function splitText(text: string, limit = 2000): string[] {
   return chunks;
 }
 
+async function favoriteEntriesToTracks(entries: DiscordMusicFavoriteEntry[]): Promise<DiscordMusicTrack[]> {
+  return await Promise.all(entries.map(async (entry, index) => {
+    const resolved = /(?:open\.spotify\.com|spotify\.link)/i.test(entry.url)
+      ? (await resolveDiscordMusicTracks(entry.url))[0]
+      : undefined;
+    return {
+      id: entry.id,
+      title: resolved?.title ?? entry.title,
+      url: entry.url,
+      playbackUrl: resolved?.playbackUrl,
+      thumbnail: resolved?.thumbnail ?? entry.thumbnail,
+      playlistTitle: "我的收藏歌單",
+      duration: resolved?.duration ?? entry.duration,
+      index: index + 1,
+      total: entries.length,
+    };
+  }));
+}
+
+export async function launchCyreneDiscordGame(
+  interaction: { launchActivity(): Promise<unknown> },
+): Promise<void> {
+  await interaction.launchActivity();
+}
+
+export function hasDiscordActivityEnabled(application: unknown): boolean {
+  if (!application || typeof application !== "object") return false;
+  const data = application as { embedded_activity_config?: unknown; flags?: unknown };
+  const hasConfig = Boolean(data.embedded_activity_config && typeof data.embedded_activity_config === "object");
+  const flags = typeof data.flags === "number" ? data.flags : 0;
+  return hasConfig || (flags & ApplicationFlags.Embedded) === ApplicationFlags.Embedded;
+}
+
+export function buildDiscordActivityInstallConfig(application: unknown): Record<string, unknown> {
+  const data = application && typeof application === "object"
+    ? application as { integration_types_config?: Record<string, { oauth2_install_params?: { scopes?: string[]; permissions?: string } }>; install_params?: { scopes?: string[]; permissions?: string } }
+    : {};
+  const guildParams = data.integration_types_config?.["0"]?.oauth2_install_params ?? data.install_params;
+  return {
+    integration_types_config: {
+      "0": {
+        oauth2_install_params: {
+          scopes: [...new Set([...(guildParams?.scopes ?? []), "bot", "applications.commands"])],
+          permissions: guildParams?.permissions ?? "0",
+        },
+      },
+      "1": {
+        oauth2_install_params: {
+          scopes: ["applications.commands"],
+          permissions: "0",
+        },
+      },
+    },
+  };
+}
+
 export class DiscordAdapter implements ChannelAdapter {
   readonly id = "discord" as const;
   readonly displayName = "Discord";
@@ -162,7 +312,11 @@ export class DiscordAdapter implements ChannelAdapter {
   private voiceCall: DiscordVoiceCall | null = null;
   private musicControllerMessage: Message | null = null;
   private musicControllerRefreshTimer: ReturnType<typeof setInterval> | null = null;
+  private codexImageBridgeTimer: ReturnType<typeof setInterval> | null = null;
+  private codexImageBridgeBusy = false;
   private musicSearchSessions = new Map<string, { ownerId: string; tracks: DiscordMusicTrack[]; expiresAt: number }>();
+  private favoriteSelections = new Map<string, string>();
+  private discordActivityConfigured = false;
   private status: ChannelStatus = { enabled: false, phase: "offline", message: "未啟用" };
 
   constructor(private readonly voiceDispatch?: MessageHandler) {}
@@ -200,10 +354,23 @@ export class DiscordAdapter implements ChannelAdapter {
 
     client.on("messageCreate", async (message) => {
       const botUserId = client.user?.id;
-      if (!botUserId || !shouldHandleDiscordMessage(message, loadChannelsSettings().discord, botUserId)) return;
+      const config = loadChannelsSettings().discord;
+      if (!botUserId || !shouldHandleDiscordMessage(message, config, botUserId)) return;
       try {
-        const mentionPattern = new RegExp(`<@!?${botUserId}>`, "g");
-        const content = message.content.replace(mentionPattern, "").trim();
+        const content = normalizeDiscordInvocationText(message.content, botUserId);
+        const imageRequest = extractOwnerCodexImageRequest(content, config, message.author.id);
+        if (imageRequest) {
+          const job = createCodexImageJob({
+            prompt: imageRequest,
+            requestedByUserId: message.author.id,
+            requestedByName: message.member?.displayName ?? message.author.globalName ?? message.author.username,
+            responseChannelId: message.channelId,
+            responseGuildId: message.guildId,
+          });
+          await message.reply(buildCyreneImageQueuedReply(job.prompt));
+          enqueueOnDemandCodexImageWorker(job);
+          return;
+        }
         const musicRequest = parseDiscordMusicRequest(content);
         if (musicRequest && await this.voiceCall?.handleMusicRequest(message, musicRequest)) return;
         const voiceCommand = parseDiscordVoiceCommand(content);
@@ -218,12 +385,14 @@ export class DiscordAdapter implements ChannelAdapter {
       const actionable = interaction.isChatInputCommand() ? interaction
         : interaction.isButton() ? interaction
         : interaction.isStringSelectMenu() ? interaction
+        : interaction.isModalSubmit() ? interaction
         : null;
       if (!actionable) return;
       try {
         if (actionable.isChatInputCommand()) await this.handleSlashCommand(actionable);
         else if (actionable.isButton()) await this.handleMusicButton(actionable);
-        else await this.handleMusicSelect(actionable);
+        else if (actionable.isStringSelectMenu()) await this.handleMusicSelect(actionable);
+        else await this.handleFavoriteModal(actionable);
       } catch (err) {
         console.error(LOG, "處理 Discord / 指令失敗:", err);
         const content = `指令執行失敗：${err instanceof Error ? err.message : String(err)}`;
@@ -249,7 +418,10 @@ export class DiscordAdapter implements ChannelAdapter {
 
     try {
       await client.login(config.botToken);
+      await this.refreshDiscordActivityConfiguration(client);
+      await this.registerActivityEntryPoint(client);
       await this.registerSlashCommands(client);
+      this.startCodexImageBridgeWatcher();
       client.user?.setPresence({
         status: config.presenceStatus ?? "online",
         activities: config.activityText?.trim()
@@ -273,6 +445,7 @@ export class DiscordAdapter implements ChannelAdapter {
 
   private async stopClient(): Promise<void> {
     this.stopMusicControllerRefresh();
+    this.stopCodexImageBridgeWatcher();
     this.musicControllerMessage = null;
     await this.voiceCall?.leave();
     this.voiceCall = null;
@@ -306,11 +479,45 @@ export class DiscordAdapter implements ChannelAdapter {
     if (failures.length) console.warn(LOG, `${failures.length} 個伺服器無法註冊 / 指令`);
   }
 
+  private async registerActivityEntryPoint(client: Client): Promise<void> {
+    if (!this.discordActivityConfigured || !client.application) return;
+    try {
+      const commands = await client.application.commands.fetch();
+      const existing = commands.find((command) => command.type === ApplicationCommandType.PrimaryEntryPoint);
+      const registered = existing
+        ? await existing.edit(DISCORD_ACTIVITY_ENTRY_POINT)
+        : await client.application.commands.create(DISCORD_ACTIVITY_ENTRY_POINT);
+      console.log(
+        LOG,
+        `已註冊 Discord Activity Entry Point：${registered.name} (id=${registered.id}, type=${registered.type}, handler=${registered.handler}, integrations=${registered.integrationTypes?.join(",") ?? "-"}, contexts=${registered.contexts?.join(",") ?? "-"})`,
+      );
+    } catch (error) {
+      console.warn(LOG, "Discord Activity Entry Point 註冊失敗:", error);
+    }
+  }
+
+  private async refreshDiscordActivityConfiguration(client: Client): Promise<void> {
+    try {
+      const application = await client.rest.get(Routes.currentApplication());
+      this.discordActivityConfigured = hasDiscordActivityEnabled(application);
+      if (!this.discordActivityConfigured) {
+        console.warn(LOG, "Discord Activity 尚未在 Developer Portal 啟用；/game 將顯示設定提示");
+      } else {
+        await client.rest.patch(Routes.currentApplication(), { body: buildDiscordActivityInstallConfig(application) });
+        console.log(LOG, "已啟用 Discord Activity 的伺服器／使用者安裝範圍與 application.commands");
+      }
+    } catch (error) {
+      this.discordActivityConfigured = false;
+      console.warn(LOG, "無法讀取 Discord Activity 設定；/game 將顯示設定提示:", error);
+    }
+  }
+
   private async handleSlashCommand(interaction: ChatInputCommandInteraction): Promise<void> {
     // Discord interactions must be acknowledged within roughly three seconds. /play may
     // parse large Bilibili collections, so acknowledge it before any disk/config work.
-    const playPredeferred = interaction.commandName === "play" || interaction.commandName === "favorite";
-    if (playPredeferred) await interaction.deferReply();
+    const playPredeferred = interaction.commandName === "play" || interaction.commandName === "like" || interaction.commandName === "favorites";
+    if (interaction.commandName === "draw") await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    else if (playPredeferred) await interaction.deferReply();
     const config = loadChannelsSettings().discord;
     if (!shouldHandleDiscordInteraction(interaction, config)) {
       const content = "你不在 Cyrene 的 Discord 白名單中，或這個頻道／伺服器未被允許。";
@@ -320,6 +527,38 @@ export class DiscordAdapter implements ChannelAdapter {
     }
     if (interaction.commandName === "chat") {
       await this.handleSlashChat(interaction, interaction.options.getString("message", true));
+      return;
+    }
+    if (interaction.commandName === "draw") {
+      if (!isCodexImageOwner(config, interaction.user.id)) {
+        await interaction.editReply({ content: "這個 Codex 繪圖入口只開放給擁有者。" });
+        return;
+      }
+      const job = createCodexImageJob({
+        prompt: interaction.options.getString("prompt", true),
+        requestedByUserId: interaction.user.id,
+        requestedByName: interaction.user.globalName ?? interaction.user.username,
+        responseChannelId: interaction.channelId,
+        responseGuildId: interaction.guildId,
+      });
+      await interaction.editReply({
+        content: buildCyreneImageQueuedReply(job.prompt),
+      });
+      enqueueOnDemandCodexImageWorker(job);
+      return;
+    }
+    if (interaction.commandName === "game") {
+      if (!this.discordActivityConfigured) {
+        await interaction.reply({
+          content: [
+            "《繩結同行》尚未在 Discord Developer Portal 完成 Activity 設定。",
+            "請先新增 HTTPS URL Mapping 並開啟 **Enable Activities**，再重新連接昔漣。",
+          ].join("\n"),
+          flags: MessageFlags.Ephemeral,
+        });
+        return;
+      }
+      await launchCyreneDiscordGame(interaction);
       return;
     }
     if (interaction.commandName === "status") {
@@ -366,7 +605,22 @@ export class DiscordAdapter implements ChannelAdapter {
       return;
     }
     if (interaction.commandName === "favorites") {
-      await interaction.reply({ ...buildDiscordMusicFavorites(await loadDiscordMusicFavorites(100)), flags: MessageFlags.Ephemeral });
+      if (this.voiceCall?.getMusicState().active && !this.voiceCall.canControlMusic(interaction.user.id)) {
+        await interaction.editReply({ content: "這是其他人的播放工作階段，你不能播放她的收藏歌單。" });
+        return;
+      }
+      const favorites = await loadDiscordMusicFavorites(500);
+      if (!favorites.length) {
+        await interaction.editReply({ content: "收藏歌單目前是空的；可以用 `/like` 或播放器的 ❤️ Like 加入歌曲。" });
+        return;
+      }
+      const message = await this.interactionAsMessage(interaction);
+      const handled = await this.voiceCall?.handleResolvedMusicTracks(message, await favoriteEntriesToTracks(favorites)) ?? false;
+      if (!handled || !this.voiceCall?.getMusicState().active) {
+        await interaction.editReply({ content: "無法開始播放，請先加入一個語音頻道。" });
+        return;
+      }
+      await this.showMusicController(interaction);
       return;
     }
     if (interaction.commandName === "spotify") {
@@ -398,7 +652,7 @@ export class DiscordAdapter implements ChannelAdapter {
       });
       return;
     }
-    if (interaction.commandName === "favorite") {
+    if (interaction.commandName === "like") {
       if (!this.voiceCall?.canControlMusic(interaction.user.id)) {
         await interaction.editReply({ content: "這是其他人的播放工作階段，你不能修改她的收藏。" });
         return;
@@ -423,7 +677,7 @@ export class DiscordAdapter implements ChannelAdapter {
     }
 
     const musicSessionActive = this.voiceCall?.getMusicState().active ?? false;
-    const musicCommands = new Set(["play", "previous", "pause", "resume", "skip", "stop", "queue", "clear", "remove", "volume", "repeat", "mode", "autoplay", "leave"]);
+    const musicCommands = new Set(["play", "previous", "pause", "resume", "next", "stop", "queue", "clear", "remove", "volume", "repeat", "mode", "autoplay", "leave"]);
     if (musicSessionActive && musicCommands.has(interaction.commandName) && !this.voiceCall?.canControlMusic(interaction.user.id)) {
       const content = "這是其他人的播放工作階段，你不能控制她的音樂。";
       if (interaction.deferred) await interaction.editReply({ content });
@@ -479,7 +733,73 @@ export class DiscordAdapter implements ChannelAdapter {
     }
   }
 
+  private startCodexImageBridgeWatcher(): void {
+    this.stopCodexImageBridgeWatcher();
+    void this.flushCodexImageDeliveries();
+    this.codexImageBridgeTimer = setInterval(() => void this.flushCodexImageDeliveries(), 5_000);
+  }
+
+  private stopCodexImageBridgeWatcher(): void {
+    if (this.codexImageBridgeTimer) clearInterval(this.codexImageBridgeTimer);
+    this.codexImageBridgeTimer = null;
+    this.codexImageBridgeBusy = false;
+  }
+
+  private async flushCodexImageDeliveries(): Promise<void> {
+    if (this.codexImageBridgeBusy || !this.client?.isReady()) return;
+    this.codexImageBridgeBusy = true;
+    try {
+      const config = loadChannelsSettings().discord;
+      const ownerId = config.codexImageOwnerId;
+      if (!ownerId) return;
+      for (const delivery of listCodexImageDeliveries()) {
+        if (delivery.job.requestedByUserId !== ownerId) {
+          console.warn(LOG, `拒絕非擁有者 Codex 圖片結果：${delivery.job.id}`);
+          markCodexImageDeliveryProcessed(delivery);
+          continue;
+        }
+        const owner = await this.client.users.fetch(ownerId);
+        const responseChannel = delivery.job.responseGuildId && delivery.job.responseChannelId
+          ? await this.client.channels.fetch(delivery.job.responseChannelId)
+          : null;
+        if (delivery.job.responseGuildId) {
+          if (!responseChannel || !responseChannel.isSendable() || responseChannel.isDMBased()) {
+            throw new Error(`原始 Discord 頻道無法回傳圖片：${delivery.job.responseChannelId ?? "missing"}`);
+          }
+          if (responseChannel.guildId !== delivery.job.responseGuildId) {
+            throw new Error("Discord 回傳頻道與原始伺服器不一致。");
+          }
+        }
+        if (delivery.result.status === "completed" && delivery.result.imagePath) {
+          const imagePath = validateCodexImageOutput(delivery.result.imagePath);
+          const payload = {
+            content: "我回來啦♪ 你想看的模樣，已經好好留在這片「記憶」裡了。",
+            files: [new AttachmentBuilder(imagePath, { name: path.basename(imagePath) })],
+          };
+          if (responseChannel?.isSendable()) await responseChannel.send(payload);
+          else await owner.send(payload);
+        } else {
+          const failureMessage = [
+            "唔……這次的光沒有好好凝成畫面。再讓人家試一次，好嗎？",
+            `（${delivery.result.error || "沒有取得圖片"}）`,
+          ].join("\n");
+          if (responseChannel?.isSendable()) await responseChannel.send(failureMessage);
+          else await owner.send(failureMessage);
+        }
+        markCodexImageDeliveryProcessed(delivery);
+      }
+    } catch (error) {
+      console.error(LOG, "回傳 Codex 圖片失敗:", error);
+    } finally {
+      this.codexImageBridgeBusy = false;
+    }
+  }
+
   private async handleMusicButton(interaction: ButtonInteraction): Promise<void> {
+    if (interaction.customId.startsWith(`${DISCORD_MUSIC_BUTTON_PREFIX}favorites-`)) {
+      await this.handleFavoriteEditorButton(interaction);
+      return;
+    }
     const state = this.voiceCall?.getMusicState();
     const request = musicRequestFromButton(
       interaction.customId,
@@ -487,6 +807,7 @@ export class DiscordAdapter implements ChannelAdapter {
       state?.shuffle ?? false,
       state?.repeat ?? "off",
       state?.autoplay ?? false,
+      state?.volume ?? 100,
     );
     if (!request) return;
     const config = loadChannelsSettings().discord;
@@ -540,6 +861,101 @@ export class DiscordAdapter implements ChannelAdapter {
       : { ok: false, message: "Discord 語音尚未啟用。" };
     if (result.ok && this.voiceCall) await interaction.editReply(buildDiscordMusicPlayer(this.voiceCall.getMusicState()));
     if (!result.ok) await interaction.followUp({ content: result.message, flags: MessageFlags.Ephemeral });
+  }
+
+  private async handleFavoriteEditorButton(interaction: ButtonInteraction): Promise<void> {
+    if (!shouldHandleDiscordInteraction(interaction, loadChannelsSettings().discord)) {
+      await interaction.reply({ content: "你沒有編輯收藏歌單的權限。", flags: MessageFlags.Ephemeral });
+      return;
+    }
+    const action = interaction.customId.slice(`${DISCORD_MUSIC_BUTTON_PREFIX}favorites-`.length);
+    if (action === "add") {
+      const input = new TextInputBuilder()
+        .setCustomId("url")
+        .setLabel("Music URL")
+        .setPlaceholder("Bilibili / YouTube / Spotify 單曲連結")
+        .setStyle(TextInputStyle.Short)
+        .setRequired(true);
+      await interaction.showModal(new ModalBuilder()
+        .setCustomId(`${DISCORD_MUSIC_BUTTON_PREFIX}favorites-add-modal`)
+        .setTitle("Add to favorites")
+        .addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(input)));
+      return;
+    }
+    if (action === "delete") {
+      const input = new TextInputBuilder()
+        .setCustomId("numbers")
+        .setLabel("Track numbers")
+        .setPlaceholder("例如：1 2 3 4（用空格分隔）")
+        .setStyle(TextInputStyle.Short)
+        .setRequired(true);
+      await interaction.showModal(new ModalBuilder()
+        .setCustomId(`${DISCORD_MUSIC_BUTTON_PREFIX}favorites-delete-modal`)
+        .setTitle("Delete from playlists")
+        .addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(input)));
+      return;
+    }
+    const selectedId = this.favoriteSelections.get(interaction.user.id);
+    if (!selectedId) {
+      await interaction.reply({ content: "請先從上方選單選擇一首歌曲。", flags: MessageFlags.Ephemeral });
+      return;
+    }
+    await interaction.deferUpdate();
+    if (action === "up" || action === "down") {
+      await moveDiscordMusicFavorite(selectedId, action);
+    }
+    await interaction.editReply(buildDiscordMusicFavorites(await loadDiscordMusicFavorites(100)));
+  }
+
+  private async handleFavoriteModal(interaction: ModalSubmitInteraction): Promise<void> {
+    const isAdd = interaction.customId === `${DISCORD_MUSIC_BUTTON_PREFIX}favorites-add-modal`;
+    const isDelete = interaction.customId === `${DISCORD_MUSIC_BUTTON_PREFIX}favorites-delete-modal`;
+    if (!isAdd && !isDelete) return;
+    if (!shouldHandleDiscordInteraction(interaction, loadChannelsSettings().discord)) {
+      await interaction.reply({ content: "你沒有編輯收藏歌單的權限。", flags: MessageFlags.Ephemeral });
+      return;
+    }
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    try {
+      if (isDelete) {
+        const raw = interaction.fields.getTextInputValue("numbers").trim();
+        const tokens = raw.split(/\s+/).filter(Boolean);
+        if (!tokens.length || tokens.some((token) => !/^\d+$/.test(token))) {
+          await interaction.editReply({ content: "請輸入歌曲編號，並用空格分隔，例如：`1 2 3 4`。" });
+          return;
+        }
+        const favorites = await loadDiscordMusicFavorites(100);
+        const visibleCount = Math.min(25, favorites.length);
+        const numbers = [...new Set(tokens.map(Number))];
+        const invalid = numbers.filter((number) => number < 1 || number > visibleCount);
+        if (invalid.length) {
+          await interaction.editReply({ content: `找不到編號 ${invalid.join("、")}；目前可選範圍是 1–${visibleCount}。` });
+          return;
+        }
+        const ids = numbers.map((number) => favorites[number - 1].id);
+        const deleted = await deleteDiscordMusicFavorites(ids);
+        const selectedId = this.favoriteSelections.get(interaction.user.id);
+        if (selectedId && ids.includes(selectedId)) this.favoriteSelections.delete(interaction.user.id);
+        if (interaction.message) {
+          await interaction.message.edit(buildDiscordMusicFavorites(await loadDiscordMusicFavorites(100))).catch(() => undefined);
+        }
+        await interaction.editReply({ content: `已刪除 ${deleted} 首歌曲。` });
+        return;
+      }
+      const input = interaction.fields.getTextInputValue("url").trim();
+      const track = (await resolveDiscordMusicTracks(findDiscordMusicUrl(input) ?? input))[0];
+      if (!track) {
+        await interaction.editReply({ content: "這個連結沒有找到可收藏的歌曲。" });
+        return;
+      }
+      const saved = await saveDiscordMusicFavorite(track);
+      if (interaction.message) {
+        await interaction.message.edit(buildDiscordMusicFavorites(await loadDiscordMusicFavorites(100))).catch(() => undefined);
+      }
+      await interaction.editReply({ content: saved.added ? `❤️ 已加入「${saved.entry.title}」。` : `「${saved.entry.title}」已經在收藏中。` });
+    } catch (error) {
+      await interaction.editReply({ content: `無法加入收藏：${error instanceof Error ? error.message : String(error)}` });
+    }
   }
 
   private async handleMusicSelect(interaction: StringSelectMenuInteraction): Promise<void> {
@@ -610,7 +1026,7 @@ export class DiscordAdapter implements ChannelAdapter {
       return;
     }
     this.musicControllerMessage = interaction.message;
-    await interaction.editReply(buildDiscordMusicPlayer(this.voiceCall.getMusicState()));
+    await this.showMusicController(interaction);
     this.startMusicControllerRefresh();
   }
 
@@ -623,20 +1039,22 @@ export class DiscordAdapter implements ChannelAdapter {
       await interaction.reply({ content: "這是其他人的播放工作階段，你不能加入歌曲。", flags: MessageFlags.Ephemeral });
       return;
     }
-    const favorite = (await loadDiscordMusicFavorites(500))
-      .find((entry) => entry.id === interaction.values[0]);
-    if (!favorite) {
+    const favorites = await loadDiscordMusicFavorites(500);
+    const selectedIndex = favorites.findIndex((entry) => entry.id === interaction.values[0]);
+    if (selectedIndex < 0) {
       await interaction.reply({ content: "找不到這筆收藏，請重新開啟 `/favorites`。", flags: MessageFlags.Ephemeral });
       return;
     }
+    this.favoriteSelections.set(interaction.user.id, favorites[selectedIndex].id);
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const message = await this.interactionAsMessage(interaction);
-    const handled = await this.voiceCall?.handleMusicRequest(message, { url: favorite.url }) ?? false;
+    const playable = await favoriteEntriesToTracks(favorites.slice(selectedIndex));
+    const handled = await this.voiceCall?.handleResolvedMusicTracks(message, playable) ?? false;
     if (!handled || !this.voiceCall?.getMusicState().active) {
       await interaction.editReply({ content: "無法開始播放，請確認你已加入語音頻道。", embeds: [], components: [] });
       return;
     }
-    await interaction.editReply(buildDiscordMusicPlayer(this.voiceCall.getMusicState()));
+    await this.showMusicController(interaction);
   }
 
   private async handleSpotifyPlaylistSelect(interaction: StringSelectMenuInteraction): Promise<void> {
@@ -667,7 +1085,7 @@ export class DiscordAdapter implements ChannelAdapter {
         await interaction.editReply({ content: "無法開始播放，請確認你已加入語音頻道。", embeds: [], components: [] });
         return;
       }
-      await interaction.editReply(buildDiscordMusicPlayer(this.voiceCall.getMusicState()));
+      await this.showMusicController(interaction);
     } catch (error) {
       await interaction.editReply({ content: `Spotify 播放清單讀取失敗：${error instanceof Error ? error.message : String(error)}` });
     }
@@ -696,7 +1114,7 @@ export class DiscordAdapter implements ChannelAdapter {
         await interaction.editReply({ content: "無法開始播放，請確認你已加入語音頻道。", embeds: [], components: [] });
         return;
       }
-      await interaction.editReply(buildDiscordMusicPlayer(this.voiceCall.getMusicState()));
+      await this.showMusicController(interaction);
     } catch (error) {
       await interaction.editReply({ content: `Spotify 作者歌曲讀取失敗：${error instanceof Error ? error.message : String(error)}` });
     }
@@ -715,7 +1133,7 @@ export class DiscordAdapter implements ChannelAdapter {
     }, 5_000);
   }
 
-  private async showMusicController(interaction: ChatInputCommandInteraction): Promise<void> {
+  private async showMusicController(interaction: ChatInputCommandInteraction | StringSelectMenuInteraction): Promise<void> {
     const state = this.voiceCall?.getMusicState();
     if (!state) return;
     const payload = buildDiscordMusicPlayer(state);
@@ -762,7 +1180,7 @@ export class DiscordAdapter implements ChannelAdapter {
     if (interaction.commandName === "pause") return { command: "pause" as const };
     if (interaction.commandName === "resume") return { command: "resume" as const };
     if (interaction.commandName === "previous") return { command: "previous" as const };
-    if (interaction.commandName === "skip") return { command: "skip" as const };
+    if (interaction.commandName === "next") return { command: "skip" as const };
     if (interaction.commandName === "stop") return { command: "stop" as const };
     if (interaction.commandName === "queue") return { command: "queue" as const };
     if (interaction.commandName === "clear") return { command: "clear" as const };

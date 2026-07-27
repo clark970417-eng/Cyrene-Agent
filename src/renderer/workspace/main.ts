@@ -22,6 +22,16 @@ declare global {
     tokenUsage?: {
       get: (days: number) => Promise<Array<{ date: string; input: number; output: number }>>;
     };
+    callUsage?: {
+      get: (days: number) => Promise<Array<{
+        date: string;
+        weekday: string;
+        totalMs: number;
+        desktopMs: number;
+        discordMs: number;
+        active: boolean;
+      }>>;
+    };
     cyreneScheduler?: {
       list: () => Promise<{ ok: boolean; value?: Array<{ enabled: boolean; title: string; nextFireAt: string | null }> }>;
     };
@@ -473,6 +483,73 @@ async function initStatusSync() {
   // input/output token 累加能在面板仍開啟時同步顯示。
   void updateTokenUsageStats();
   window.setInterval(() => void updateTokenUsageStats(), 10_000);
+
+  function formatCallDuration(ms: number, compact = false): string {
+    const seconds = Math.max(0, Math.floor(ms / 1000));
+    if (seconds < 60) return seconds > 0 && !compact ? `${seconds} 秒` : compact ? "0分" : "0 分鐘";
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    if (hours === 0) return compact ? `${minutes}分` : `${minutes} 分鐘`;
+    if (compact) return minutes ? `${hours}時 ${minutes}分` : `${hours}時`;
+    if (minutes === 0) return `${hours} 小時`;
+    return `${hours} 小時 ${minutes} 分`;
+  }
+
+  async function updateCallUsageStats() {
+    if (!window.callUsage) return;
+    try {
+      const data = await window.callUsage.get(7);
+      const today = new Date();
+      const weekdays = ["週日", "週一", "週二", "週三", "週四", "週五", "週六"];
+      const current = data[data.length - 1] ?? { totalMs: 0, desktopMs: 0, discordMs: 0, active: false };
+
+      const todayVal = document.getElementById("call-usage-today-val");
+      const sourceDetail = document.getElementById("call-usage-source-detail");
+      if (todayVal) todayVal.textContent = formatCallDuration(current.totalMs, true);
+      if (sourceDetail) {
+        sourceDetail.textContent = `今日 · 桌面 ${formatCallDuration(current.desktopMs, true)} · Discord ${formatCallDuration(current.discordMs, true)}`;
+      }
+      const liveIndicator = document.getElementById("call-live-indicator");
+      if (liveIndicator) liveIndicator.hidden = !current.active;
+
+      const weekStart = new Date(today);
+      weekStart.setHours(0, 0, 0, 0);
+      weekStart.setDate(today.getDate() - today.getDay());
+      const week = weekdays.map((weekday, index) => {
+        const date = new Date(weekStart);
+        date.setDate(weekStart.getDate() + index);
+        const key = `${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+        const entry = date.getTime() > today.getTime() ? undefined : data.find((item) => item.date === key);
+        return { weekday, totalMs: entry?.totalMs ?? 0 };
+      });
+      const elapsed = week.slice(0, today.getDay() + 1);
+      const weekTotal = elapsed.reduce((sum, item) => sum + item.totalMs, 0);
+      const peak = elapsed.reduce((best, item) => item.totalMs > best.totalMs ? item : best, { weekday: "週日", totalMs: 0 });
+      const average = weekTotal / Math.max(1, elapsed.length);
+
+      const avgEl = document.getElementById("call-avg-val");
+      const peakEl = document.getElementById("call-chart-peak-desc");
+      if (avgEl) avgEl.textContent = `日均 ${formatCallDuration(average, true)}`;
+      if (peakEl) {
+        peakEl.textContent = peak.totalMs > 0
+          ? `🎙️ 本週累計 ${formatCallDuration(weekTotal, true)} · 最長 ${formatCallDuration(peak.totalMs, true)} (${peak.weekday})`
+          : "🎙️ 本週尚無通話紀錄";
+      }
+
+      document.querySelectorAll(".call-chart-bar-item").forEach((item) => {
+        const dayIndex = Number((item as HTMLElement).dataset.day);
+        const fill = item.querySelector(".call-chart-bar-fill") as HTMLElement | null;
+        if (!fill) return;
+        const duration = week[dayIndex]?.totalMs ?? 0;
+        fill.style.height = peak.totalMs > 0 ? `${Math.max(duration > 0 ? 5 : 0, Math.min(100, duration / peak.totalMs * 100))}%` : "0%";
+      });
+    } catch (err) {
+      console.warn("Failed to load call usage stats:", err);
+    }
+  }
+
+  void updateCallUsageStats();
+  window.setInterval(() => void updateCallUsageStats(), 60_000);
 
   async function updateScheduleVisibility() {
     const summary = document.getElementById("schedule-summary");

@@ -259,7 +259,7 @@ export async function onAgentRunFinished(
   latestUserText: string,
   deps: OnRunFinishedDeps,
   channel?: "wechat" | "feishu" | "discord",
-): Promise<void> {
+): Promise<string | null> {
   const chatContent = result.reply;
   deps.scheduleMemoryWrite(latestUserText, chatContent);
 
@@ -279,12 +279,13 @@ export async function onAgentRunFinished(
   });
 
   const stickerIndex = deps.getStickerEmbeddingIndex?.() ?? deps.stickerEmbeddingIndex;
+  const stickerProvider = deps.getEmbeddingProvider();
   const stickerCandidate =
-    settings.stickerEnabled && stickerIndex
+    settings.stickerEnabled && stickerIndex && stickerProvider
       ? (
           await deps.matchSticker(
             chatContent + "\n" + latestUserText,
-            deps.getEmbeddingProvider(),
+            stickerProvider,
             stickerIndex,
             settings.stickerSimilarityThreshold ?? 0.55,
           )
@@ -311,4 +312,5 @@ export async function onAgentRunFinished(
       void deps.observeRuntimeState(settings, [], latestUserText, chatContent);
     }
   }
+  return sticker;
 }

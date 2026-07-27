@@ -25,7 +25,12 @@ const openNotebookBtn = document.getElementById("open-notebook-btn");
 const chaptersListContainer = document.getElementById("chapters-list-container");
 
 let pages: string[] = [];
-let currentPageIndex = 0; // 當前左半頁索引 (0, 2, 4, etc.)
+let currentPageIndex = 0; // 單頁模式逐頁遞增；雙頁模式維持偶數索引。
+const singlePageMedia = window.matchMedia("(max-width: 760px)");
+
+function pageStep(): number {
+  return singlePageMedia.matches ? 1 : 2;
+}
 
 function parseMarkdown(md: string): string {
   // Escape HTML to prevent injection
@@ -155,8 +160,8 @@ function buildChaptersSidebar() {
     item.setAttribute("data-page-index", String(idx));
     
     item.addEventListener("click", () => {
-      // 點擊後，翻到對應雙頁
-      currentPageIndex = Math.floor(idx / 2) * 2;
+      // 窄畫面逐頁閱讀；寬畫面則翻到包含該章節的雙頁。
+      currentPageIndex = singlePageMedia.matches ? idx : Math.floor(idx / 2) * 2;
       updatePageDisplay();
     });
 
@@ -198,15 +203,15 @@ function updatePageDisplay() {
 
   // Button States
   if (prevPageBtn) prevPageBtn.disabled = (currentPageIndex === 0);
-  if (nextPageBtn) nextPageBtn.disabled = (currentPageIndex + 2 >= pages.length);
+  if (nextPageBtn) nextPageBtn.disabled = (currentPageIndex + pageStep() >= pages.length);
 
   // 更新左側 sidebar 章節的高亮狀態
   const items = chaptersListContainer?.querySelectorAll(".chapter-item");
   if (items) {
     items.forEach((item) => {
       const idx = Number(item.getAttribute("data-page-index"));
-      // 只要這個章節在當前雙頁展示範圍內 (即為左頁或右頁)，就高亮它！
-      if (idx === currentPageIndex || idx === currentPageIndex + 1) {
+      const isVisible = idx === currentPageIndex || (!singlePageMedia.matches && idx === currentPageIndex + 1);
+      if (isVisible) {
         item.classList.add("active");
       } else {
         item.classList.remove("active");
@@ -222,13 +227,14 @@ function turnPage(direction: "next" | "prev") {
   bookContainer.classList.add(animationClass);
 
   setTimeout(() => {
+    const step = pageStep();
     if (direction === "next") {
-      if (currentPageIndex + 2 < pages.length) {
-        currentPageIndex += 2;
+      if (currentPageIndex + step < pages.length) {
+        currentPageIndex += step;
       }
     } else {
-      if (currentPageIndex - 2 >= 0) {
-        currentPageIndex -= 2;
+      if (currentPageIndex - step >= 0) {
+        currentPageIndex -= step;
       }
     }
     updatePageDisplay();
@@ -248,7 +254,7 @@ document.getElementById("book-left-page")?.addEventListener("click", (e) => {
 // 點擊右頁面邊角也能往後翻頁
 document.getElementById("book-right-page")?.addEventListener("click", (e) => {
   if ((e.target as HTMLElement).tagName === "A" || (e.target as HTMLElement).tagName === "BUTTON") return;
-  if (currentPageIndex + 2 < pages.length) turnPage("next");
+  if (currentPageIndex + pageStep() < pages.length) turnPage("next");
 });
 
 openNotebookBtn?.addEventListener("click", () => {
@@ -263,17 +269,19 @@ async function init() {
     // 建立左側章節清單
     buildChaptersSidebar();
 
-    // 開啟時自動翻到最後一頁 (最接近當前日期的雙頁)
-    if (pages.length > 2) {
-      currentPageIndex = Math.floor((pages.length - 1) / 2) * 2;
-    } else {
-      currentPageIndex = 0;
-    }
+    // 開啟時自動翻到最新紀錄；雙頁模式對齊偶數頁。
+    currentPageIndex = singlePageMedia.matches
+      ? Math.max(0, pages.length - 1)
+      : Math.floor(Math.max(0, pages.length - 1) / 2) * 2;
     updatePageDisplay();
   }
 }
 
 void init();
+singlePageMedia.addEventListener("change", () => {
+  if (!singlePageMedia.matches) currentPageIndex = Math.floor(currentPageIndex / 2) * 2;
+  updatePageDisplay();
+});
 window.sidebar?.onSharedNotebookChanged?.(() => {
   void init();
 });

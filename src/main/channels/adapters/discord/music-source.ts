@@ -3,6 +3,7 @@ import { spawn, type ChildProcessByStdio } from "node:child_process";
 import type { Readable } from "node:stream";
 import { constants as fsConstants, promises as fs } from "node:fs";
 import { createHash } from "node:crypto";
+import os from "node:os";
 import { toTraditionalTaiwan } from "../../../utils/opencc";
 
 // 足以涵蓋 Bilibili 跨作品音樂合集，同時避免無界清單耗盡記憶體。
@@ -114,6 +115,26 @@ interface BilibiliViewPayload {
 }
 
 let ytDlpBinaryPromise: Promise<string> | null = null;
+let bilibiliBrowserCookieSpec: string | null = null;
+
+export function getOperaGxProfilePath(): string {
+  if (process.platform === "darwin") {
+    return path.join(os.homedir(), "Library", "Application Support", "com.operasoftware.OperaGX", "Default");
+  }
+  if (process.platform === "win32") {
+    return path.join(process.env.APPDATA ?? path.join(os.homedir(), "AppData", "Roaming"), "Opera Software", "Opera GX Stable");
+  }
+  return path.join(os.homedir(), ".config", "opera-gx", "Default");
+}
+
+export function configureBilibiliBrowserCookies(enabled: boolean): void {
+  bilibiliBrowserCookieSpec = enabled ? `opera:${getOperaGxProfilePath()}` : null;
+}
+
+export function bilibiliCookieArgs(source: string): string[] {
+  if (!bilibiliBrowserCookieSpec || !/(?:bilibili\.com|b23\.tv)/i.test(source)) return [];
+  return ["--cookies-from-browser", bilibiliBrowserCookieSpec];
+}
 
 function normalizeHost(hostname: string): string {
   return hostname.toLowerCase().replace(/\.$/, "");
@@ -488,6 +509,7 @@ export async function resolveDiscordMusicTracks(input: string): Promise<DiscordM
   }
   const binary = await ensureYtDlpBinary();
   const commonArgs = [
+    ...bilibiliCookieArgs(sourceUrl),
     "--dump-single-json",
     "--no-warnings",
     "--no-progress",
@@ -703,7 +725,9 @@ async function runYtDlpJson(binary: string, args: string[]): Promise<YtDlpResult
 
 export async function spawnDiscordMusicStream(track: DiscordMusicTrack): Promise<DiscordMusicProcess> {
   const binary = await ensureYtDlpBinary();
+  const source = track.playbackUrl ?? track.url;
   return spawn(binary, [
+    ...bilibiliCookieArgs(source),
     "--no-playlist",
     "--no-warnings",
     "--no-progress",
@@ -711,8 +735,25 @@ export async function spawnDiscordMusicStream(track: DiscordMusicTrack): Promise
     "bestaudio/best",
     "--output",
     "-",
-    track.playbackUrl ?? track.url,
+    source,
   ], { stdio: ["ignore", "pipe", "pipe"] });
+}
+
+export async function testBilibiliBrowserCookies(): Promise<{ profilePath: string; title: string }> {
+  const profilePath = getOperaGxProfilePath();
+  await fs.access(path.join(profilePath, "Cookies"), fsConstants.R_OK);
+  const binary = await ensureYtDlpBinary();
+  const result = await runYtDlpJson(binary, [
+    "--cookies-from-browser",
+    `opera:${profilePath}`,
+    "--dump-single-json",
+    "--no-warnings",
+    "--no-progress",
+    "--skip-download",
+    "--no-playlist",
+    "https://www.bilibili.com/video/BV1EArsYVESc?p=2",
+  ]);
+  return { profilePath, title: toTraditionalTaiwan(result.title?.trim() || "Bilibili 登入狀態可用") };
 }
 
 export function formatMusicDuration(seconds: number | undefined): string {

@@ -5,6 +5,8 @@
 export interface BotTools {
   /** 啟動 exe。 */
   launch(exe: string): Promise<void>;
+  /** 依 YAAGL 視窗邊界點擊其主要「開始遊戲」按鈕。 */
+  yaaglStart(): Promise<void>;
   /** 截當前屏幕，返回 base64 + 實際像素尺寸。 */
   screenshot(): Promise<{ base64: string; mime: string; width: number; height: number } | null>;
   /** 點擊屏幕座標。 */

@@ -4,10 +4,10 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>昔漣 · 工作台</title>
-  <script type="module" crossorigin src="../assets/workspace-f_prouuR.js"></script>
+  <script type="module" crossorigin src="../assets/workspace-NE7vxyVj.js"></script>
   <link rel="modulepreload" crossorigin href="../assets/base-CbynX6G5.js">
   <link rel="stylesheet" crossorigin href="../assets/base-DacNE79P.css">
-  <link rel="stylesheet" crossorigin href="../assets/workspace-CvRyeGkG.css">
+  <link rel="stylesheet" crossorigin href="../assets/workspace-Bsu48T_5.css">
 </head>
 <body>
   <div class="workspace">
@@ -306,6 +306,38 @@
               📊 本周 Token 消耗趨勢 | 峰值 0K (週日)
             </div>
           </div>
+
+          <!-- 每日陪伴通話統計（桌面通話與 Discord 語音陪伴） -->
+          <section class="call-usage-section" aria-labelledby="call-usage-title">
+            <div class="call-usage-card">
+              <div class="call-usage-heading">
+                <div>
+                  <div class="call-usage-title" id="call-usage-title">📞 陪伴通話</div>
+                  <div class="call-usage-caption" id="call-usage-source-detail">今日 · 桌面 0 分鐘 · Discord 0 分鐘</div>
+                </div>
+                <div class="call-usage-num" id="call-usage-today-val">0 分鐘</div>
+              </div>
+              <div class="call-live-indicator" id="call-live-indicator" hidden>
+                <span class="call-live-dot"></span>
+                通話計時中
+              </div>
+            </div>
+
+            <div class="call-chart-header">
+              <span class="call-chart-label">本週通話時間</span>
+              <span class="call-avg-pill" id="call-avg-val">日均 0 分鐘</span>
+            </div>
+            <div class="call-chart-bars" id="call-chart-bars-list">
+              <div class="call-chart-bar-item" data-day="0"><div class="call-chart-bar-track"><div class="call-chart-bar-fill"></div></div><span>週日</span></div>
+              <div class="call-chart-bar-item" data-day="1"><div class="call-chart-bar-track"><div class="call-chart-bar-fill"></div></div><span>週一</span></div>
+              <div class="call-chart-bar-item" data-day="2"><div class="call-chart-bar-track"><div class="call-chart-bar-fill"></div></div><span>週二</span></div>
+              <div class="call-chart-bar-item" data-day="3"><div class="call-chart-bar-track"><div class="call-chart-bar-fill"></div></div><span>週三</span></div>
+              <div class="call-chart-bar-item" data-day="4"><div class="call-chart-bar-track"><div class="call-chart-bar-fill"></div></div><span>週四</span></div>
+              <div class="call-chart-bar-item" data-day="5"><div class="call-chart-bar-track"><div class="call-chart-bar-fill"></div></div><span>週五</span></div>
+              <div class="call-chart-bar-item" data-day="6"><div class="call-chart-bar-track"><div class="call-chart-bar-fill"></div></div><span>週六</span></div>
+            </div>
+            <div class="call-chart-footer" id="call-chart-peak-desc">🎙️ 本週尚無通話紀錄</div>
+          </section>
 
           <div class="schedule-divider"></div>
 

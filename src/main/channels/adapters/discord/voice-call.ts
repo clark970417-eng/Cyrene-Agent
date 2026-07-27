@@ -30,6 +30,7 @@ import {
 import { recordDiscordMusicInNotebook } from "./notebook-activity";
 import { recordDiscordMusicHistory } from "./music-history";
 import { toTraditionalTaiwan } from "../../../utils/opencc";
+import { startCallUsage, stopCallUsage } from "../../../call-usage-store";
 
 const LOG = "[DiscordVoice]";
 const MAX_UTTERANCE_BYTES = 48_000 * 2 * 2 * 30;
@@ -435,11 +436,13 @@ export class DiscordVoiceCall {
       await message.reply("我沒能連上語音頻道，請檢查 Bot 的連接／說話權限後再試。");
       return true;
     }
+    startCallUsage("discord");
     await message.reply("我進來了。你直接說話就好，我會在你停下來後回答。要結束時標註我說「離開通話」。");
     return true;
   }
 
   async leave(): Promise<void> {
+    const wasConnected = this.connection !== null;
     this.mode = null;
     this.processing = false;
     this.speaking = false;
@@ -466,6 +469,7 @@ export class DiscordVoiceCall {
     this.activeUserName = undefined;
     this.restoreConfiguredPresence();
     this.notifyMusicStateChange();
+    if (wasConnected) stopCallUsage("discord");
   }
 
   private bindConnection(): void {
@@ -530,6 +534,8 @@ export class DiscordVoiceCall {
       await this.leave();
       throw err;
     }
+    // 使用者把 Bot 留在 Discord 語音頻道陪伴或播歌，都算作相處通話時間。
+    startCallUsage("discord");
   }
 
   private async handleMusicCommand(

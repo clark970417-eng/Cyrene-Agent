@@ -39,6 +39,13 @@ async function readFavorites(filePath: string): Promise<DiscordMusicFavoriteEntr
   }
 }
 
+async function writeFavorites(entries: DiscordMusicFavoriteEntry[], filePath: string): Promise<void> {
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+  const temporary = `${filePath}.${process.pid}.tmp`;
+  await fs.writeFile(temporary, JSON.stringify(entries.slice(-MAX_FAVORITE_ITEMS), null, 2), "utf8");
+  await fs.rename(temporary, filePath);
+}
+
 export async function loadDiscordMusicFavorites(
   limit = 100,
   filePath = getDiscordMusicFavoritesPath(),
@@ -69,11 +76,7 @@ export async function saveDiscordMusicFavorite(
       savedAt: new Date().toISOString(),
     };
     favorites.push(entry);
-    const bounded = favorites.slice(-MAX_FAVORITE_ITEMS);
-    await fs.mkdir(path.dirname(filePath), { recursive: true });
-    const temporary = `${filePath}.${process.pid}.tmp`;
-    await fs.writeFile(temporary, JSON.stringify(bounded, null, 2), "utf8");
-    await fs.rename(temporary, filePath);
+    await writeFavorites(favorites, filePath);
     result = { added: true, entry };
   });
   favoritesWriteQueue = operation.catch((error) => {
@@ -81,4 +84,58 @@ export async function saveDiscordMusicFavorite(
   });
   await operation;
   return result;
+}
+
+async function editDiscordMusicFavorites(
+  edit: (displayOrder: DiscordMusicFavoriteEntry[]) => boolean,
+  filePath = getDiscordMusicFavoritesPath(),
+): Promise<boolean> {
+  let changed = false;
+  const operation = favoritesWriteQueue.catch(() => undefined).then(async () => {
+    const displayOrder = (await readFavorites(filePath)).reverse();
+    changed = edit(displayOrder);
+    if (changed) await writeFavorites(displayOrder.reverse(), filePath);
+  });
+  favoritesWriteQueue = operation.catch((error) => {
+    console.error("[DiscordMusicFavorites] 編輯失敗:", error);
+  });
+  await operation;
+  return changed;
+}
+
+export async function deleteDiscordMusicFavorite(
+  id: string,
+  filePath = getDiscordMusicFavoritesPath(),
+): Promise<boolean> {
+  return (await deleteDiscordMusicFavorites([id], filePath)) > 0;
+}
+
+export async function deleteDiscordMusicFavorites(
+  ids: string[],
+  filePath = getDiscordMusicFavoritesPath(),
+): Promise<number> {
+  const targets = new Set(ids);
+  let deleted = 0;
+  await editDiscordMusicFavorites((entries) => {
+    const kept = entries.filter((entry) => !targets.has(entry.id));
+    deleted = entries.length - kept.length;
+    if (!deleted) return false;
+    entries.splice(0, entries.length, ...kept);
+    return true;
+  }, filePath);
+  return deleted;
+}
+
+export async function moveDiscordMusicFavorite(
+  id: string,
+  direction: "up" | "down",
+  filePath = getDiscordMusicFavoritesPath(),
+): Promise<boolean> {
+  return await editDiscordMusicFavorites((entries) => {
+    const index = entries.findIndex((entry) => entry.id === id);
+    const target = direction === "up" ? index - 1 : index + 1;
+    if (index < 0 || target < 0 || target >= entries.length) return false;
+    [entries[index], entries[target]] = [entries[target], entries[index]];
+    return true;
+  }, filePath);
 }

@@ -3,7 +3,6 @@ import type { ExtraGameId, GameId, GameOutcome, GameResult, GameRoomStats } from
 import { chooseCyreneMove, getWinner, type Cell } from "./game-logic";
 import { setupExtraGames } from "./extra-games";
 import { setupCyreneQuiz } from "./cyrene-quiz";
-import { setupRopeboundGame } from "./ropebound-game";
 import "./game-room.css";
 
 type GameRoomApi = {
@@ -318,11 +317,12 @@ const extraStarts: Record<ExtraGameId, () => void> = {
     setLine,
     record: (outcome) => recordExtraResult("cyrene-quiz", outcome),
   }),
-  ropebound: setupRopeboundGame({
-    activate: (title, kicker, pill) => activateExtraGame("ropebound", title, kicker, pill),
-    setLine,
-    record: (outcome) => recordExtraResult("ropebound", outcome),
-  }),
+  ropebound: () => {
+    activateExtraGame("ropebound", "繩結同行", "原版遊戲 · 新增昔漣", "單人／雙人");
+    playStage.classList.add("play-stage--wide");
+    setLine("原本的玩法和角色動作都留在這裡；這次我也加入同行。", "笑一笑");
+    window.setTimeout(() => document.getElementById("ropebound-frame")?.focus(), 0);
+  },
 } as Record<ExtraGameId, () => void>;
 
 document.querySelectorAll<HTMLButtonElement>("[data-game]").forEach((button) => {

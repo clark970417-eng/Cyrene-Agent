@@ -34,18 +34,28 @@ export function buildDiscordHelp(profile: { username?: string; avatarUrl?: strin
         inline: false,
       },
       {
+        name: "🎮  Play together",
+        value: "`/game` 由昔漣直接在 Discord 內開啟《繩結同行》",
+        inline: false,
+      },
+      {
+        name: "🎨  Codex image",
+        value: "`/draw` 將繪圖委託交給 Codex，完成後以私訊回傳（僅擁有者）",
+        inline: false,
+      },
+      {
         name: "🎧  Play music",
         value: "`/play` 搜尋歌曲或貼音樂連結\n`/nowplaying` 顯示播放器　`/spotify` 選 Playlist／搜尋作者",
         inline: false,
       },
       {
         name: "♡  Your library",
-        value: "`/favorite` 收藏目前歌曲或單曲連結\n`/favorites` 收藏歌單　`/history` 最近播放紀錄",
+        value: "`/like` 收藏目前歌曲或單曲連結\n`/favorites` 從第一首播放收藏歌單　`/history` 最近播放紀錄",
         inline: false,
       },
       {
         name: "⚙  Playback",
-        value: "`/previous`　`/pause`　`/resume`　`/skip`　`/stop`\n`/queue`　`/remove`　`/clear`　`/volume`　`/repeat`　`/mode`　`/autoplay`",
+        value: "`/previous`　`/pause`　`/resume`　`/next`　`/stop`\n`/queue`　`/remove`　`/clear`　`/volume`　`/repeat`　`/mode`　`/autoplay`",
         inline: false,
       },
       {
@@ -66,11 +76,11 @@ export function buildDiscordHelp(profile: { username?: string; avatarUrl?: strin
 
 export function buildDiscordMusicControls(paused = false): ActionRowBuilder<ButtonBuilder> {
   return new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder().setCustomId(`${DISCORD_MUSIC_BUTTON_PREFIX}previous`).setEmoji("⏮️").setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId(`${DISCORD_MUSIC_BUTTON_PREFIX}toggle`).setEmoji(paused ? "▶️" : "⏸️").setStyle(ButtonStyle.Primary),
-    new ButtonBuilder().setCustomId(`${DISCORD_MUSIC_BUTTON_PREFIX}skip`).setEmoji("⏭️").setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId(`${DISCORD_MUSIC_BUTTON_PREFIX}stop`).setEmoji("👋").setStyle(ButtonStyle.Danger),
-    new ButtonBuilder().setCustomId(`${DISCORD_MUSIC_BUTTON_PREFIX}queue`).setEmoji("📃").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(`${DISCORD_MUSIC_BUTTON_PREFIX}previous`).setEmoji("⏮️").setLabel("Previous").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(`${DISCORD_MUSIC_BUTTON_PREFIX}toggle`).setEmoji(paused ? "▶️" : "⏸️").setLabel(paused ? "Play" : "Pause").setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId(`${DISCORD_MUSIC_BUTTON_PREFIX}skip`).setEmoji("⏭️").setLabel("Next").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(`${DISCORD_MUSIC_BUTTON_PREFIX}stop`).setEmoji("👋").setLabel("Leave").setStyle(ButtonStyle.Danger),
+    new ButtonBuilder().setCustomId(`${DISCORD_MUSIC_BUTTON_PREFIX}queue`).setEmoji("📃").setLabel("Queue").setStyle(ButtonStyle.Secondary),
   );
 }
 
@@ -83,35 +93,56 @@ export function buildDiscordMusicModes(
     new ButtonBuilder()
       .setCustomId(`${DISCORD_MUSIC_BUTTON_PREFIX}shuffle-toggle`)
       .setEmoji("🔀")
+      .setLabel("Shuffle")
       .setStyle(shuffle ? ButtonStyle.Success : ButtonStyle.Secondary),
     new ButtonBuilder()
       .setCustomId(`${DISCORD_MUSIC_BUTTON_PREFIX}repeat-cycle`)
       .setEmoji(repeat === "track" ? "🔂" : "🔁")
+      .setLabel("Repeat")
       .setStyle(repeat !== "off" ? ButtonStyle.Success : ButtonStyle.Secondary),
     new ButtonBuilder()
       .setCustomId(`${DISCORD_MUSIC_BUTTON_PREFIX}refresh`)
       .setEmoji("🔄")
+      .setLabel("Refresh")
       .setStyle(ButtonStyle.Secondary),
     new ButtonBuilder()
       .setCustomId(`${DISCORD_MUSIC_BUTTON_PREFIX}autoplay-toggle`)
       .setEmoji("♾️")
+      .setLabel("Auto play")
       .setStyle(autoplay ? ButtonStyle.Success : ButtonStyle.Secondary),
     new ButtonBuilder()
       .setCustomId(`${DISCORD_MUSIC_BUTTON_PREFIX}history`)
       .setEmoji("🕘")
+      .setLabel("History")
       .setStyle(ButtonStyle.Secondary),
   );
 }
 
-export function buildDiscordMusicLibrary(): ActionRowBuilder<ButtonBuilder> {
+export function buildDiscordMusicLibrary(currentVolume = 100): ActionRowBuilder<ButtonBuilder> {
   return new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`${DISCORD_MUSIC_BUTTON_PREFIX}volume-down`)
+      .setLabel("−")
+      .setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder()
+      .setCustomId(`${DISCORD_MUSIC_BUTTON_PREFIX}volume-display`)
+      .setEmoji("🔊")
+      .setLabel(`${Math.max(0, Math.min(150, Math.round(currentVolume)))}%`)
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(true),
+    new ButtonBuilder()
+      .setCustomId(`${DISCORD_MUSIC_BUTTON_PREFIX}volume-up`)
+      .setLabel("+")
+      .setStyle(ButtonStyle.Secondary),
     new ButtonBuilder()
       .setCustomId(`${DISCORD_MUSIC_BUTTON_PREFIX}favorite`)
       .setEmoji("❤️")
+      .setLabel("Like")
       .setStyle(ButtonStyle.Success),
     new ButtonBuilder()
       .setCustomId(`${DISCORD_MUSIC_BUTTON_PREFIX}favorites`)
       .setEmoji("💖")
+      .setLabel("Playlists")
       .setStyle(ButtonStyle.Secondary),
   );
 }
@@ -181,7 +212,7 @@ export function buildDiscordMusicPlayer(state: DiscordMusicState) {
         .setAuthor({ name: "Cyrene Music • 準備播放" })
         .setTitle("正在讀取音樂…")
         .setDescription("取得音訊後，這張卡片會自動更新。")],
-      components: [buildDiscordMusicControls(state.paused), buildDiscordMusicModes(state.shuffle, state.repeat, state.autoplay), buildDiscordMusicLibrary(), buildDiscordVolumeControl(state.volume)],
+      components: [buildDiscordMusicControls(state.paused), buildDiscordMusicModes(state.shuffle, state.repeat, state.autoplay), buildDiscordMusicLibrary(state.volume)],
     };
   }
 
@@ -206,7 +237,7 @@ export function buildDiscordMusicPlayer(state: DiscordMusicState) {
   return {
     content: "",
     embeds: [embed],
-    components: [buildDiscordMusicControls(state.paused), buildDiscordMusicModes(state.shuffle, state.repeat, state.autoplay), buildDiscordMusicLibrary(), buildDiscordVolumeControl(state.volume)],
+    components: [buildDiscordMusicControls(state.paused), buildDiscordMusicModes(state.shuffle, state.repeat, state.autoplay), buildDiscordMusicLibrary(state.volume)],
   };
 }
 
@@ -270,7 +301,8 @@ export function buildDiscordMusicHistory(entries: DiscordMusicHistoryEntry[]) {
       const playlist = entry.playlistTitle ? `\n　　${entry.playlistTitle.slice(0, 100)}` : "";
       const safeUrl = /^https?:\/\//i.test(entry.url) ? entry.url.slice(0, 1024) : "";
       const linkedTitle = safeUrl ? `[${title}](${safeUrl})` : title;
-      const line = `\`${String(index + 1).padStart(2, "0")}\` ${linkedTitle}${time}${playlist}`;
+      const copyableUrl = safeUrl ? `\n　　🔗 \`${safeUrl.replace(/`/g, "%60")}\`` : "";
+      const line = `\`${String(index + 1).padStart(2, "0")}\` ${linkedTitle}${time}${playlist}${copyableUrl}`;
       // Discord embed description 上限為 4096；保留餘量，避免 API 拒絕整則互動回覆。
       if ([...lines, line].join("\n").length > 3900) break;
       lines.push(line);
@@ -310,18 +342,25 @@ export function buildDiscordMusicFavorites(entries: DiscordMusicFavoriteEntry[])
     .setDescription(lines.length ? lines.join("\n") : "還沒有收藏歌曲。播放音樂時按下 ❤️ Save 即可加入。")
     .setFooter({ text: `只有你看得到  ·  已收藏 ${entries.length} 首` });
   if (visible[0]?.thumbnail && /^https?:\/\//i.test(visible[0].thumbnail)) embed.setThumbnail(visible[0].thumbnail);
-  const components = visible.length
-    ? [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
+  const components: Array<ActionRowBuilder<StringSelectMenuBuilder> | ActionRowBuilder<ButtonBuilder>> = [];
+  if (visible.length) {
+    components.push(new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
       new StringSelectMenuBuilder()
         .setCustomId(`${DISCORD_MUSIC_BUTTON_PREFIX}favorites-select`)
-        .setPlaceholder("🎵 選擇一首加入播放")
+        .setPlaceholder("🎵 選擇歌曲並從這首開始播放")
         .addOptions(visible.map((entry, index) => ({
           label: entry.title.slice(0, 100),
           description: `${index + 1}${entry.playlistTitle ? ` · ${entry.playlistTitle}` : ""}`.slice(0, 100),
           value: entry.id,
         }))),
-    )]
-    : [];
+    ));
+  }
+  components.push(new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder().setCustomId(`${DISCORD_MUSIC_BUTTON_PREFIX}favorites-add`).setLabel("+").setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId(`${DISCORD_MUSIC_BUTTON_PREFIX}favorites-delete`).setLabel("−").setStyle(ButtonStyle.Danger).setDisabled(!visible.length),
+    new ButtonBuilder().setCustomId(`${DISCORD_MUSIC_BUTTON_PREFIX}favorites-up`).setEmoji("⬆️").setStyle(ButtonStyle.Secondary).setDisabled(!visible.length),
+    new ButtonBuilder().setCustomId(`${DISCORD_MUSIC_BUTTON_PREFIX}favorites-down`).setEmoji("⬇️").setStyle(ButtonStyle.Secondary).setDisabled(!visible.length),
+  ));
   return { content: "", embeds: [embed], components };
 }
 
@@ -386,6 +425,7 @@ export function musicRequestFromButton(
   shuffle = false,
   repeat: DiscordMusicState["repeat"] = "off",
   autoplay = false,
+  volume = 100,
 ): DiscordMusicRequest | null {
   if (!customId.startsWith(DISCORD_MUSIC_BUTTON_PREFIX)) return null;
   const action = customId.slice(DISCORD_MUSIC_BUTTON_PREFIX.length);
@@ -399,6 +439,8 @@ export function musicRequestFromButton(
   if (action === "history") return { command: "history" };
   if (action === "favorite") return { command: "favorite" };
   if (action === "favorites") return { command: "favorites" };
+  if (action === "volume-down") return { command: "volume", value: Math.max(0, volume - 25) };
+  if (action === "volume-up") return { command: "volume", value: Math.min(150, volume + 25) };
   if (["previous", "skip", "queue", "stop"].includes(action)) {
     return { command: action as "previous" | "skip" | "queue" | "stop" };
   }
@@ -411,6 +453,11 @@ const commands = [
     .setDescription("直接和 Cyrene 聊天，不需要標註她")
     .addStringOption((option) => option.setName("message").setDescription("想對她說的話").setRequired(true)),
   new SlashCommandBuilder()
+    .setName("draw")
+    .setDescription("由 Codex 生成圖片並透過 Discord 私訊回傳（僅擁有者）")
+    .addStringOption((option) => option.setName("prompt").setDescription("可只輸入關鍵詞，例如：我想看你穿黑絲").setMaxLength(1800).setRequired(true)),
+  new SlashCommandBuilder().setName("game").setDescription("由昔漣在 Discord 內開啟《繩結同行》"),
+  new SlashCommandBuilder()
     .setName("play")
     .setDescription("搜尋歌曲，或播放 YouTube／Bilibili／SoundCloud／Spotify 連結")
     .addStringOption((option) => option.setName("url").setDescription("歌曲名稱、音樂網址或播放清單").setRequired(true)),
@@ -418,16 +465,16 @@ const commands = [
   new SlashCommandBuilder().setName("pause").setDescription("暫停目前播放的音樂"),
   new SlashCommandBuilder().setName("resume").setDescription("繼續播放已暫停的音樂"),
   new SlashCommandBuilder().setName("previous").setDescription("回到上一首歌曲"),
-  new SlashCommandBuilder().setName("skip").setDescription("跳過目前歌曲"),
+  new SlashCommandBuilder().setName("next").setDescription("播放下一首歌曲"),
   new SlashCommandBuilder().setName("stop").setDescription("停止音樂並離開語音頻道"),
   new SlashCommandBuilder().setName("queue").setDescription("查看目前歌曲與接下來的播放佇列"),
   new SlashCommandBuilder().setName("history").setDescription("查看最近聽過的歌曲與影片"),
   new SlashCommandBuilder().setName("save").setDescription("把目前播放的歌曲永久加入收藏"),
   new SlashCommandBuilder()
-    .setName("favorite")
+    .setName("like")
     .setDescription("收藏目前歌曲，或收藏一個 Bilibili／YouTube／Spotify 單曲連結")
     .addStringOption((option) => option.setName("url").setDescription("可省略；單一歌曲或影片連結").setRequired(false)),
-  new SlashCommandBuilder().setName("favorites").setDescription("查看收藏歌單並選擇歌曲播放"),
+  new SlashCommandBuilder().setName("favorites").setDescription("從第一首開始播放收藏歌單"),
   new SlashCommandBuilder()
     .setName("spotify")
     .setDescription("選擇 Spotify 播放清單，或搜尋作者並播放熱門歌曲")

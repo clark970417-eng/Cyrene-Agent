@@ -7,6 +7,7 @@ import { parseRecipe } from "./script-parser";
 function mockTools(overrides: Partial<BotTools> = {}): BotTools {
   return {
     launch: vi.fn().mockResolvedValue(undefined),
+    yaaglStart: vi.fn().mockResolvedValue(undefined),
     screenshot: vi.fn().mockResolvedValue({ base64: "x", mime: "image/png", width: 1000, height: 1000 }),
     click: vi.fn().mockResolvedValue(undefined),
     clickCenter: vi.fn().mockResolvedValue(undefined),
@@ -35,12 +36,35 @@ describe("runRecipe", () => {
     expect(tools.launch).toHaveBeenCalledWith("C:/game.exe");
   });
 
+  it("launch 可透過頂層 exe 間接展開 exe_path", async () => {
+    const tools = mockTools();
+    const r = recipe('name: x\nexe: "${exe_path}"\nsteps:\n  - launch: "${exe}"');
+    await runRecipe(r, { tools, vars: { exe_path: "/Applications/Honkai Star Rail.app" }, sleep: noSleep });
+    expect(tools.launch).toHaveBeenCalledWith("/Applications/Honkai Star Rail.app");
+  });
+
   it("wait 調用 sleep", async () => {
     const tools = mockTools();
     const sleep = vi.fn().mockResolvedValue(undefined);
     const r = recipe('name: x\nexe: y\nsteps:\n  - wait: 60s');
     await runRecipe(r, { tools, sleep });
     expect(sleep).toHaveBeenCalledWith(60000);
+  });
+
+  it("yaagl_start 調用專用啟動按鈕工具", async () => {
+    const tools = mockTools();
+    const r = recipe('name: x\nexe: y\nsteps:\n  - yaagl_start: true');
+    await runRecipe(r, { tools, sleep: noSleep });
+    expect(tools.yaaglStart).toHaveBeenCalledOnce();
+  });
+
+  it("click 比例座標依目前螢幕尺寸換算", async () => {
+    const tools = mockTools({
+      screenshot: vi.fn().mockResolvedValue({ base64: "x", mime: "image/png", width: 1000, height: 800 }),
+    });
+    const r = recipe('name: x\nexe: y\nsteps:\n  - click: { ratio_x: 0.8, ratio_y: 0.85 }');
+    await runRecipe(r, { tools, sleep: noSleep });
+    expect(tools.click).toHaveBeenCalledWith(800, 680);
   });
 
   it("vlm_click 定位成功後點擊", async () => {

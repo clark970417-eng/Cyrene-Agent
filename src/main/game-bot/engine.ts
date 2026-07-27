@@ -58,6 +58,7 @@ function evalExpr(expr: string, vars: Record<string, unknown>): boolean {
 function stepDesc(step: Step): string {
   switch (step.type) {
     case "launch": return "啟動 " + step.exe;
+    case "yaagl_start": return "點擊 YAAGL 開始遊戲";
     case "wait": return "等待 " + step.ms + "ms";
     case "key": return "按鍵 " + step.combo;
     case "click": return "點擊 " + (step.target === "center" ? "中心" : JSON.stringify(step.target));
@@ -72,6 +73,10 @@ function stepDesc(step: Step): string {
 export async function runRecipe(recipe: GameRecipe, ctx: RunContext): Promise<RunResult> {
   const tools = ctx.tools;
   const vars: Record<string, unknown> = { ...(ctx.vars ?? {}) };
+  // 腳本步驟可用 ${exe} / ${model} 引用頂層欄位；頂層欄位本身也可引用
+  // 執行環境注入的 ${exe_path} / ${vlm_config}。
+  vars.exe = resolveVars(recipe.exe, vars);
+  if (recipe.model) vars.model = resolveVars(recipe.model, vars);
   const sleep = ctx.sleep ?? defaultSleep;
   const settleMs = ctx.settleMs ?? 3000;
   const total = recipe.steps.length;
@@ -83,6 +88,9 @@ export async function runRecipe(recipe: GameRecipe, ctx: RunContext): Promise<Ru
       case "launch":
         await tools.launch(resolveVars(step.exe, vars));
         return null;
+      case "yaagl_start":
+        await tools.yaaglStart();
+        return null;
       case "wait":
         await sleep(step.ms);
         return null;
@@ -91,7 +99,14 @@ export async function runRecipe(recipe: GameRecipe, ctx: RunContext): Promise<Ru
         return null;
       case "click":
         if (step.target === "center") await tools.clickCenter();
-        else await tools.click(step.target.x, step.target.y);
+        else if ("ratioX" in step.target) {
+          const shot = await tools.screenshot();
+          if (!shot) return "無法取得螢幕尺寸以計算比例點擊";
+          await tools.click(
+            Math.round(shot.width * step.target.ratioX),
+            Math.round(shot.height * step.target.ratioY),
+          );
+        } else await tools.click(step.target.x, step.target.y);
         return null;
       case "vlm_click": {
         await sleep(step.settle ?? settleMs);

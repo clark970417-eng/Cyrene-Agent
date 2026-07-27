@@ -199,6 +199,7 @@ export const IPC = {
 
   // token usage statistics
   TOKEN_USAGE_GET: "token-usage:get",
+  CALL_USAGE_GET: "call-usage:get",
   AGENT_ACTIVITY_GET: "agent-activity:get",
   AGENT_DIAGNOSTIC_EXPORT: "agent-diagnostic:export",
   ASR_TEST_LOCAL: "asr:test-local",
@@ -288,6 +289,10 @@ export const IPC = {
   CHANNELS_SPOTIFY_GET_STATUS: "channels:spotify:get-status",
   CHANNELS_SPOTIFY_CONTROL: "channels:spotify:control",
   CHANNELS_SPOTIFY_DISCONNECT: "channels:spotify:disconnect",
+  // Bilibili / Opera GX browser session
+  CHANNELS_BILIBILI_CONNECT: "channels:bilibili:connect",
+  CHANNELS_BILIBILI_GET_STATUS: "channels:bilibili:get-status",
+  CHANNELS_BILIBILI_DISCONNECT: "channels:bilibili:disconnect",
   // Phase 3.4：消息日誌
   CHANNELS_LOG_GET: "channels:log:get",
   CHANNELS_LOG_CLEAR: "channels:log:clear",

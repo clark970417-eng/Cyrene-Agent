@@ -4,12 +4,12 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>昔漣的遊戲房</title>
-  <script type="module" crossorigin src="../assets/gameRoom-CnGQKFx4.js"></script>
+  <script type="module" crossorigin src="../assets/gameRoom-CqGrv-Sz.js"></script>
   <link rel="modulepreload" crossorigin href="../assets/base-CbynX6G5.js">
   <link rel="modulepreload" crossorigin href="../assets/theme-uAkP_0In.js">
   <link rel="stylesheet" crossorigin href="../assets/base-DacNE79P.css">
   <link rel="stylesheet" crossorigin href="../assets/theme-CU2jk0uT.css">
-  <link rel="stylesheet" crossorigin href="../assets/gameRoom-BoUUemHw.css">
+  <link rel="stylesheet" crossorigin href="../assets/gameRoom-DkvJ7jvI.css">
 </head>
 <body>
   <main class="game-room">
@@ -104,9 +104,9 @@
         <button class="game-card game-card--wide game-card--ropebound" type="button" data-game="ropebound">
           <span class="game-card__glyph">⌁</span>
           <span class="game-card__meta">雙人協作平台冒險 · 單人陪伴／本地雙人</span>
-          <strong>記憶絲線</strong>
-          <span class="game-card__desc">你和昔漣被一條會感受重量的絲線相連。收集六朵記憶花，互相拉住彼此，走到星河另一端。</span>
-          <span class="game-card__cta">牽住絲線 <b>→</b></span>
+          <strong>繩結同行</strong>
+          <span class="game-card__desc">保留原版關卡、繩索物理與所有操作；昔漣取代第三名角色，使用憶光閃步。</span>
+          <span class="game-card__cta">開始同行 <b>→</b></span>
         </button>
       </div>
     </section>
@@ -211,61 +211,13 @@
       </div>
 
       <div class="ropebound-game extra-game" id="ropebound-game" hidden>
-        <div class="ropebound-shell">
-          <div class="ropebound-hud" id="ropebound-hud" hidden>
-            <div><span id="ropebound-score-label">記憶花</span><strong id="ropebound-collected">0 / 9</strong></div>
-            <div class="ropebound-tension"><span>絲線張力</span><i><b id="ropebound-tension-bar"></b></i></div>
-            <div><span id="ropebound-effect">牽引：菲比啾比</span><strong id="ropebound-time">0:00</strong></div>
-            <div class="ropebound-ability"><span id="ropebound-ability-label">飛帽</span><i><b id="ropebound-ability-bar"></b></i></div>
-            <button type="button" id="ropebound-sound" aria-label="關閉遊戲音樂">♪</button>
-            <button type="button" id="ropebound-pause">暫停</button>
-          </div>
-          <canvas id="ropebound-canvas" class="ropebound-canvas" width="1180" height="664" tabindex="0" aria-label="你與昔漣以記憶絲線相連的橫向平台冒險"></canvas>
-          <div class="ropebound-intro" id="ropebound-intro">
-            <div class="ropebound-intro__copy">
-              <span class="eyebrow">MEMORY THREAD · CO-OP FIELD</span>
-              <h3>記憶有重量，<br />所以我們要一起走。</h3>
-              <p id="ropebound-mode-copy">你控制其中一人，夥伴會跟隨；Tab 可交換牽引。</p>
-            </div>
-            <div class="ropebound-setup" aria-label="遊戲設定">
-              <span class="ropebound-setup__label">旅途</span>
-              <div class="ropebound-mode ropebound-journey">
-                <button type="button" class="is-selected" data-rope-journey="endless"><b>無盡星河</b><span>隨機地圖與積分</span></button>
-                <button type="button" data-rope-journey="story"><b>燈塔旅途</b><span>固定關卡與存檔</span></button>
-              </div>
-              <span class="ropebound-setup__label">同行方式</span>
-              <div class="ropebound-mode">
-                <button type="button" class="is-selected" data-rope-mode="solo"><b>單人 + AI</b><span>同行夥伴會跟隨</span></button>
-                <button type="button" data-rope-mode="duo"><b>本地雙人</b><span>共用鍵盤</span></button>
-              </div>
-              <span class="ropebound-setup__label">出戰角色</span>
-              <div class="ropebound-roster" aria-label="選擇兩名角色">
-                <div><small>主控／P1</small><div>
-                  <button type="button" class="is-selected" data-rope-slot="0" data-rope-character="0">菲比啾比</button>
-                  <button type="button" data-rope-slot="0" data-rope-character="1">弗糯糯</button>
-                  <button type="button" data-rope-slot="0" data-rope-character="2">昔漣</button>
-                </div></div>
-                <div><small>同行／P2</small><div>
-                  <button type="button" data-rope-slot="1" data-rope-character="0">菲比啾比</button>
-                  <button type="button" class="is-selected" data-rope-slot="1" data-rope-character="1">弗糯糯</button>
-                  <button type="button" data-rope-slot="1" data-rope-character="2">昔漣</button>
-                </div></div>
-              </div>
-              <button type="button" class="ropebound-start" id="ropebound-start"><span>牽住絲線</span><b>→</b></button>
-              <small>移動 A D／← →　跳躍 W／↑　收線 Q　抓取 E　技能 F／　重來 R</small>
-            </div>
-          </div>
-          <div class="ropebound-touch" aria-label="觸控操作">
-            <button type="button" data-rope-input="solo-left" aria-label="向左">←</button>
-            <button type="button" data-rope-input="solo-right" aria-label="向右">→</button>
-            <button type="button" data-rope-input="switch" aria-label="交換牽引">換</button>
-            <button type="button" data-rope-input="reel" aria-label="收緊絲線">收</button>
-            <button type="button" data-rope-input="grab" aria-label="抓住或投擲同伴">抓</button>
-            <button type="button" data-rope-input="ability" aria-label="使用角色技能">技</button>
-            <button type="button" data-rope-input="jump" aria-label="跳躍">跳</button>
-          </div>
-        </div>
-        <button class="text-button ropebound-restart" id="ropebound-restart" type="button" hidden>重新開始這段記憶</button>
+        <iframe
+          class="ropebound-frame"
+          id="ropebound-frame"
+          src="../ropebound-original/index.html"
+          title="繩結同行遊戲"
+          allow="autoplay"
+        ></iframe>
       </div>
     </section>
   </main>

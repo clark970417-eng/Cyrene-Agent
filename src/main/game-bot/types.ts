@@ -5,9 +5,13 @@
 // 每個原語一個 interface；Step 是聯合類型。branch.then/else 遞歸為 Step[]。
 
 export interface StepLaunch { type: "launch"; exe: string; }
+export interface StepYaaglStart { type: "yaagl_start"; }
 export interface StepWait { type: "wait"; ms: number; }
 export interface StepKey { type: "key"; combo: string; }  // "F4" / "Alt+F4"
-export interface StepClick { type: "click"; target: "center" | { x: number; y: number }; }
+export interface StepClick {
+  type: "click";
+  target: "center" | { x: number; y: number } | { ratioX: number; ratioY: number };
+}
 
 export interface StepVlmClick {
   type: "vlm_click";
@@ -50,7 +54,7 @@ export interface StepBranch {
 }
 
 export type Step =
-  | StepLaunch | StepWait | StepKey | StepClick
+  | StepLaunch | StepYaaglStart | StepWait | StepKey | StepClick
   | StepVlmClick | StepVlmSelect | StepVlmCheck | StepVlmCompare
   | StepBranch;
 

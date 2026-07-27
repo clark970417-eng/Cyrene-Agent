@@ -18,6 +18,7 @@ import { toTraditionalTaiwan } from "../utils/opencc";
 import { splitForEarlySpeech } from "./tts-segmentation";
 import { captionImage } from "../orchestrator/vision-captioner";
 import { parseSharedScreenFrame, shouldUseSharedScreen, type SharedScreenFrame } from "./screen-context";
+import { startCallUsage, stopCallUsage } from "../call-usage-store";
 
 const LOG_PREFIX = "[CallManager]";
 
@@ -281,6 +282,7 @@ export function startCall(): void {
   }
 
   active = true;
+  startCallUsage("desktop");
   finalText = "";
   localAudioBuffer = Buffer.alloc(0);
   callHistory.length = 0;
@@ -464,6 +466,7 @@ function restartAsr(): void {
 /** 掛斷：清理一切。 */
 export function stopCall(): void {
   active = false;
+  stopCallUsage("desktop");
   callHistory.length = 0;
   latestScreenFrame = null;
   localAudioBuffer = Buffer.alloc(0);

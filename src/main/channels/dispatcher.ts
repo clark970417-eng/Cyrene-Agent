@@ -35,15 +35,55 @@ interface ChatMessage {
   content?: string;
 }
 
+/** Agent 可以在文字之外附帶一張已匹配完成的表情包。 */
+export interface ChannelAgentReply {
+  text: string;
+  sticker?: {
+    id: string;
+    imagePath: string;
+  };
+}
+
 export interface SynthesizedChannelAudio {
   audio: Buffer;
   format: "wav" | "mp3";
 }
 
-/** Discord 一般文字聊天只回文字；語音通話的內部輪次才需要合成音訊。 */
+/**
+ * 使用者在 Discord 文字頻道明確要求一段語音。
+ * 支援「能傳一段晚安的語音嗎」以及不帶主題的「能傳一段語音嗎」。
+ */
+export function extractDiscordVoiceRequestTopic(text: string): string | null {
+  const cleaned = text.replace(/<@!?\d+>/g, " ").replace(/\s+/g, " ").trim();
+  const match = cleaned.match(/能傳一段(?:(.+?)的)?語音(?:嗎)?[？?]?\s*$/u);
+  if (!match) return null;
+  return match[1]?.trim() || "自由發揮一段自然、親切的內容";
+}
+
+export function isDiscordTextVoiceRequest(msg: IncomingMessage): boolean {
+  return msg.channel === "discord" && extractDiscordVoiceRequestTopic(msg.text) !== null;
+}
+
+/** 把能力詢問改寫成朗讀稿任務，避免模型誤以為平台不能附加音訊。 */
+export function prepareDiscordVoiceAgentMessage(msg: IncomingMessage): IncomingMessage {
+  if (msg.channel !== "discord") return msg;
+  const topic = extractDiscordVoiceRequestTopic(msg.text);
+  if (topic === null) return msg;
+  return {
+    ...msg,
+    text: [
+      `請直接寫出一段關於「${topic}」、適合用昔漣口吻朗讀的自然口語內容。`,
+      "本次回答會由 Discord 語音附件功能自動合成並成功發送。",
+      "只輸出要被朗讀的內容，不要解釋傳送方式，也不要討論是否能傳語音。",
+    ].join("\n"),
+  };
+}
+
+/** Discord 一般文字聊天只回文字；語音輪次或明確語音請求才合成音訊。 */
 export function shouldSynthesizeChannelTts(msg: IncomingMessage, ttsEnabled: boolean): boolean {
   if (!ttsEnabled) return false;
   if (msg.channel !== "discord") return true;
+  if (isDiscordTextVoiceRequest(msg)) return true;
   const raw = msg._raw;
   return !!raw && typeof raw === "object"
     && (raw as { source?: unknown }).source === "discord-voice";
@@ -129,7 +169,11 @@ export interface DispatcherDeps {
   /** 渲染端 chatWindow 用於鏡像顯示（可選） */
   getChatWindow?: () => { webContents: { isDestroyed(): boolean; send: (channel: string, ...args: unknown[]) => void }; isDestroyed(): boolean } | null;
   /** Phase 1+：完整 agent 調用。Phase 0 留空，返回純 echo。 */
-  buildAndRunAgent?: (msg: IncomingMessage, sessionId: string, priorMessages?: ChatMessage[]) => Promise<string>;
+  buildAndRunAgent?: (
+    msg: IncomingMessage,
+    sessionId: string,
+    priorMessages?: ChatMessage[],
+  ) => Promise<string | ChannelAgentReply>;
   /** Phase A：讀這個 sessionId 最近 N 條對話歷史（按時間順序）。不提供時不拼歷史，行為同 Phase 0。 */
   loadRecentChannelHistory?: (sessionId: string, limit: number) => Promise<ChatMessage[]>;
   /** Phase 3：可選 — 把文本合成成音頻。失敗返回 null，dispatcher 會跳過 audio。 */
@@ -222,6 +266,7 @@ export class ChannelDispatcher {
 
     // Phase 1 實裝的 agent 調用；Phase 0 沒有 → echo
     let replyText: string;
+    let sticker: ChannelAgentReply["sticker"];
     if (this.deps.buildAndRunAgent) {
       // Phase A：拼接最近 16 條歷史 (同桌面端 buildModelMessages 行為).
       // 加載失敗/未注入 → 不拼歷史 (兼容舊實現).
@@ -235,7 +280,13 @@ export class ChannelDispatcher {
         }
       }
       try {
-        replyText = await this.deps.buildAndRunAgent(msg, sessionId, priorMessages);
+        const agentReply = await this.deps.buildAndRunAgent(prepareDiscordVoiceAgentMessage(msg), sessionId, priorMessages);
+        if (typeof agentReply === "string") {
+          replyText = agentReply;
+        } else {
+          replyText = agentReply.text;
+          sticker = agentReply.sticker;
+        }
       } catch (err) {
         console.error(LOG, "agent 調用失敗:", err instanceof Error ? err.message : err);
         return null;
@@ -249,9 +300,17 @@ export class ChannelDispatcher {
 
     // 構造 OutgoingMessage parts
     const parts: OutgoingPart[] = [{ kind: "text", text: replyText }];
+    if (sticker) {
+      parts.push({
+        kind: "sticker",
+        stickerId: sticker.id,
+        imagePath: sticker.imagePath,
+      });
+    }
 
     // Phase 3：TTS 音頻自動追加（如果啟用且適配器支持 audio）
     const shouldSynthesizeTts = shouldSynthesizeChannelTts(msg, this.settings.ttsEnabled);
+    const audioOnlyRequested = isDiscordTextVoiceRequest(msg);
     console.log(LOG, `TTS 決策: enabled=${shouldSynthesizeTts} hasFn=${!!this.deps.synthesizeTts}`);
     if (shouldSynthesizeTts && this.deps.synthesizeTts) {
       const adapterCap = this.deps.manager.getAdapter(msg.channel)?.capability;
@@ -266,7 +325,9 @@ export class ChannelDispatcher {
             fs.mkdirSync(audioDir, { recursive: true });
             const audioPath = path.join(audioDir, `${msg.channel}-${Date.now()}.${synthesized.format}`);
             fs.writeFileSync(audioPath, synthesized.audio);
-            parts.push({ kind: "audio", filePath: audioPath, mime: synthesized.format === "wav" ? "audio/wav" : "audio/mpeg" });
+            const audioPart: OutgoingPart = { kind: "audio", filePath: audioPath, mime: synthesized.format === "wav" ? "audio/wav" : "audio/mpeg" };
+            if (audioOnlyRequested) parts.splice(0, parts.length, audioPart);
+            else parts.push(audioPart);
             console.log(LOG, `TTS 合成完成: ${synthesized.audio.length} bytes → ${audioPath}`);
           }
         } catch (err) {
@@ -301,7 +362,7 @@ export class ChannelDispatcher {
         senderName: msg.senderName,
         chatId: msg.chatId,
         text: replyText,
-        hasAttachments: parts.some((p) => p.kind === "audio"),
+        hasAttachments: parts.some((p) => p.kind !== "text"),
       });
     } catch (err) {
       console.warn(LOG, "appendLog (outgoing) 失敗:", err);
@@ -366,7 +427,11 @@ export const channelDispatcher = new ChannelDispatcher({
 
 /** 給 index.ts 調：注入 buildAndRunAgent（讓 dispatcher 真正跑 agent） */
 export function setDispatcherBuildAndRunAgent(
-  fn: (msg: IncomingMessage, sessionId: string, priorMessages?: { role: "user" | "assistant" | "system"; content?: string }[]) => Promise<string>,
+  fn: (
+    msg: IncomingMessage,
+    sessionId: string,
+    priorMessages?: { role: "user" | "assistant" | "system"; content?: string }[],
+  ) => Promise<string | ChannelAgentReply>,
 ): void {
   channelDispatcher.deps.buildAndRunAgent = fn as never;
 }

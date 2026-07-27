@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import {
   findDiscordMusicUrl,
   buildSpotifySearchQuery,
@@ -11,9 +11,24 @@ import {
   parseBilibiliSeasonHtml,
   parseSpotifyEmbedHtml,
   selectBilibiliTracks,
+  bilibiliCookieArgs,
+  configureBilibiliBrowserCookies,
 } from "./music-source";
 
+afterEach(() => configureBilibiliBrowserCookies(false));
+
 describe("Discord music request parsing", () => {
+  it("only applies Opera GX cookies to Bilibili sources", () => {
+    configureBilibiliBrowserCookies(true);
+    expect(bilibiliCookieArgs("https://www.bilibili.com/video/BVTEST")).toEqual([
+      "--cookies-from-browser",
+      expect.stringContaining("opera:"),
+    ]);
+    expect(bilibiliCookieArgs("https://b23.tv/example")).toHaveLength(2);
+    expect(bilibiliCookieArgs("https://www.youtube.com/watch?v=abcdefghijk")).toEqual([]);
+    expect(bilibiliCookieArgs("https://open.spotify.com/track/example")).toEqual([]);
+  });
+
   it.each([
     "https://youtu.be/abcdefghijk",
     "https://www.youtube.com/watch?v=abcdefghijk&list=PL123",

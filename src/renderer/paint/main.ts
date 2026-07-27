@@ -1,298 +1,444 @@
-// 昔漣的創作工作台 (NovelAI 繪圖) 控制器
+type PaintProvider = "openrouter" | "gemini";
+type TaskStatus = "loading" | "done" | "failed";
+
+interface ReferenceImage {
+  id: string;
+  name: string;
+  dataUrl: string;
+  mimeType: string;
+}
+
+interface PaintTask {
+  id: string;
+  prompt: string;
+  provider: PaintProvider;
+  model: string;
+  status: TaskStatus;
+  time: string;
+}
+
+interface ConnectionInfo {
+  provider: PaintProvider;
+  label: string;
+  connected: boolean;
+  model: string;
+}
+
+const MODEL_OPTIONS: Record<PaintProvider, Array<{ value: string; label: string }>> = {
+  openrouter: [
+    { value: "google/gemini-3.1-flash-image", label: "Gemini 3.1 Flash Image · 平衡" },
+    { value: "google/gemini-3-pro-image", label: "Gemini 3 Pro Image · 精緻" },
+    { value: "bytedance-seed/seedream-4.5", label: "Seedream 4.5 · 插畫" },
+    { value: "black-forest-labs/flux.2-pro", label: "FLUX.2 Pro · 寫實" },
+  ],
+  gemini: [
+    { value: "gemini-3.1-flash-image", label: "Nano Banana 2 · 推薦" },
+    { value: "gemini-3.1-flash-lite-image", label: "Nano Banana 2 Lite · 快速" },
+    { value: "gemini-3-pro-image", label: "Nano Banana Pro · 專業" },
+  ],
+};
+
+const CLOTHING_PROMPTS: Record<string, { label: string; prompt: string }> = {
+  none: { label: "未選擇服裝", prompt: "" },
+  signature: {
+    label: "昔漣星海禮服",
+    prompt: "her signature pearl-white fitted dress with lavender-cyan filigree, rose ornaments, iridescent panels, and a deep starry-indigo asymmetric train",
+  },
+  casual: {
+    label: "柔軟居家白襯衫",
+    prompt: "a tasteful oversized soft white lounge shirt with long sleeves, relaxed cozy styling, fully covered",
+  },
+  "black-stockings": {
+    label: "白紫禮服＋黑色絲襪",
+    prompt: "an elegant white-and-lavender dress paired with tasteful black semi-sheer thigh-high stockings and refined black heels",
+  },
+  wedding: {
+    label: "月桂婚紗",
+    prompt: "an ethereal white wedding dress with a laurel motif, translucent crystal layers, lavender accents, and delicate rose embroidery",
+  },
+};
+
+const byId = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
+const taskStorageKey = "cyrene.paint.tasks.v2";
 
 document.addEventListener("DOMContentLoaded", () => {
-  // DOM 元素獲取
-  const tabs = document.querySelectorAll(".panel-tab");
-  const panes = document.querySelectorAll(".tab-pane");
-  const creationParamsEl = document.getElementById("creation-params") as HTMLTextAreaElement;
-  const buildPromptBtn = document.getElementById("build-prompt-btn") as HTMLButtonElement;
-  const novelaiPromptEl = document.getElementById("novelai-prompt") as HTMLTextAreaElement;
-  const pipelineSelect = document.getElementById("pipeline-select") as HTMLSelectElement;
-  const clothingSelect = document.getElementById("clothing-select") as HTMLSelectElement;
-  const modelInput = document.getElementById("model-input") as HTMLInputElement;
-  const widthSelect = document.getElementById("width-select") as HTMLSelectElement;
-  const heightSelect = document.getElementById("height-select") as HTMLSelectElement;
-  const generateBtn = document.getElementById("generate-btn") as HTMLButtonElement;
-  
-  // 連接設定
-  const naiTokenEl = document.getElementById("nai-token") as HTMLInputElement;
-  const naiUrlEl = document.getElementById("nai-url") as HTMLInputElement;
-  const saveConnBtn = document.getElementById("save-conn-btn") as HTMLButtonElement;
-  const connStatusLabel = document.getElementById("conn-status-label") as HTMLDivElement;
+  const tabs = document.querySelectorAll<HTMLButtonElement>(".panel-tab");
+  const panes = document.querySelectorAll<HTMLElement>(".tab-pane");
+  const creationParamsEl = byId<HTMLTextAreaElement>("creation-params");
+  const buildPromptBtn = byId<HTMLButtonElement>("build-prompt-btn");
+  const imagePromptEl = byId<HTMLTextAreaElement>("image-prompt");
+  const clearPromptBtn = byId<HTMLButtonElement>("clear-prompt-btn");
+  const providerSelect = byId<HTMLSelectElement>("provider-select");
+  const providerHelp = byId<HTMLParagraphElement>("provider-help");
+  const modelSelect = byId<HTMLSelectElement>("model-select");
+  const clothingSelect = byId<HTMLSelectElement>("clothing-select");
+  const aspectSelect = byId<HTMLSelectElement>("aspect-select");
+  const resolutionSelect = byId<HTMLSelectElement>("resolution-select");
+  const qualitySelect = byId<HTMLSelectElement>("quality-select");
+  const characterPromptEl = byId<HTMLTextAreaElement>("character-prompt");
+  const injectCharacterEl = byId<HTMLInputElement>("inject-character");
+  const generateBtn = byId<HTMLButtonElement>("generate-btn");
+  const inlineMessage = byId<HTMLDivElement>("inline-message");
+  const generationSummary = byId<HTMLDivElement>("generation-summary");
 
-  // 畫布顯示與載入
-  const canvasTitle = document.getElementById("canvas-title") as HTMLSpanElement;
-  const metaResolution = document.getElementById("meta-resolution") as HTMLSpanElement;
-  const metaModel = document.getElementById("meta-model") as HTMLSpanElement;
-  const viewDetailsBtn = document.getElementById("view-details-btn") as HTMLButtonElement;
-  const promptDrawer = document.getElementById("prompt-drawer") as HTMLDivElement;
-  const finalPromptPreview = document.getElementById("final-prompt-preview") as HTMLPreElement;
-  const displayImage = document.getElementById("display-image") as HTMLImageElement;
-  const canvasLoader = document.getElementById("canvas-loader") as HTMLDivElement;
-  const loaderText = document.getElementById("loader-text") as HTMLDivElement;
-  
-  // 任務列表
-  const tasksCount = document.getElementById("tasks-count") as HTMLSpanElement;
-  const tasksList = document.getElementById("tasks-list") as HTMLDivElement;
+  const referenceInput = byId<HTMLInputElement>("reference-input");
+  const pickReferenceBtn = byId<HTMLButtonElement>("pick-reference-btn");
+  const referenceDropZone = byId<HTMLDivElement>("reference-drop-zone");
+  const referenceGrid = byId<HTMLDivElement>("reference-grid");
+  const referenceCount = byId<HTMLSpanElement>("reference-count");
 
-  let taskHistory: Array<{ id: string; prompt: string; status: "loading" | "done" | "failed"; time: string }> = [
-    {
-      id: "task-1",
-      prompt: "1girl, solo, seele (honkai), pink hair, blue eyes, hair flower, white t-shirt, black pantyhose, holding cup",
-      status: "done",
-      time: "21:45:19"
-    }
-  ];
+  const headerStatus = byId<HTMLDivElement>("header-status");
+  const headerProviderLabel = byId<HTMLSpanElement>("header-provider-label");
+  const connectionList = byId<HTMLDivElement>("connection-list");
+  const openSettingsBtn = byId<HTMLButtonElement>("open-settings-btn");
 
-  // 1. 初始化頁面 & 載入連接設定
-  const loadConnectionSettings = () => {
-    const savedToken = localStorage.getItem("nai_token") || "";
-    const savedUrl = localStorage.getItem("nai_url") || "https://image.novelai.net";
-    
-    naiTokenEl.value = savedToken;
-    naiUrlEl.value = savedUrl;
-    
-    if (savedToken) {
-      connStatusLabel.textContent = "已成功連接至 NovelAI API 🟢";
-      connStatusLabel.style.color = "#10b981";
-    } else {
-      connStatusLabel.textContent = "已使用本地模擬模式 (未連接 Token 時將採用展示模式)";
-      connStatusLabel.style.color = "";
-    }
-  };
+  const canvasTitle = byId<HTMLHeadingElement>("canvas-title");
+  const metaResolution = byId<HTMLSpanElement>("meta-resolution");
+  const metaModel = byId<HTMLSpanElement>("meta-model");
+  const metaProvider = byId<HTMLSpanElement>("meta-provider");
+  const viewDetailsBtn = byId<HTMLButtonElement>("view-details-btn");
+  const promptDrawer = byId<HTMLDivElement>("prompt-drawer");
+  const finalPromptPreview = byId<HTMLPreElement>("final-prompt-preview");
+  const displayImage = byId<HTMLImageElement>("display-image");
+  const imageStage = byId<HTMLDivElement>("image-stage");
+  const canvasLoader = byId<HTMLDivElement>("canvas-loader");
+  const loaderText = byId<HTMLElement>("loader-text");
+  const tasksCount = byId<HTMLSpanElement>("tasks-count");
+  const tasksList = byId<HTMLDivElement>("tasks-list");
 
-  loadConnectionSettings();
+  let references: ReferenceImage[] = [];
+  let connections: ConnectionInfo[] = [];
+  let taskHistory = loadTasks();
 
-  const updatePipelineUi = () => {
-    const pipeline = pipelineSelect ? pipelineSelect.value : "free";
-    const headerTitle = document.getElementById("header-pipeline-title");
-    const promptLabel = document.getElementById("prompt-label");
-    
-    if (pipeline === "free") {
-      if (headerTitle) headerTitle.textContent = "AI 繪圖";
-      if (promptLabel) promptLabel.textContent = "免費繪圖 Prompt";
-      if (buildPromptBtn) buildPromptBtn.textContent = "✨ 構建 繪圖 Prompt";
-      modelInput.value = "Flux (Pollinations AI)";
-      modelInput.disabled = true;
-    } else {
-      if (headerTitle) headerTitle.textContent = "NovelAI 官方繪圖";
-      if (promptLabel) promptLabel.textContent = "NovelAI Prompt";
-      if (buildPromptBtn) buildPromptBtn.textContent = "✨ 構建 NovelAI Prompt";
-      modelInput.value = "nai-diffusion-4-5-full";
-      modelInput.disabled = false;
-    }
-  };
-
-  if (pipelineSelect) {
-    pipelineSelect.addEventListener("change", updatePipelineUi);
+  function setMessage(message: string, isError = false) {
+    inlineMessage.textContent = message;
+    inlineMessage.classList.toggle("is-error", isError);
   }
-  updatePipelineUi();
 
-  // 保存設定
-  saveConnBtn.addEventListener("click", () => {
-    localStorage.setItem("nai_token", naiTokenEl.value.trim());
-    localStorage.setItem("nai_url", naiUrlEl.value.trim());
-    loadConnectionSettings();
-    alert("連接設定已保存！");
-  });
+  function loadTasks(): PaintTask[] {
+    try {
+      const value = JSON.parse(localStorage.getItem(taskStorageKey) || "[]") as PaintTask[];
+      return Array.isArray(value) ? value.slice(0, 12) : [];
+    } catch {
+      return [];
+    }
+  }
 
-  // 2. 左側選單切換
-  tabs.forEach((tab) => {
-    tab.addEventListener("click", () => {
-      tabs.forEach((t) => t.classList.remove("is-active"));
-      panes.forEach((p) => p.classList.remove("is-active"));
+  function saveTasks() {
+    const persisted = taskHistory.filter((task) => task.status !== "loading").slice(0, 12);
+    localStorage.setItem(taskStorageKey, JSON.stringify(persisted));
+  }
 
-      tab.classList.add("is-active");
-      const targetTab = tab.getAttribute("data-panel-tab");
-      const targetPane = document.getElementById(`pane-${targetTab}`);
-      if (targetPane) targetPane.classList.add("is-active");
-    });
-  });
-
-  // 3. 構建 NovelAI Prompt (調用 LLM 翻譯/提取標籤)
-  buildPromptBtn.addEventListener("click", async () => {
-    const desc = creationParamsEl.value.trim();
-    if (!desc) {
-      alert("請先輸入創作參數描述喔！");
+  function renderTasks() {
+    tasksCount.textContent = `${taskHistory.length} 項`;
+    tasksList.replaceChildren();
+    if (taskHistory.length === 0) {
+      const empty = document.createElement("div");
+      empty.className = "task-empty";
+      empty.textContent = "完成第一次生成後，任務會保留在這裡。";
+      tasksList.appendChild(empty);
       return;
     }
 
-    buildPromptBtn.disabled = true;
-    buildPromptBtn.textContent = "✨ 昔漣正在分析提示詞...";
-
-    try {
-      // 呼叫預留的 paint.buildPrompt IPC
-      if ((window as any).paint?.buildPrompt) {
-        const result = await (window as any).paint.buildPrompt(desc);
-        if (result) {
-          novelaiPromptEl.value = result.trim();
-        } else {
-          novelaiPromptEl.value = "1girl, solo, seele (honkai), pink hair, blue eyes, hair flower";
-        }
-      } else {
-        // 降級 Mock
-        setTimeout(() => {
-          novelaiPromptEl.value = "1girl, solo, seele (honkai), pink hair, blue eyes, hair flower, white t-shirt, black pantyhose, holding cup, cup focus, soles, detailed background, masterpiece";
-        }, 1000);
-      }
-    } catch (err) {
-      console.error(err);
-      novelaiPromptEl.value = "1girl, solo, seele (honkai), pink hair, blue eyes, hair flower";
-    } finally {
-      setTimeout(() => {
-        buildPromptBtn.disabled = false;
-        buildPromptBtn.textContent = "✨ 構建 NovelAI Prompt";
-      }, 500);
-    }
-  });
-
-  // 4. 查看完整提示詞摺疊抽屜
-  viewDetailsBtn.addEventListener("click", () => {
-    promptDrawer.classList.toggle("is-open");
-    viewDetailsBtn.textContent = promptDrawer.classList.contains("is-open")
-      ? "隱藏完整提示詞與參數"
-      : "查看完整提示詞與參數";
-  });
-
-  // 5. 渲染任務列表
-  const renderTasks = () => {
-    tasksCount.textContent = `${taskHistory.length} 項`;
-    tasksList.innerHTML = "";
-    
-    taskHistory.forEach((task) => {
+    for (const task of taskHistory) {
       const item = document.createElement("div");
       item.className = "task-item";
-      
-      const statusText = task.status === "done" ? "已完成" : task.status === "failed" ? "失敗" : "生成中";
-      const statusClass = `task-item__status--${task.status}`;
-      
-      item.innerHTML = `
-        <div class="task-item__prompt" title="${task.prompt}">${task.prompt}</div>
-        <div class="task-item__right">
-          <span class="task-item__status ${statusClass}">${statusText}</span>
-          <span class="task-item__time">${task.time}</span>
-        </div>
-      `;
-      
+      const prompt = document.createElement("div");
+      prompt.className = "task-item__prompt";
+      prompt.textContent = task.prompt;
+      prompt.title = task.prompt;
+
+      const meta = document.createElement("div");
+      meta.className = "task-item__meta";
+      const status = document.createElement("span");
+      status.className = `task-item__status task-item__status--${task.status}`;
+      status.textContent = task.status === "done" ? "已完成" : task.status === "failed" ? "失敗" : "生成中";
+      const time = document.createElement("span");
+      time.className = "task-item__time";
+      time.textContent = task.time;
+      meta.append(status, time);
+      item.append(prompt, meta);
       tasksList.appendChild(item);
+    }
+  }
+
+  function renderModels() {
+    const provider = providerSelect.value as PaintProvider;
+    const previous = modelSelect.value;
+    modelSelect.replaceChildren();
+    for (const model of MODEL_OPTIONS[provider]) {
+      const option = document.createElement("option");
+      option.value = model.value;
+      option.textContent = model.label;
+      modelSelect.appendChild(option);
+    }
+    if (MODEL_OPTIONS[provider].some((model) => model.value === previous)) modelSelect.value = previous;
+    updateMeta();
+  }
+
+  function updateMeta() {
+    const provider = providerSelect.value as PaintProvider;
+    const clothing = CLOTHING_PROMPTS[clothingSelect.value] ?? CLOTHING_PROMPTS.none;
+    canvasTitle.textContent = `AI 繪圖 · ${clothing.label}`;
+    metaResolution.textContent = `${aspectSelect.value} · ${resolutionSelect.value}`;
+    metaModel.textContent = modelSelect.value || "等待選擇模型";
+    metaProvider.textContent = provider === "openrouter" ? "OpenRouter" : "Gemini";
+    const spans = generationSummary.querySelectorAll("span");
+    if (spans[0]) spans[0].textContent = `參考圖 ${references.length} 張`;
+    providerHelp.textContent = provider === "openrouter"
+      ? "透過 OpenRouter Unified Image API 生成，可在模型間切換。"
+      : "直接使用 Gemini 原生圖片 API，適合角色一致性與多輪修改。";
+  }
+
+  function renderConnections() {
+    connectionList.replaceChildren();
+    for (const connection of connections) {
+      const card = document.createElement("div");
+      card.className = "connection-card";
+      const icon = document.createElement("span");
+      icon.className = "connection-card__icon";
+      icon.textContent = connection.provider === "openrouter" ? "◈" : "✦";
+      const copy = document.createElement("div");
+      const title = document.createElement("strong");
+      title.textContent = connection.label;
+      const model = document.createElement("small");
+      model.textContent = connection.model || "尚未設定模型";
+      copy.append(title, model);
+      const state = document.createElement("span");
+      state.className = `connection-card__state${connection.connected ? " is-connected" : ""}`;
+      state.textContent = connection.connected ? "已連接" : "未設定";
+      card.append(icon, copy, state);
+      connectionList.appendChild(card);
+    }
+
+    const selected = connections.find((item) => item.provider === providerSelect.value);
+    const anyConnected = connections.some((item) => item.connected);
+    headerStatus.classList.toggle("is-offline", !anyConnected);
+    headerProviderLabel.textContent = selected?.connected
+      ? `${selected.label} 已連接`
+      : anyConnected
+        ? "已有可用圖片生成管道"
+        : "請先設定 OpenRouter 或 Gemini API Key";
+  }
+
+  async function refreshConnections() {
+    try {
+      connections = await window.paint.getConnections();
+      const openrouter = connections.find((item) => item.provider === "openrouter");
+      const gemini = connections.find((item) => item.provider === "gemini");
+      if (!openrouter?.connected && gemini?.connected) providerSelect.value = "gemini";
+      renderModels();
+      renderConnections();
+    } catch {
+      connections = [
+        { provider: "openrouter", label: "OpenRouter", connected: false, model: "" },
+        { provider: "gemini", label: "Gemini", connected: false, model: "" },
+      ];
+      renderConnections();
+    }
+  }
+
+  function buildFinalPrompt() {
+    const parts: string[] = [];
+    if (injectCharacterEl.checked && characterPromptEl.value.trim()) parts.push(characterPromptEl.value.trim());
+    if (imagePromptEl.value.trim()) parts.push(imagePromptEl.value.trim());
+    const clothing = CLOTHING_PROMPTS[clothingSelect.value]?.prompt;
+    if (clothing) parts.push(clothing);
+    parts.push("premium anime game key art, refined cel shading, accurate anatomy and hands, no text, no logo, no watermark");
+    return parts.join(". ");
+  }
+
+  function fileToReference(file: File): Promise<ReferenceImage> {
+    return new Promise((resolve, reject) => {
+      if (file.size > 8 * 1024 * 1024) {
+        reject(new Error(`${file.name} 超過 8 MB`));
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = () => resolve({
+        id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        name: file.name,
+        dataUrl: String(reader.result),
+        mimeType: file.type || "image/png",
+      });
+      reader.onerror = () => reject(new Error(`無法讀取 ${file.name}`));
+      reader.readAsDataURL(file);
     });
-  };
+  }
 
-  renderTasks();
+  async function addReferenceFiles(files: File[]) {
+    const remaining = 4 - references.length;
+    if (remaining <= 0) {
+      setMessage("最多只能加入 4 張參考圖。", true);
+      return;
+    }
+    try {
+      const loaded = await Promise.all(files.slice(0, remaining).map(fileToReference));
+      references = [...references, ...loaded];
+      renderReferences();
+      setMessage(`已加入 ${loaded.length} 張參考圖。`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "參考圖讀取失敗。", true);
+    }
+  }
 
-  // 6. 生成圖像邏輯
+  function renderReferences() {
+    referenceGrid.replaceChildren();
+    for (const reference of references) {
+      const item = document.createElement("div");
+      item.className = "reference-item";
+      const image = document.createElement("img");
+      image.src = reference.dataUrl;
+      image.alt = reference.name;
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.setAttribute("aria-label", `移除 ${reference.name}`);
+      remove.textContent = "×";
+      remove.addEventListener("click", () => {
+        references = references.filter((item) => item.id !== reference.id);
+        renderReferences();
+      });
+      item.append(image, remove);
+      referenceGrid.appendChild(item);
+    }
+    referenceCount.textContent = String(references.length);
+    updateMeta();
+  }
+
+  tabs.forEach((tab) => {
+    tab.addEventListener("click", () => {
+      tabs.forEach((item) => item.classList.remove("is-active"));
+      panes.forEach((pane) => pane.classList.remove("is-active"));
+      tab.classList.add("is-active");
+      byId<HTMLElement>(`pane-${tab.dataset.panelTab}`).classList.add("is-active");
+      if (tab.dataset.panelTab === "connection") void refreshConnections();
+    });
+  });
+
+  buildPromptBtn.addEventListener("click", async () => {
+    const description = creationParamsEl.value.trim();
+    if (!description) {
+      setMessage("請先輸入中文創作描述。", true);
+      creationParamsEl.focus();
+      return;
+    }
+    buildPromptBtn.disabled = true;
+    buildPromptBtn.textContent = "✦ 正在整理畫面語言…";
+    setMessage("");
+    try {
+      const result = await window.paint.buildPrompt(description);
+      if (!result?.trim()) throw new Error("提示詞模型沒有回傳內容，請檢查主要模型連線。 ");
+      imagePromptEl.value = result.trim();
+      setMessage("Prompt 已完成，可以直接生成或繼續修改。");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Prompt 構建失敗。", true);
+    } finally {
+      buildPromptBtn.disabled = false;
+      buildPromptBtn.textContent = "✦ 構建繪圖 Prompt";
+    }
+  });
+
+  clearPromptBtn.addEventListener("click", () => {
+    imagePromptEl.value = "";
+    creationParamsEl.value = "";
+    setMessage("");
+  });
+
+  providerSelect.addEventListener("change", () => {
+    renderModels();
+    renderConnections();
+  });
+  for (const element of [modelSelect, clothingSelect, aspectSelect, resolutionSelect, qualitySelect]) {
+    element.addEventListener("change", updateMeta);
+  }
+
+  pickReferenceBtn.addEventListener("click", () => referenceInput.click());
+  referenceInput.addEventListener("change", () => {
+    void addReferenceFiles(Array.from(referenceInput.files ?? []));
+    referenceInput.value = "";
+  });
+  referenceDropZone.addEventListener("dragover", (event) => {
+    event.preventDefault();
+    referenceDropZone.classList.add("is-dragging");
+  });
+  referenceDropZone.addEventListener("dragleave", () => referenceDropZone.classList.remove("is-dragging"));
+  referenceDropZone.addEventListener("drop", (event) => {
+    event.preventDefault();
+    referenceDropZone.classList.remove("is-dragging");
+    void addReferenceFiles(Array.from(event.dataTransfer?.files ?? []));
+  });
+
+  viewDetailsBtn.addEventListener("click", () => {
+    promptDrawer.classList.toggle("is-open");
+    viewDetailsBtn.textContent = promptDrawer.classList.contains("is-open") ? "隱藏完整提示詞" : "查看完整提示詞";
+  });
+
+  openSettingsBtn.addEventListener("click", () => window.paint.openSettings());
+
   generateBtn.addEventListener("click", async () => {
-    const userPrompt = novelaiPromptEl.value.trim();
-    if (!userPrompt) {
-      alert("請先構建或輸入 NovelAI Prompt 標籤！");
+    const finalPrompt = buildFinalPrompt();
+    if (!imagePromptEl.value.trim() && !creationParamsEl.value.trim()) {
+      setMessage("請先輸入或構建繪圖 Prompt。", true);
+      imagePromptEl.focus();
       return;
     }
 
-    const token = localStorage.getItem("nai_token") || "";
-    const model = modelInput.value.trim() || "nai-diffusion-4-5-full";
-    const width = Number(widthSelect.value);
-    const height = Number(heightSelect.value);
-    const clothing = clothingSelect.value;
-
-    // 拼裝人物固定特徵
-    let finalPrompt = "masterpiece, best quality, " + userPrompt;
-    let clothingName = "未選擇服裝";
-
-    if (clothing === "default") {
-      finalPrompt += ", seele (honkai), pink hair, blue eyes, hair flower, white t-shirt, black pantyhose, tights, holding cup";
-      clothingName = "昔漣日常套";
-    } else if (clothing === "wedding") {
-      finalPrompt += ", seele (honkai), pink hair, blue eyes, hair flower, wedding dress, purple accents, crystal chestpiece";
-      clothingName = "昔漣婚紗套";
-    } else if (clothing === "swimsuit") {
-      finalPrompt += ", seele (honkai), pink hair, blue eyes, hair flower, bikini, summer beach, smiling";
-      clothingName = "昔漣泳裝套";
-    } else {
-      finalPrompt += ", seele (honkai), pink hair, blue eyes, hair flower";
+    const provider = providerSelect.value as PaintProvider;
+    const connection = connections.find((item) => item.provider === provider);
+    if (!connection?.connected) {
+      setMessage(`尚未設定 ${provider === "openrouter" ? "OpenRouter" : "Gemini"} API Key，請到連接頁前往設定。`, true);
+      return;
     }
 
-    // 更新 Canvas UI
-    canvasTitle.textContent = `AI 繪圖 · ${clothingName}`;
-    metaResolution.textContent = `${width}x${height}`;
-    metaModel.textContent = model;
-    finalPromptPreview.textContent = finalPrompt;
-
-    // 添加到任務歷史
+    const model = modelSelect.value;
     const now = new Date();
-    const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
-    const newTaskId = `task-${Date.now()}`;
-    
-    taskHistory.unshift({
-      id: newTaskId,
+    const task: PaintTask = {
+      id: `task-${Date.now()}`,
       prompt: finalPrompt,
+      provider,
+      model,
       status: "loading",
-      time: timeStr
-    });
-    
+      time: now.toLocaleTimeString("zh-TW", { hour12: false }),
+    };
+    taskHistory.unshift(task);
     renderTasks();
-
-    // 顯示 Loading
+    updateMeta();
+    finalPromptPreview.textContent = finalPrompt;
     canvasLoader.classList.add("is-loading");
-    loaderText.textContent = "昔漣正在為您繪製中...";
     generateBtn.disabled = true;
+    loaderText.textContent = provider === "openrouter" ? "OpenRouter 正在生成畫面…" : "Gemini 正在繪製畫面…";
+    setMessage("");
 
     try {
-      const pipeline = pipelineSelect ? pipelineSelect.value : "free";
-
-      if (pipeline === "free") {
-        loaderText.textContent = "正在透過免費通道生成全新影像...";
-        if ((window as any).paint?.generateFreeImage) {
-          const base64Url = await (window as any).paint.generateFreeImage({
-            prompt: finalPrompt,
-            width,
-            height
-          });
-          displayImage.src = base64Url;
-          const task = taskHistory.find(t => t.id === newTaskId);
-          if (task) task.status = "done";
-        } else {
-          throw new Error("免費繪圖 API 未啟用，請重啟客戶端。");
-        }
-        return;
-      }
-
-      if (!token) {
-        // 本地模擬演示模式
-        await new Promise((resolve) => setTimeout(resolve, 2500));
-        displayImage.src = "/avatars/cyrene-painting-placeholder.jpg";
-        
-        // 更新歷史狀態為完成
-        const task = taskHistory.find(t => t.id === newTaskId);
-        if (task) task.status = "done";
-      } else {
-        // 調用真實的 NovelAI API
-        if ((window as any).paint?.generateImage) {
-          loaderText.textContent = "正在發送請求至 NovelAI 伺服器...";
-          const base64Url = await (window as any).paint.generateImage({
-            prompt: finalPrompt,
-            model,
-            width,
-            height,
-            token
-          });
-          
-          displayImage.src = base64Url;
-          
-          const task = taskHistory.find(t => t.id === newTaskId);
-          if (task) task.status = "done";
-        } else {
-          throw new Error("繪圖 API 連接失敗，請重啟客戶端。");
-        }
-      }
-    } catch (err: any) {
-      console.error(err);
-      alert(`生成失敗: ${err?.message || err}`);
-      const task = taskHistory.find(t => t.id === newTaskId);
-      if (task) task.status = "failed";
+      const result = await window.paint.generateImage({
+        provider,
+        prompt: finalPrompt,
+        model,
+        aspectRatio: aspectSelect.value,
+        resolution: resolutionSelect.value as "1K" | "2K" | "4K",
+        quality: qualitySelect.value as "auto" | "low" | "medium" | "high",
+        references: references.map(({ dataUrl, mimeType }) => ({ dataUrl, mimeType })),
+      });
+      if (!result?.dataUrl) throw new Error("圖片服務沒有回傳可顯示的圖片。");
+      displayImage.src = result.dataUrl;
+      imageStage.style.aspectRatio = aspectSelect.value.replace(":", " / ");
+      task.status = "done";
+      setMessage(
+        `${provider === "openrouter" ? "OpenRouter" : "Gemini"} 生成完成。${result.savedPath ? ` 已儲存至 ${result.savedPath}` : ""}`,
+      );
+    } catch (error) {
+      task.status = "failed";
+      setMessage(error instanceof Error ? error.message : "圖片生成失敗。", true);
     } finally {
       canvasLoader.classList.remove("is-loading");
       generateBtn.disabled = false;
+      saveTasks();
       renderTasks();
     }
   });
+
+  renderTasks();
+  renderModels();
+  renderReferences();
+  void refreshConnections();
 });

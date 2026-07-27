@@ -158,6 +158,8 @@ export interface DiscordChannelConfig extends ChannelRuntimeConfig {
   allowedGuildIds?: string[];
   allowedChannelIds?: string[];
   allowedUserIds?: string[];
+  /** 唯一可建立 Codex 圖片任務的 Discord 使用者；不隨一般聊天白名單擴張。 */
+  codexImageOwnerId?: string;
   /** 伺服器頻道中是否必須直接 @Bot；私訊不受此項限制。 */
   requireMention?: boolean;
   /** 是否允許白名單使用者要求 Bot 加入 Discord 語音頻道通話。 */
@@ -177,6 +179,12 @@ export interface SpotifyConfig {
   accountName?: string;
 }
 
+/** Bilibili 使用本機瀏覽器工作階段；不保存帳號、密碼或 Cookie。 */
+export interface BilibiliConfig {
+  enabled: boolean;
+  browser?: "opera-gx";
+}
+
 /** 給上層用的明文 AppSecret 讀取器 */
 export function decryptFeishuSecret(cfg: FeishuChannelConfig | undefined): string {
   return decryptField(cfg?.appSecret ?? "");
@@ -187,6 +195,7 @@ export interface ChannelsSettings {
   feishu: FeishuChannelConfig;
   discord: DiscordChannelConfig;
   spotify: SpotifyConfig;
+  bilibili: BilibiliConfig;
   /** 入站 HTTP server 綁定的端口。0 = 隨機空閒。 */
   inboundPort: number;
   /** HMAC 共享密鑰。啟動時若為空則自動生成。 */
@@ -210,6 +219,7 @@ const DEFAULT_SETTINGS: ChannelsSettings = {
   feishu: { enabled: false },
   discord: { enabled: false, requireMention: true, voiceEnabled: true },
   spotify: { enabled: false },
+  bilibili: { enabled: false, browser: "opera-gx" },
   inboundPort: 0,
   sharedSecret: "",
   rateLimitPerUser: 10,
@@ -239,6 +249,7 @@ function normalize(input: Partial<ChannelsSettings> | null | undefined): Channel
   const f: Partial<FeishuChannelConfig> | undefined = input?.feishu;
   const d: Partial<DiscordChannelConfig> | undefined = input?.discord;
   const s: Partial<SpotifyConfig> | undefined = input?.spotify;
+  const b: Partial<BilibiliConfig> | undefined = input?.bilibili;
   const safeIds = (value: unknown): string[] => Array.isArray(value)
     ? [...new Set(value.filter((v): v is string => typeof v === "string").map((v) => v.trim()).filter(Boolean))]
     : [];
@@ -271,6 +282,9 @@ function normalize(input: Partial<ChannelsSettings> | null | undefined): Channel
       allowedGuildIds: safeIds(d?.allowedGuildIds),
       allowedChannelIds: safeIds(d?.allowedChannelIds),
       allowedUserIds: safeIds(d?.allowedUserIds),
+      codexImageOwnerId: typeof d?.codexImageOwnerId === "string" && /^\d{15,22}$/.test(d.codexImageOwnerId.trim())
+        ? d.codexImageOwnerId.trim()
+        : undefined,
       requireMention: safeBool(d?.requireMention, true),
       voiceEnabled: safeBool(d?.voiceEnabled, true),
       ...(["online", "idle", "dnd", "invisible"].includes(d?.presenceStatus ?? "")
@@ -284,6 +298,10 @@ function normalize(input: Partial<ChannelsSettings> | null | undefined): Channel
       clientSecret: typeof s?.clientSecret === "string" ? s.clientSecret : undefined,
       refreshToken: typeof s?.refreshToken === "string" ? s.refreshToken : undefined,
       accountName: typeof s?.accountName === "string" ? s.accountName.slice(0, 160) : undefined,
+    },
+    bilibili: {
+      enabled: safeBool(b?.enabled, false),
+      browser: "opera-gx",
     },
     inboundPort: safeNum(input?.inboundPort, 0, 0, 65535),
     sharedSecret: typeof input?.sharedSecret === "string" ? input.sharedSecret : "",
@@ -339,6 +357,7 @@ export function saveChannelsSettings(patch: Partial<ChannelsSettings>): Channels
   if (patch.feishu) merged.feishu = { ...existing.feishu, ...patch.feishu };
   if (patch.discord) merged.discord = { ...existing.discord, ...patch.discord };
   if (patch.spotify) merged.spotify = { ...existing.spotify, ...patch.spotify };
+  if (patch.bilibili) merged.bilibili = { ...existing.bilibili, ...patch.bilibili };
 
   // Partial save 沒帶私密字段時，直接沿用磁碟密文，不能依賴「解密後再加密」。
   // macOS Keychain 暫時不可用、renderer 延遲自動保存等情況下，load 可能拿到空字串；
@@ -409,6 +428,7 @@ export type ChannelConfigPatch = Partial<{
   feishu: Partial<FeishuChannelConfig>;
   discord: Partial<DiscordChannelConfig>;
   spotify: Partial<SpotifyConfig>;
+  bilibili: Partial<BilibiliConfig>;
   inboundPort: number;
   sharedSecret: string;
   rateLimitPerUser: number;

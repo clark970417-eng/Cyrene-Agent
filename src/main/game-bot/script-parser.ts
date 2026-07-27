@@ -50,6 +50,8 @@ function parseStep(raw: unknown): Step {
   switch (op) {
     case "launch":
       return { type: "launch", exe: str(params, "launch.exe") };
+    case "yaagl_start":
+      return { type: "yaagl_start" };
     case "wait":
       return { type: "wait", ms: parseDuration(params, "wait") };
     case "key":
@@ -57,12 +59,17 @@ function parseStep(raw: unknown): Step {
     case "click": {
       if (params === "center") return { type: "click", target: "center" };
       if (params && typeof params === "object") {
-        const p = params as { x?: unknown; y?: unknown };
+        const p = params as { x?: unknown; y?: unknown; ratio_x?: unknown; ratio_y?: unknown };
+        if (typeof p.ratio_x === "number" && typeof p.ratio_y === "number") {
+          if (p.ratio_x < 0 || p.ratio_x > 1 || p.ratio_y < 0 || p.ratio_y > 1)
+            throw new Error("click 比例座標必須在 0 到 1 之間");
+          return { type: "click", target: { ratioX: p.ratio_x, ratioY: p.ratio_y } };
+        }
         if (typeof p.x !== "number" || typeof p.y !== "number")
-          throw new Error("click 座標必須是 {x,y} 數字");
+          throw new Error("click 座標必須是 {x,y} 或 {ratio_x,ratio_y} 數字");
         return { type: "click", target: { x: p.x, y: p.y } };
       }
-      throw new Error("click 必須是 center 或 {x,y}");
+      throw new Error("click 必須是 center、{x,y} 或 {ratio_x,ratio_y}");
     }
     case "vlm_click": {
       const p = (params ?? {}) as Record<string, unknown>;
@@ -76,8 +83,18 @@ function parseStep(raw: unknown): Step {
         target: optStr(p.target),
       };
     }
-    case "vlm_select":
-      return { type: "vlm_select", desc: str(params, "vlm_select.desc"), retry: 2 };
+    case "vlm_select": {
+      if (typeof params === "string") {
+        return { type: "vlm_select", desc: str(params, "vlm_select.desc"), retry: 2 };
+      }
+      const p = (params ?? {}) as Record<string, unknown>;
+      return {
+        type: "vlm_select",
+        desc: str(p.desc, "vlm_select.desc"),
+        retry: optNum(p.retry) ?? 2,
+        settle: optDur(p.settle, "vlm_select.settle"),
+      };
+    }
     case "vlm_check": {
       const p = (params ?? {}) as Record<string, unknown>;
       return {

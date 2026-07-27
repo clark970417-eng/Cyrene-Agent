@@ -22,6 +22,7 @@ import { getRecentLog, clearLog } from "./message-log";
 import { loadDiscordMusicHistory } from "./adapters/discord/music-history";
 import { loadDiscordMusicFavorites } from "./adapters/discord/music-favorites";
 import { controlSpotify, disconnectSpotify, getSpotifyStatus, startSpotifyAuthorization } from "./spotify-control";
+import { configureBilibiliBrowserCookies, getOperaGxProfilePath, testBilibiliBrowserCookies } from "./adapters/discord/music-source";
 
 const LOG = "[ChannelsInit]";
 
@@ -36,6 +37,7 @@ export async function initChannels(): Promise<void> {
 
   // app.whenReady() 後才讀取含 safeStorage 密文的渠道設定。
   channelDispatcher.reloadSettings();
+  configureBilibiliBrowserCookies(loadChannelsSettings().bilibili.enabled);
 
   // 注入 dispatcher 到 manager
   channelManager.setDispatcher(async (msg) => {
@@ -86,6 +88,7 @@ function registerChannelsIpc(): void {
   ipcMain.handle(IPC.CHANNELS_SAVE_CONFIG, (_e, patch: unknown) => {
     const saved = saveChannelsSettings(patch as Parameters<typeof saveChannelsSettings>[0]);
     channelDispatcher.reloadSettings();
+    configureBilibiliBrowserCookies(saved.bilibili.enabled);
     return saved;
   });
 
@@ -331,6 +334,33 @@ function registerChannelsIpc(): void {
   ipcMain.handle(IPC.CHANNELS_SPOTIFY_DISCONNECT, () => {
     disconnectSpotify();
     return { ok: true, message: "Spotify 已解除連線" };
+  });
+
+  ipcMain.handle(IPC.CHANNELS_BILIBILI_GET_STATUS, () => {
+    const config = loadChannelsSettings().bilibili;
+    return {
+      connected: config.enabled,
+      browser: "Opera GX",
+      profilePath: getOperaGxProfilePath(),
+    };
+  });
+  ipcMain.handle(IPC.CHANNELS_BILIBILI_CONNECT, async () => {
+    try {
+      const verified = await testBilibiliBrowserCookies();
+      saveChannelsSettings({ bilibili: { enabled: true, browser: "opera-gx" } });
+      configureBilibiliBrowserCookies(true);
+      return { ok: true, message: `已連接 Opera GX 的 Bilibili 登入狀態`, ...verified };
+    } catch (error) {
+      configureBilibiliBrowserCookies(false);
+      saveChannelsSettings({ bilibili: { enabled: false, browser: "opera-gx" } });
+      const detail = error instanceof Error ? error.message : String(error);
+      return { ok: false, error: `無法讀取 Opera GX 的 Bilibili 登入狀態：${detail}` };
+    }
+  });
+  ipcMain.handle(IPC.CHANNELS_BILIBILI_DISCONNECT, () => {
+    configureBilibiliBrowserCookies(false);
+    saveChannelsSettings({ bilibili: { enabled: false, browser: "opera-gx" } });
+    return { ok: true, message: "Bilibili 已解除連接；Opera GX 登入不受影響" };
   });
 
   // Phase 3.4：消息日誌

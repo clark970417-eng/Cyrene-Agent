@@ -54,7 +54,16 @@ describe("channels/settings-store", () => {
     const cfg = loadChannelsSettings();
     expect(cfg.wechat.enabled).toBe(false);
     expect(cfg.feishu.enabled).toBe(false);
+    expect(cfg.bilibili).toEqual({ enabled: false, browser: "opera-gx" });
     expect(cfg.rateLimitPerUser).toBe(10);
+  });
+
+  it("Bilibili: 只保存本機瀏覽器連接狀態，不保存憑證", () => {
+    saveChannelsSettings({ bilibili: { enabled: true, browser: "opera-gx" } });
+    const raw = fs.readFileSync(path.join(os.tmpdir(), "channels-settings.json"), "utf8");
+    expect(raw).toContain('"browser": "opera-gx"');
+    expect(raw).not.toMatch(/cookie|password/i);
+    expect(loadChannelsSettings().bilibili.enabled).toBe(true);
   });
 
   it("saveChannelsSettings + load: 私密字段加密落盤 + 解密還原", () => {

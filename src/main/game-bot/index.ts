@@ -4,18 +4,32 @@
 
 import * as fs from "fs";
 import * as path from "path";
-import { app, ipcMain, BrowserWindow } from "electron";
+import { app, ipcMain, BrowserWindow, systemPreferences } from "electron";
 import { toolRegistry } from "../orchestrator/tool-registry";
 import { IPC } from "../../shared/ipc-channels";
 import { parseRecipe } from "./script-parser";
 import { runRecipe } from "./engine";
 import type { BotTools } from "./bot-tools";
 import type { GameRecipe } from "./types";
-import { loadGameBotSettings, saveGameBotSettings, type GameBotSettings } from "./settings-store";
+import {
+  loadGameBotSettings,
+  resolveGameBotVlmSettings,
+  saveGameBotSettings,
+  type GameBotSettings,
+  type GameBotVlmSettings,
+} from "./settings-store";
 import { listRefs, readRef, refsDirPath } from "./refs-store";
 import { captureScreen } from "./screenshot";
 import * as input from "./input";
 import * as vlm from "./vlm-locator";
+import {
+  inspectGameRuntime,
+  isYaaglGameRunning,
+  launchGameTarget,
+  pressYaaglStartButton,
+  readYaaglWindowBounds,
+  yaaglStartPoint,
+} from "./platform";
 
 const LOG = "[GameBot]";
 
@@ -55,13 +69,31 @@ let runSignal: { aborted: boolean } | null = null;
 let runningRecipe: string | null = null;
 
 /** 組裝 BotTools 實現（注入引擎）。 */
-function buildTools(settings: GameBotSettings): BotTools {
-  const vlmConfig = { baseUrl: settings.vlm.baseUrl, apiKey: settings.vlm.apiKey, model: settings.vlm.model };
+function buildTools(settings: GameBotSettings, vlmConfig: GameBotVlmSettings): BotTools {
   const curRecipe = () => runningRecipe ?? settings.activeRecipe;
   return {
-    launch: async (exe) => {
-      const { spawn } = await import("child_process");
-      spawn(exe, [], { detached: true, shell: false, stdio: "ignore" }).unref();
+    launch: async (target) => {
+      if (await isYaaglGameRunning()) {
+        console.log(LOG, "StarRail.exe 已在執行，跳過 YAAGL 啟動");
+        return;
+      }
+      await launchGameTarget(target);
+    },
+    yaaglStart: async () => {
+      if (await isYaaglGameRunning()) {
+        console.log(LOG, "StarRail.exe 已在執行，跳過 YAAGL 開始按鈕");
+        return;
+      }
+      try {
+        await pressYaaglStartButton(path.join(app.getAppPath(), "scripts", "yaagl-click-start.swift"));
+        console.log(LOG, "已透過 macOS 輔助使用按下 YAAGL 開始遊戲");
+      } catch (error) {
+        console.warn(LOG, "YAAGL 輔助使用按鈕點擊失敗，改用視窗座標:", error);
+        const bounds = await readYaaglWindowBounds(path.join(app.getAppPath(), "scripts", "yaagl-window-bounds.swift"));
+        const point = yaaglStartPoint(bounds);
+        console.log(LOG, "YAAGL 視窗與開始按鈕座標:", bounds, point);
+        await input.click(point.x, point.y);
+      }
     },
     screenshot: captureScreen,
     click: input.click,
@@ -111,15 +143,28 @@ export async function startGameBot(): Promise<{ ok: boolean; error?: string }> {
   if (runSignal) return { ok: false, error: "已有代肝任務在運行" };
   const settings = loadGameBotSettings();
   if (!settings.enabled) return { ok: false, error: "代肝未啟用（設置→插件→遊戲代肝 開啟開關）" };
-  if (!settings.exePath) return { ok: false, error: "未配置遊戲 exe 路徑" };
-  if (!settings.vlm.baseUrl || !settings.vlm.apiKey || !settings.vlm.model)
-    return { ok: false, error: "未配置 VLM（baseUrl/apiKey/model）" };
+  if (!settings.exePath) return { ok: false, error: "未配置遊戲／YAAGL 路徑" };
+  const runtime = inspectGameRuntime(settings.exePath);
+  if (!runtime.exists) return { ok: false, error: "找不到遊戲啟動程式: " + settings.exePath };
+  if (runtime.runtime === "macos-yaagl") {
+    // true 只會在使用者實際按下「開始代肝」時要求輔助使用權限。
+    if (!systemPreferences.isTrustedAccessibilityClient(true)) {
+      return { ok: false, error: "macOS 尚未允許昔漣控制鍵盤滑鼠。請到 系統設定 → 隱私權與安全性 → 輔助使用，允許 Electron／昔漣後重試。" };
+    }
+    const screenStatus = systemPreferences.getMediaAccessStatus("screen");
+    if (screenStatus === "denied" || screenStatus === "restricted") {
+      return { ok: false, error: "macOS 尚未允許昔漣擷取畫面。請到 系統設定 → 隱私權與安全性 → 螢幕與系統錄音，允許 Electron／昔漣後重試。" };
+    }
+  }
+  const vlmConfig = resolveGameBotVlmSettings(settings);
+  if (!vlmConfig)
+    return { ok: false, error: "沒有可用的視覺模型。請先在 API 設定啟用視覺模型，或在遊戲代肝填入 VLM（baseUrl/API Key/model）。" };
   const recipe = loadRecipe(settings.activeRecipe);
   if (!recipe) return { ok: false, error: "找不到腳本: " + settings.activeRecipe };
 
   runningRecipe = settings.activeRecipe;
   runSignal = { aborted: false };
-  const tools = buildTools(settings);
+  const tools = buildTools(settings, vlmConfig);
 
   void runRecipe(recipe, {
     tools,
@@ -136,6 +181,13 @@ export async function startGameBot(): Promise<{ ok: boolean; error?: string }> {
     runSignal = null;
     runningRecipe = null;
   });
+  // macOS 上若昔漣仍在前景，Wine/Metal 遊戲畫面可能被壓到背景，導致後續截圖
+  // 只看到設定頁。延後隱藏以便 IPC 先把「已啟動」結果回傳給渲染端。
+  if (runtime.runtime === "macos-yaagl") {
+    setTimeout(() => {
+      try { app.hide(); } catch { /* app may already be shutting down */ }
+    }, 250);
+  }
   return { ok: true };
 }
 

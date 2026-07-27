@@ -122,7 +122,7 @@ describe("build-options", () => {
       }),
     }
 
-    await onAgentRunFinished({ reply: "來，抱抱你", toolResults: [] }, "今天好累", deps)
+    const sticker = await onAgentRunFinished({ reply: "來，抱抱你", toolResults: [] }, "今天好累", deps)
 
     expect(matchSticker).toHaveBeenCalledWith(
       "來，抱抱你\n今天好累",
@@ -134,5 +134,6 @@ describe("build-options", () => {
       name: "cyrene.sticker",
       value: "hugtight",
     }))
+    expect(sticker).toBe("hugtight")
   })
 })

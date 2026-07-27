@@ -287,6 +287,9 @@ const settingsApi = {
   channelsSpotifyGetStatus: () => ipcRenderer.invoke(IPC.CHANNELS_SPOTIFY_GET_STATUS),
   channelsSpotifyControl: (input: { command: string; value?: number; deviceId?: string; query?: string }) => ipcRenderer.invoke(IPC.CHANNELS_SPOTIFY_CONTROL, input),
   channelsSpotifyDisconnect: () => ipcRenderer.invoke(IPC.CHANNELS_SPOTIFY_DISCONNECT),
+  channelsBilibiliConnect: () => ipcRenderer.invoke(IPC.CHANNELS_BILIBILI_CONNECT),
+  channelsBilibiliGetStatus: () => ipcRenderer.invoke(IPC.CHANNELS_BILIBILI_GET_STATUS),
+  channelsBilibiliDisconnect: () => ipcRenderer.invoke(IPC.CHANNELS_BILIBILI_DISCONNECT),
   // Phase 3.4：消息日誌
   channelsLogGet: (limit?: number) => ipcRenderer.invoke(IPC.CHANNELS_LOG_GET, limit ?? 100),
   channelsLogClear: () => ipcRenderer.invoke(IPC.CHANNELS_LOG_CLEAR),
@@ -491,6 +494,11 @@ const tokenUsageApi = {
 };
 contextBridge.exposeInMainWorld("tokenUsage", tokenUsageApi);
 
+const callUsageApi = {
+  get: (days: number) => ipcRenderer.invoke(IPC.CALL_USAGE_GET, days),
+};
+contextBridge.exposeInMainWorld("callUsage", callUsageApi);
+
 const agentActivityApi = {
   get: (days: number) => ipcRenderer.invoke(IPC.AGENT_ACTIVITY_GET, days),
   exportDiagnostic: () => ipcRenderer.invoke(IPC.AGENT_DIAGNOSTIC_EXPORT),
@@ -598,12 +606,20 @@ const gameBotApi = {
 };
 contextBridge.exposeInMainWorld("gameBot", gameBotApi);
 
-// 昔漣的創作工作台 (NovelAI 繪圖) API
+// 昔漣的創作工作台（OpenRouter / Gemini 圖片生成）API
 const paintApi = {
   buildPrompt: (description: string) => ipcRenderer.invoke("paint:build-prompt", description),
-  generateImage: (payload: { prompt: string; model: string; width: number; height: number; token: string }) =>
+  getConnections: () => ipcRenderer.invoke("paint:get-connections"),
+  generateImage: (payload: {
+    provider: "openrouter" | "gemini";
+    prompt: string;
+    model: string;
+    aspectRatio: string;
+    resolution: "1K" | "2K" | "4K";
+    quality: "auto" | "low" | "medium" | "high";
+    references: Array<{ dataUrl: string; mimeType: string }>;
+  }) =>
     ipcRenderer.invoke("paint:generate-image", payload),
-  generateFreeImage: (payload: { prompt: string; width: number; height: number }) =>
-    ipcRenderer.invoke("paint:generate-free-image", payload),
+  openSettings: () => ipcRenderer.send(IPC.SIDEBAR_OPEN_SETTINGS, "api"),
 };
 contextBridge.exposeInMainWorld("paint", paintApi);

@@ -999,6 +999,37 @@
             </div>
           </div>
 
+          <div class="channels-card channels-card--bilibili" id="channels-bilibili-card" tabindex="-1">
+            <div class="channels-card__header bilibili-card__header">
+              <div class="bilibili-card__brand">
+                <span class="bilibili-card__logo" aria-hidden="true">B</span>
+                <div><h2>Bilibili</h2><small>OPERA GX SESSION</small></div>
+              </div>
+              <span class="bilibili-card__badge" id="channels-bilibili-status">尚未連接</span>
+            </div>
+            <div class="channels-card__body">
+              <div class="bilibili-session" aria-label="Bilibili 瀏覽器連接狀態">
+                <div class="bilibili-session__rail" aria-hidden="true">
+                  <span class="bilibili-session__node bilibili-session__node--gx">GX</span>
+                  <span class="bilibili-session__line"><i></i></span>
+                  <span class="bilibili-session__node bilibili-session__node--bili">B</span>
+                </div>
+                <div class="bilibili-session__copy">
+                  <strong id="channels-bilibili-session-title">連接你的 Opera GX 登入狀態</strong>
+                  <span id="channels-bilibili-session-detail">連接後，Discord 播放 Bilibili 連結時會自動讀取你的本機登入狀態。</span>
+                </div>
+              </div>
+              <p class="channels-card__hint">Cyrene 不會保存你的 Bilibili 帳號、密碼或 Cookie；播放時只會讓 yt-dlp 從本機 Opera GX 讀取，而且只套用於 <strong>bilibili.com</strong> 與 <strong>b23.tv</strong> 連結。</p>
+              <div class="bilibili-privacy"><span aria-hidden="true">⌁</span><div><strong>只在這台 Mac 生效</strong><small>Opera GX 必須保持 Bilibili 已登入；登出後可在這裡重新連接。</small></div></div>
+              <div class="channels-card__actions">
+                <button type="button" class="btn-secondary btn-bilibili" id="channels-bilibili-connect">連接 Bilibili</button>
+                <button type="button" class="btn-secondary" id="channels-bilibili-disconnect" disabled>解除連接</button>
+                <a class="btn-secondary bilibili-portal-link" href="https://www.bilibili.com/" target="_blank" rel="noopener">開啟 Bilibili ↗</a>
+              </div>
+              <div class="channels-feedback" id="channels-bilibili-feedback" aria-live="polite"></div>
+            </div>
+          </div>
+
           <div class="channels-card channels-card--discord" id="channels-discord-card" tabindex="-1">
             <div class="channels-card__header">
               <h2>Discord</h2>
@@ -1157,9 +1188,14 @@
                 <label class="form-label">允許的 User IDs</label>
                 <input type="text" id="channels-discord-user-ids" class="form-input form-input--wide" placeholder="留空不限制；多個用逗號分隔" />
               </div>
+              <div class="form-row">
+                <label class="form-label">Codex 繪圖擁有者 ID</label>
+                <input type="text" id="channels-discord-codex-owner-id" class="form-input form-input--wide" inputmode="numeric" placeholder="只有這個 Discord User ID 能使用 /draw" />
+                <span class="form-help">獨立於一般聊天白名單；繪圖結果只會私訊給此帳號。</span>
+              </div>
               <div class="form-row form-row--inline">
                 <span class="switch"><input id="channels-discord-require-mention" type="checkbox" checked /><span class="switch__track"><span class="switch__thumb"></span></span></span>
-                <span class="form-row__label">伺服器頻道必須 @Bot 才回覆</span>
+                <span class="form-row__label">伺服器頻道必須 @Bot 或以 / 開頭才回覆</span>
               </div>
               <div class="form-row form-row--inline">
                 <span class="switch"><input id="channels-discord-voice-enabled" type="checkbox" checked /><span class="switch__track"><span class="switch__thumb"></span></span></span>
@@ -1439,8 +1475,9 @@
                 <p>按預設腳本自動跑每日任務，視覺定位自適應分辨率。參考圖由後端存儲，把小圖按命名放進下方目錄即可。</p>
                 <div class="plugin-config" id="plugin-gamebot-config">
                   <div class="tts-field">
-                    <label for="gamebot-exe">遊戲 exe 路徑</label>
-                    <input id="gamebot-exe" type="text" placeholder="C:/Games/StarRail/StarRail.exe" autocomplete="off" />
+                    <label for="gamebot-exe">遊戲／YAAGL 路徑</label>
+                    <input id="gamebot-exe" type="text" placeholder="macOS: /Applications/Honkai Star Rail.app；Windows: C:/Games/StarRail/StarRail.exe" autocomplete="off" />
+                    <p class="user-field-hint">macOS YAAGL 預設為 <code>/Applications/Honkai Star Rail.app</code>。首次執行需在系統設定授權「輔助使用」與「螢幕與系統錄音」。</p>
                   </div>
                   <div class="tts-field">
                     <label for="gamebot-vlm-url">VLM Base URL（OpenAI 兼容）</label>
@@ -1454,6 +1491,7 @@
                     <label for="gamebot-vlm-model">VLM 模型名</label>
                     <input id="gamebot-vlm-model" type="text" placeholder="Qwen/Qwen3-VL-8B-Instruct" autocomplete="off" />
                   </div>
+                  <p class="user-field-hint">三個 VLM 欄位全部留空時，會自動沿用昔漣 API 設定中的視覺模型／目前主模型。</p>
                   <div class="tts-field">
                     <label for="gamebot-recipe">代肝腳本</label>
                     <select id="gamebot-recipe"></select>

@@ -160,3 +160,24 @@ export function getLocalStickerUrl(file: string): string {
 export function getUserStickerFilePath(file: string): string {
   return path.join(getStickersDir(), file);
 }
+
+/**
+ * 把表情包 id 解析成可交給 Discord AttachmentBuilder 的本機圖片路徑。
+ * 內置圖片由 Vite 複製到 dist/renderer/stickers；自訂圖片位於 userData/stickers。
+ */
+export function resolveStickerImagePath(id: string): string | null {
+  const builtInFile = BUILT_IN_STICKER_FILES[id];
+  if (builtInFile) {
+    const candidates = [
+      path.join(__dirname, "..", "..", "renderer", "stickers", builtInFile),
+      path.join(app.getAppPath(), "dist", "renderer", "stickers", builtInFile),
+      path.join(app.getAppPath(), "src", "renderer", "public", "stickers", builtInFile),
+    ];
+    return candidates.find((candidate) => fs.existsSync(candidate)) ?? null;
+  }
+
+  const userSticker = loadUserStickerManifest()[id];
+  if (!userSticker) return null;
+  const userPath = getUserStickerFilePath(userSticker.file);
+  return fs.existsSync(userPath) ? userPath : null;
+}
