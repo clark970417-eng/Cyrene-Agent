@@ -31,20 +31,28 @@ describe("SkillRegistry", () => {
     expect(reg.getAll().map(s => s.id).sort()).toEqual(["a", "b"]);
   });
 
-  it("setEnabled 切換", () => {
+  it("setEnabled 切换", () => {
     reg.register(entry("a", { enabled: false }));
     reg.setEnabled("a", true);
     expect(reg.getById("a")?.enabled).toBe(true);
     expect(reg.getEnabled().map(s => s.id)).toEqual(["a"]);
   });
 
-  it("getBody 懶加載 + 緩存（改磁盤不刷新）", () => {
+  it("excludes an enabled Skill when its runtime availability gate is closed", () => {
+    reg.register(entry("music"));
+    reg.setAvailability("music", () => false);
+
+    expect(reg.getEnabled()).toEqual([]);
+    expect(reg.getAll()[0].enabled).toBe(true);
+  });
+
+  it("getBody 懒加载 + 缓存（改磁盘不刷新）", () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "reg-"));
     const mdPath = path.join(tmp, "SKILL.md");
     fs.writeFileSync(mdPath, "---\nname: a\ndescription: d\n---\n正文v1", "utf8");
     reg.register(entry("a", { bodyPath: mdPath }));
     expect(reg.getBody("a")).toBe("正文v1");
-    // 改磁盤，緩存應返回舊內容（懶加載緩存語義，見 spec 5.4）
+    // 改磁盘，缓存应返回旧内容（懒加载缓存语义，见 spec 5.4）
     fs.writeFileSync(mdPath, "---\nname: a\ndescription: d\n---\n正文v2", "utf8");
     expect(reg.getBody("a")).toBe("正文v1");
     fs.rmSync(tmp, { recursive: true, force: true });

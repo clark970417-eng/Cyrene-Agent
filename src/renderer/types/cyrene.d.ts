@@ -14,6 +14,7 @@ declare global {
       captureFrame: () => Promise<string | null>;
       getCursorPosition: () => Promise<{ x: number; y: number } | null>;
       onPetZoom: (callback: (zoom: number) => void) => () => void;
+      onPetVisibilityChanged: (callback: (visible: boolean) => void) => () => void;
     };
     petChat?: {
       send: (text: string) => Promise<{ text: string; audioBase64: string; format: "wav" | "mp3"; durationMs: number }>;

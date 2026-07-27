@@ -190,28 +190,30 @@ export function decryptFeishuSecret(cfg: FeishuChannelConfig | undefined): strin
   return decryptField(cfg?.appSecret ?? "");
 }
 
+export type ChannelToolSandbox = "off" | "safe-only" | "all";
+
 export interface ChannelsSettings {
   wechat: WechatChannelConfig;
   feishu: FeishuChannelConfig;
   discord: DiscordChannelConfig;
   spotify: SpotifyConfig;
   bilibili: BilibiliConfig;
-  /** 入站 HTTP server 綁定的端口。0 = 隨機空閒。 */
+  /** 入站 HTTP server 绑定的端口。0 = 随机空闲。 */
   inboundPort: number;
-  /** HMAC 共享密鑰。啟動時若為空則自動生成。 */
+  /** HMAC 共享密钥。启动时若为空则自动生成。 */
   sharedSecret: string;
-  /** 全局：每用戶每分鐘最多消息數 */
+  /** 全局：每用户每分钟最多消息数 */
   rateLimitPerUser: number;
-  /** 全局：單渠道每分鐘最多消息數 */
+  /** 全局：单渠道每分钟最多消息数 */
   rateLimitPerChannel: number;
-  /** 全局：是否發送 TTS 音頻消息 */
+  /** 全局：是否发送 TTS 音频消息 */
   ttsEnabled: boolean;
-  /** 全局：是否發送 sticker */
+  /** 全局：是否发送 sticker */
   stickerEnabled: boolean;
-  /** 全局：是否把 bot 會話鏡像到桌面端 chatWindow */
+  /** 全局：是否把 bot 会话镜像到桌面端 chatWindow */
   mirrorToDesktop: boolean;
-  /** 全局：工具沙箱 'safe-only' | 'all' */
-  toolSandbox: "safe-only" | "all";
+  /** 全局：Chat 关闭工具；Work 可限制工具风险等级。 */
+  toolSandbox: ChannelToolSandbox;
 }
 
 const DEFAULT_SETTINGS: ChannelsSettings = {
@@ -227,7 +229,7 @@ const DEFAULT_SETTINGS: ChannelsSettings = {
   ttsEnabled: true,
   stickerEnabled: true,
   mirrorToDesktop: true,
-  toolSandbox: "safe-only",
+  toolSandbox: "all",
 };
 
 function filePath(): string {
@@ -244,6 +246,8 @@ function normalize(input: Partial<ChannelsSettings> | null | undefined): Channel
     typeof v === "boolean" ? v : fallback;
 
   const safeStr = (v: unknown): string => (typeof v === "string" ? v : "");
+  const safeToolSandbox = (v: unknown): ChannelToolSandbox =>
+    v === "off" || v === "all" ? v : "safe-only";
 
   const w: Partial<WechatChannelConfig> | undefined = input?.wechat;
   const f: Partial<FeishuChannelConfig> | undefined = input?.feishu;
@@ -310,7 +314,7 @@ function normalize(input: Partial<ChannelsSettings> | null | undefined): Channel
     ttsEnabled: safeBool(input?.ttsEnabled, true),
     stickerEnabled: safeBool(input?.stickerEnabled, true),
     mirrorToDesktop: safeBool(input?.mirrorToDesktop, true),
-    toolSandbox: input?.toolSandbox === "all" ? "all" : "safe-only",
+    toolSandbox: safeToolSandbox(input?.toolSandbox),
   };
 }
 
@@ -436,15 +440,15 @@ export type ChannelConfigPatch = Partial<{
   ttsEnabled: boolean;
   stickerEnabled: boolean;
   mirrorToDesktop: boolean;
-  toolSandbox: "safe-only" | "all";
+  toolSandbox: ChannelToolSandbox;
 }>;
 
-/** 給定 channelId 返回對應的配置子集（用於 adapter 內部讀取自己的開關）。 */
+/** 给定 channelId 返回对应的配置子集（用于 adapter 内部读取自己的开关）。 */
 export function getChannelConfig<K extends ChannelId>(
   settings: ChannelsSettings,
   channel: K,
-): K extends "wechat" ? WechatChannelConfig : K extends "feishu" ? FeishuChannelConfig : DiscordChannelConfig {
-  return settings[channel] as K extends "wechat"
+): K extends "wechat" ? WechatChannelConfig : FeishuChannelConfig {
+  return (settings[channel] as unknown) as K extends "wechat"
     ? WechatChannelConfig
-    : K extends "feishu" ? FeishuChannelConfig : DiscordChannelConfig;
+    : FeishuChannelConfig;
 }

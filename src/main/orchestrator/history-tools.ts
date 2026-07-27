@@ -9,6 +9,7 @@
 
 import { addMemory, searchHistoryEntries } from "../rag";
 import { toolRegistry } from "./tool-registry";
+import { currentUserTimezone } from "./built-in-tools";
 
 const LOG_PREFIX = "[History]";
 
@@ -72,27 +73,27 @@ export function registerRecallHistoryTool(): void {
       try {
         hits = await searchHistoryEntries(query, 5);
       } catch (e) {
-        return "[recall_history] 檢索失敗：" + (e instanceof Error ? e.message : String(e));
+        return "[recall_history] 检索失败：" + (e instanceof Error ? e.message : String(e));
       }
 
       const filtered = hits.filter(h => h.createdAt >= cutoff);
 
       if (filtered.length === 0) {
-        return `[recall_history] 沒有找到關於 "${query}" 的歷史記錄`;
+        return `[recall_history] 没有找到关于 "${query}" 的历史记录`;
       }
 
-      // 按時間正序（最早的在前），讓對話脈絡自然
+      // 按时间正序（最早的在前），让对话脉络自然
       const sorted = [...filtered].sort((a, b) => a.createdAt - b.createdAt);
 
       const lines = sorted.map(h => {
-        const date = new Date(h.createdAt).toLocaleString("zh-CN");
-        const role = h.metadata?.role === "user" ? "用戶" : "昔漣";
-        // 截斷過長內容，避免吃太多 token
+        const date = new Date(h.createdAt).toLocaleString("zh-CN", { timeZone: currentUserTimezone() });
+        const role = h.metadata?.role === "user" ? "用户" : "昔涟";
+        // 截断过长内容，避免吃太多 token
         const text = h.text.length > 300 ? h.text.slice(0, 300) + "..." : h.text;
         return `[${date}] ${role}：${text}`;
       });
 
-      return `[recall_history] 找到 ${sorted.length} 條相關歷史：\n\n${lines.join("\n\n")}`;
+      return `[recall_history] 找到 ${sorted.length} 条相关历史：\n\n${lines.join("\n\n")}`;
     },
   });
 }

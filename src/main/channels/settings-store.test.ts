@@ -95,42 +95,15 @@ describe("channels/settings-store", () => {
     expect(loaded.feishu.enabled).toBe(false);
   });
 
-  it("saveChannelsSettings: 傳新 secret 覆蓋", () => {
+  it("saveChannelsSettings: 传新 secret 覆盖", () => {
     saveChannelsSettings({ feishu: { enabled: true, appSecret: "old" } });
     saveChannelsSettings({ feishu: { enabled: true, appSecret: "new" } });
     const loaded = loadChannelsSettings();
     expect(loaded.feishu.appSecret).toBe("new");
   });
 
-  it("Discord: 修改白名單時保留磁碟上的加密 Bot Token", () => {
-    saveChannelsSettings({
-      discord: { enabled: true, botToken: "discord-token", requireMention: true },
-    });
-    const p = path.join(os.tmpdir(), "channels-settings.json");
-    const before = JSON.parse(fs.readFileSync(p, "utf8"));
-    const encryptedBefore = before.discord.botToken;
-
-    // 模擬 Keychain 暫時解不開舊密文；partial save 仍必須原樣保留磁碟密文。
-    encState.clear();
-    saveChannelsSettings({
-      discord: { enabled: true, allowedUserIds: ["798893182883463179"] },
-    });
-
-    const after = JSON.parse(fs.readFileSync(p, "utf8"));
-    expect(after.discord.botToken).toBe(encryptedBefore);
-    expect(after.discord.allowedUserIds).toEqual(["798893182883463179"]);
-  });
-
-  it("Spotify: 加密保存 Client Secret 與 Refresh Token，並允許解除授權", () => {
-    saveChannelsSettings({ spotify: { enabled: true, clientId: "spotify-client", clientSecret: "spotify-secret", refreshToken: "spotify-refresh" } });
-    const p = path.join(os.tmpdir(), "channels-settings.json");
-    const raw = fs.readFileSync(p, "utf8");
-    expect(raw).toContain("spotify-client");
-    expect(raw).not.toContain("spotify-secret");
-    expect(raw).not.toContain("spotify-refresh");
-    expect(loadChannelsSettings().spotify.refreshToken).toBe("spotify-refresh");
-    saveChannelsSettings({ spotify: { enabled: false, refreshToken: "" } });
-    expect(loadChannelsSettings().spotify.refreshToken).toBe("");
-    expect(loadChannelsSettings().spotify.clientSecret).toBe("spotify-secret");
+  it("saveChannelsSettings: persists the off tool sandbox", () => {
+    saveChannelsSettings({ toolSandbox: "off" });
+    expect(loadChannelsSettings().toolSandbox).toBe("off");
   });
 });

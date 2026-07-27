@@ -42,9 +42,9 @@ describe("Discord 文字頻道語音回答", () => {
       manager: { getAdapter: () => ({ capability }) } as any,
       buildAndRunAgent: async (msg) => {
         agentInput = msg.text;
-        return "你好呀，我是昔漣，很高興用聲音陪你聊天。";
+        return { text: "你好呀，我是昔漣，很高興用聲音陪你聊天。", sticker: null };
       },
-      synthesizeTts: async () => ({ audio: Buffer.from("RIFF-audio"), format: "wav" }),
+      synthesizeTts: async () => ({ audio: Buffer.from("RIFF-audio"), format: "wav", mime: "audio/wav", extension: ".wav" }),
     });
 
     const outgoing = await dispatcher.handleIncoming(voiceRequest("voice-success"));
@@ -57,7 +57,7 @@ describe("Discord 文字頻道語音回答", () => {
   it("TTS 沒有產生音訊時保留模型文字，避免靜默", async () => {
     const dispatcher = new ChannelDispatcher({
       manager: { getAdapter: () => ({ capability }) } as any,
-      buildAndRunAgent: async () => "這次先用文字陪你。",
+      buildAndRunAgent: async () => ({ text: "這次先用文字陪你。", sticker: null }),
       synthesizeTts: async () => null,
     });
 

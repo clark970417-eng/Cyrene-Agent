@@ -20,6 +20,7 @@ import {
   type ChatMessage,
   type ChatSession,
   type ChatSessionMeta,
+  type ChatSessionPurpose,
 } from "../../shared/chat-types";
 
 const ROOT_DIR_NAME = "cyrene-chats";
@@ -57,7 +58,8 @@ function readIndexFromDisk(): ChatSessionMeta[] {
         typeof meta.title === "string" &&
         typeof meta.createdAt === "number" &&
         typeof meta.updatedAt === "number" &&
-        typeof meta.messageCount === "number"
+        typeof meta.messageCount === "number" &&
+        (meta.purpose === undefined || meta.purpose === "proactive-chat")
       );
     });
   } catch (err) {
@@ -104,6 +106,7 @@ function metaFromSession(session: ChatSession): ChatSessionMeta {
     createdAt: session.createdAt,
     updatedAt: session.updatedAt,
     messageCount: session.messages.length,
+    purpose: session.purpose,
   };
 }
 
@@ -152,10 +155,29 @@ export function getSession(id: string): ChatSession | null {
   return readSessionFile(id);
 }
 
+export function getSessionPage(id: string, before: number | null, limit: number): {
+  session: Omit<ChatSession, "messages"> & { messageCount: number };
+  messages: ChatMessage[];
+  hasMore: boolean;
+} | null {
+  const session = readSessionFile(id);
+  if (!session) return null;
+  const end = Math.max(0, Math.min(before ?? session.messages.length, session.messages.length));
+  const safeLimit = Math.max(1, Math.min(Math.floor(limit) || 1, 200));
+  const start = Math.max(0, end - safeLimit);
+  const { messages: _messages, ...meta } = session;
+  return {
+    session: { ...meta, messageCount: session.messages.length },
+    messages: session.messages.slice(start, end),
+    hasMore: start > 0,
+  };
+}
+
 export function createSession(opts?: {
   title?: string;
   identityId?: string | null;
   initialMessages?: ChatMessage[];
+  purpose?: ChatSessionPurpose;
 }): ChatSession {
   const now = Date.now();
   const messages = opts?.initialMessages ?? [];
@@ -167,10 +189,34 @@ export function createSession(opts?: {
     createdAt: now,
     updatedAt: now,
     schemaVersion: CHAT_SCHEMA_VERSION,
+    purpose: opts?.purpose,
+    titleIsCustom: opts?.purpose ? true : undefined,
   };
   writeSessionFile(session);
   upsertMeta(metaFromSession(session));
   return session;
+}
+
+export function getSessionByPurpose(purpose: ChatSessionPurpose): ChatSession | null {
+  const meta = indexCache.find((session) => session.purpose === purpose);
+  return meta ? readSessionFile(meta.id) : null;
+}
+
+/**
+ * Electron 主进程内的 store API 是同步的：查询与创建之间没有 await，
+ * 因此同一事件循环上的并发调用也无法穿插出两个同用途会话。
+ */
+export function getOrCreateSessionByPurpose(
+  purpose: ChatSessionPurpose,
+  opts?: { title?: string; identityId?: string | null },
+): ChatSession {
+  const existing = getSessionByPurpose(purpose);
+  if (existing) return existing;
+  return createSession({
+    title: opts?.title,
+    identityId: opts?.identityId ?? null,
+    purpose,
+  });
 }
 
 export function appendMessage(id: string, message: ChatMessage): ChatSession | null {
@@ -197,6 +243,17 @@ export function replaceMessages(id: string, messages: ChatMessage[]): ChatSessio
   if (!session.titleIsCustom) {
     session.title = deriveTitle(session.messages);
   }
+  writeSessionFile(session);
+  upsertMeta(metaFromSession(session));
+  return session;
+}
+
+export function replaceMessagesTail(id: string, startIndex: number, messages: ChatMessage[]): ChatSession | null {
+  const session = readSessionFile(id);
+  if (!session || !Number.isInteger(startIndex) || startIndex < 0 || startIndex > session.messages.length) return null;
+  session.messages = session.messages.slice(0, startIndex).concat(messages);
+  session.updatedAt = Date.now();
+  if (!session.titleIsCustom) session.title = deriveTitle(session.messages);
   writeSessionFile(session);
   upsertMeta(metaFromSession(session));
   return session;

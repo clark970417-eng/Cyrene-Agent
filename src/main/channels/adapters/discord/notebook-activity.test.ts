@@ -59,19 +59,19 @@ describe("Discord notebook activity", () => {
   });
 
   it("keeps only completed actions and ignores informational tools", () => {
-    expect(selectDiscordNotebookAction({ toolId: "weather", args: { city: "台北" }, output: "晴天" })).toBeNull();
-    expect(selectDiscordNotebookAction({ toolId: "web_search", args: { query: "現在幾點" }, output: "結果" })).toBeNull();
-    expect(selectDiscordNotebookAction({ toolId: "todo_write", args: { todos: [] }, output: "已規劃" })).toBeNull();
-    expect(selectDiscordNotebookAction({ toolId: "write_pdf", args: { outputPath: "/tmp/report.pdf" }, output: "[錯誤] failed" })).toBeNull();
-    expect(selectDiscordNotebookAction({ toolId: "write_pdf", args: { outputPath: "/tmp/report.pdf" }, output: "完成" }))
+    expect(selectDiscordNotebookAction({ toolId: "weather", args: { city: "台北" }, output: "晴天", status: "succeeded" })).toBeNull();
+    expect(selectDiscordNotebookAction({ toolId: "web_search", args: { query: "現在幾點" }, output: "結果", status: "succeeded" })).toBeNull();
+    expect(selectDiscordNotebookAction({ toolId: "todo_write", args: { todos: [] }, output: "已規劃", status: "succeeded" })).toBeNull();
+    expect(selectDiscordNotebookAction({ toolId: "write_pdf", args: { outputPath: "/tmp/report.pdf" }, output: "[錯誤] failed", status: "failed" })).toBeNull();
+    expect(selectDiscordNotebookAction({ toolId: "write_pdf", args: { outputPath: "/tmp/report.pdf" }, output: "完成", status: "succeeded" }))
       .toMatchObject({ label: "完成 PDF 文件", detail: "report.pdf" });
   });
 
   it("writes approved actions beside music in the same daily section", async () => {
     const file = await notebookFile();
     await recordDiscordToolActionsInNotebook([
-      { toolId: "weather", args: { city: "台北" }, output: "晴天" },
-      { toolId: "send_email", args: { subject: "週報" }, output: "[send_email] 已發送" },
+      { toolId: "weather", args: { city: "台北" }, output: "晴天", status: "succeeded" },
+      { toolId: "send_email", args: { subject: "週報" }, output: "[send_email] 已發送", status: "succeeded" },
     ], { companionName: "Clark", occurredAt: new Date("2026-07-22T13:00:00.000Z") }, file);
 
     const content = await fs.readFile(file, "utf8");

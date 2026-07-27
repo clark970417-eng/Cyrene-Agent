@@ -68,6 +68,20 @@ export async function buildMemoryInjection(
   return parts.join("\n\n");
 }
 
+function getWorldbookTriggerText(userInput: string): string {
+  const contextMarkers = [
+    "【本轮文件】",
+    "【文档内容】",
+    "【图片视觉信息】",
+    "【图片附件】",
+  ];
+  const firstContextIndex = contextMarkers
+    .map((marker) => userInput.indexOf(marker))
+    .filter((index) => index >= 0)
+    .sort((a, b) => a - b)[0];
+  return (typeof firstContextIndex === "number" ? userInput.slice(0, firstContextIndex) : userInput).trim();
+}
+
 /**
  * 構建 always-on 上下文：世界書 + L0/L1 畫像。
  * 不涉及工具選擇和執行——那些由 function calling 處理。
@@ -78,21 +92,21 @@ export async function buildAlwaysOnContext(
 ): Promise<string> {
   const parts: string[] = [];
 
-  // ── 世界書 — 永遠跑 ──────────────────────────────────
-  // DMAE：常駐始終注入；非常駐條目按 Activation 生命週期門控。
-  // updateActivation 在調 LLM 之前跑 → 用戶當輪命中的條目當輪就進 Prompt。
+  // ── 世界书 — 永远跑 ──────────────────────────────────
+  // DMAE：常驻始终注入；非常驻条目按 Activation 生命周期门控。
+  // updateActivation 在调 LLM 之前跑 → 用户当轮命中的条目当轮就进 Prompt。
   try {
     const permanentWb = getPermanentWorldbookEntries();
     if (permanentWb.length > 0) {
-      parts.push("【常駐背景】\n" + permanentWb.join("\n\n"));
+      parts.push("【常驻背景】\n" + permanentWb.join("\n\n"));
     }
 
     const lastAssistant = recentMessages
       .filter(m => m.role === "assistant")
       .slice(-1)[0]?.content ?? "";
-    updateWorldbookActivation(userInput, lastAssistant);  // 打分（本輪用戶 + 上輪模型）
-    const active = getActiveWorldbookEntries();           // 閾值門控 + 注入
-    // One-Shot cascade：用戶命中後連帶觸發的條目（不入 DMAE 狀態表，只本輪有效）
+    updateWorldbookActivation(getWorldbookTriggerText(userInput), lastAssistant);  // 打分（本轮用户 + 上轮模型）
+    const active = getActiveWorldbookEntries();           // 阈值门控 + 注入
+    // One-Shot cascade：用户命中后连带触发的条目（不入 DMAE 状态表，只本轮有效）
     const cascade = getCascadeWorldbookEntries();
     const allInjected = active.length > 0 || cascade.length > 0;
     if (allInjected) {

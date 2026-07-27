@@ -11,22 +11,22 @@ export interface ChatSessionMetaUI {
   createdAt: number;
   updatedAt: number;
   messageCount: number;
+  purpose?: "proactive-chat";
 }
 
-// 默認 identity 顯示名（職位面板未做，所有會話先用這個）
-export const CHAT_DEFAULT_IDENTITY_LABEL = "聊天陪伴";
+// 默认 identity 显示名（职位面板未做，所有会话先用这个）
 
-// 微信式相對時間：剛剛 / N 分鐘前 / 今天 HH:mm / 昨天 HH:mm / N 天前 / MM-DD / YYYY-MM-DD
+// 微信式相对时间：刚刚 / N 分钟前 / 今天 HH:mm / 昨天 HH:mm / N 天前 / MM-DD / YYYY-MM-DD
 export function formatChatRelativeTime(at: number): string {
   const now = Date.now();
   const diff = now - at;
   if (diff < 0) {
-    // 極少見的時鐘回撥：直接降級到絕對時間
+    // 极少见的时钟回拨：直接降级到绝对时间
     const d = new Date(at);
     return `${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
   }
-  if (diff < 60_000) return "剛剛";
-  if (diff < 60 * 60_000) return Math.floor(diff / 60_000) + " 分鐘前";
+  if (diff < 60_000) return "刚刚";
+  if (diff < 60 * 60_000) return Math.floor(diff / 60_000) + " 分钟前";
 
   const target = new Date(at);
   const today = new Date();

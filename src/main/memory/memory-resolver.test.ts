@@ -9,7 +9,7 @@ const electronMock = vi.hoisted(() => ({
 }))
 
 const ragMock = vi.hoisted(() => ({
-  addMemory: vi.fn(),
+  addL2MemoryVector: vi.fn(),
 }))
 
 vi.mock("electron", () => ({
@@ -23,7 +23,7 @@ vi.mock("../rag/index", () => ragMock)
 describe("memory conflict resolver", () => {
   beforeEach(() => {
     electronMock.userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), "memory-resolver-"))
-    ragMock.addMemory.mockReset()
+    ragMock.addL2MemoryVector.mockReset()
     vi.resetModules()
   })
 
@@ -121,17 +121,17 @@ describe("memory conflict resolver", () => {
   it("runs one queued resolver item and applies the result", async () => {
     const { memoryStore } = await import("./memory-store")
     const { runResolverQueueOnce } = await import("./memory-resolver")
-    ragMock.addMemory.mockResolvedValue("rag_resolved")
+    ragMock.addL2MemoryVector.mockResolvedValue("rag_resolved")
     const oldMemory = await memoryStore.addL2Memory({
-      content: "用戶喜歡跑步",
-      triggerText: "我喜歡跑步",
+      content: "用户喜欢跑步",
+      triggerText: "我喜欢跑步",
       sourceConversationId: "test",
       ragId: "rag_old",
       isPinned: false,
     })
     const newMemory = await memoryStore.addL2Memory({
-      content: "用戶不喜歡跑步",
-      triggerText: "我現在不喜歡跑步",
+      content: "用户不喜欢跑步",
+      triggerText: "我现在不喜欢跑步",
       sourceConversationId: "test",
       ragId: "rag_new",
       isPinned: false,
@@ -175,11 +175,10 @@ describe("memory conflict resolver", () => {
     const resolvedMemory = store.l2.find((memory) => memory.id === conflictLogs[0].resolutionMemoryId)
     expect(resolvedMemory?.syncStatus).toBe("synced")
     expect(resolvedMemory?.ragId).toBe("rag_resolved")
-    expect(ragMock.addMemory).toHaveBeenCalledWith(
+    expect(ragMock.addL2MemoryVector).toHaveBeenCalledWith(
       "用戶過去喜歡跑步，但現在不喜歡跑步。",
-      "user_memory",
+      resolvedMemory!.id,
       expect.objectContaining({
-        l2Id: resolvedMemory?.id,
         conflictLogId: log.id,
         resolutionType: "preference_evolution",
         sourceL2Id: newMemory.id,
@@ -191,17 +190,17 @@ describe("memory conflict resolver", () => {
   it("keeps resolver resolution when syncing the resolved memory to RAG fails", async () => {
     const { memoryStore } = await import("./memory-store")
     const { runResolverQueueOnce } = await import("./memory-resolver")
-    ragMock.addMemory.mockRejectedValue(new Error("rag down"))
+    ragMock.addL2MemoryVector.mockRejectedValue(new Error("rag down"))
     const oldMemory = await memoryStore.addL2Memory({
-      content: "用戶喜歡喝咖啡",
-      triggerText: "我喜歡喝咖啡",
+      content: "用户喜欢喝咖啡",
+      triggerText: "我喜欢喝咖啡",
       sourceConversationId: "test",
       ragId: "rag_old",
       isPinned: false,
     })
     const newMemory = await memoryStore.addL2Memory({
-      content: "用戶現在不喜歡喝咖啡",
-      triggerText: "我現在不喜歡喝咖啡",
+      content: "用户现在不喜欢喝咖啡",
+      triggerText: "我现在不喜欢喝咖啡",
       sourceConversationId: "test",
       ragId: "rag_new",
       isPinned: false,
@@ -247,7 +246,7 @@ describe("memory conflict resolver", () => {
   it("records resolver run traces and rate limits back-to-back runs", async () => {
     const { memoryStore } = await import("./memory-store")
     const { runResolverQueueOnce } = await import("./memory-resolver")
-    ragMock.addMemory.mockResolvedValue("rag_resolved")
+    ragMock.addL2MemoryVector.mockResolvedValue("rag_resolved")
 
     for (const topic of ["跑步", "咖啡"]) {
       const oldMemory = await memoryStore.addL2Memory({

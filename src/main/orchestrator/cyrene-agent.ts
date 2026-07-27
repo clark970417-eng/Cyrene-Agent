@@ -1,442 +1,345 @@
-// CyreneAgent —— 把 Function Calling 循環包進 AG-UI 的 AbstractAgent。
+// CyreneAgent —— 把两阶段 FC 循环包进 AG-UI 的 AbstractAgent。
 //
-// AG-UI 是事件協議：AbstractAgent.run() 返回 Observable<BaseEvent>，
-// 我們在 Observable 內部跑 FC 循環，每一步 observer.next() 一個標準事件：
-//   RUN_STARTED → (每輪 STEP_STARTED → 可能 TOOL_CALL_* → STEP_FINISHED) →
-//   TEXT_MESSAGE_START → TEXT_MESSAGE_CONTENT(逐字) → TEXT_MESSAGE_END → RUN_FINISHED
+// 第一期重构：
+// - 持有 runWithEvents 入口，按 agentRuntime 选择 runLangGraphAgentLoop 或 runTwoPhaseFcLoop。
+// - 工具阶段只携带 tool_system + tools schema；Soul 阶段只携带 soul_systemBase + 工具结果摘要，不携带 tools。
+// - runWithEvents 把 TwoPhaseEvent 包装成 AG-UI BaseEvent 转发给渲染端。
 //
-// 設計要點：
-// - FC 循環仍是 stream:false 一次性拿全文（不碰 LLM 層），拿到全文後切成 delta 逐個發
-//   TEXT_MESSAGE_CONTENT，這就是"流式感"的來源——標準 AG-UI 做法。
-// - run() 不做副作用（不寫記憶、不推斷表情）。那些在橋層 runAgent 完成後做，
-//   保持 agent 純粹只管"產出事件流"。
-// - 錯誤用 observer.error() 拋，橋層捕獲。
+// 设计要点：
+// - FC 循环仍是 stream:false 一次性拿全文（不碰 LLM 层），拿到全文后切成 delta 逐个发
+//   TEXT_MESSAGE_CONTENT，这就是"流式感"的来源——标准 AG-UI 做法。
+// - run() 不做副作用（不写记忆、不推断表情）。那些在桥层 runAgent 完成后做，
+//   保持 agent 纯粹只管"产出事件流"。
+// - 错误用 observer.error() 抛，桥层捕获。
 import { AbstractAgent, type RunAgentInput } from "@ag-ui/client";
 import { EventType, type BaseEvent } from "@ag-ui/core";
 import { Observable } from "rxjs";
 import { toolRegistry, type ToolDefinition } from "./tool-registry";
-import { type ToolCallResult } from "./types";
+import type { ToolCallResult, ToolExecutionOutcome } from "./types";
 import { checkPermission, type ToolRiskLevel } from "../permission";
-import { recordAgentActivity } from "../agent-activity-store";
+import { getAdapterForConfig, type ChatMessage } from "./vendors";
+import { contextRefRegistry, extractLastUserQuery, type ToolContext } from "./tool-context";
 import {
-  getAdapter,
-  type ChatMessage,
-  type ChatRequest,
-  type ToolExecutionResult,
-  type ToolSpec,
-} from "./vendors";
-import { extractLastUserQuery, type ToolContext } from "./tool-context";
-import { recordUsage } from "../token-usage-store";
-import { resetReadRefs } from "../skills/skill-tools";
-import { truncateToolResult, compressConversation } from "./context-manager";
+  runTwoPhaseFcLoop,
+  type TwoPhaseEvent,
+  type TwoPhaseFcResult,
+} from "./two-phase-fc-loop";
+import { runLangGraphAgentLoop } from "./langgraph-agent-loop";
+import { runChatLoop } from "./chat-loop";
+import type { SocialAtom } from "../social-context/types";
+import { ExecutionLedgerStore } from "./execution-ledger";
+import { perf } from "../perf-trace";
+import { debugLog, flowLog } from "../agent-log";
+import type { ApprovedStyleSampling } from "./vendors/style-sampling";
+import { requestUserClarification } from "../user-choice";
+import type { TrustedAskUserProfile } from "../../shared/ask-clarification";
 
-const LOG_PREFIX = "[CyreneAgent]";
-const MAX_TOOL_ROUNDS = 20; // 多步任務（寫 Excel 多 sheet、生成圖片等）可能耗多輪；到頂強制無工具總結兜底
-const PER_ROUND_TIMEOUT_MS = 75000; // 推理模型帶 thinking，30s 偏緊，放寬到 75s
-const FORCE_SUMMARY_TIMEOUT_MS = 90000; // 強制總結兜底：對話歷史此時已很長，30s 不夠，放寬到 90s
-// 連續超時即退出：超時後重試只會讓上下文更長更慢，形成"超時→加消息→更慢→再超時"死循環。
-// 連續 MAX_CONSECUTIVE_TIMEOUTS 次超時直接跳出走強制總結，不再空轉浪費時間。
-const MAX_CONSECUTIVE_TIMEOUTS = 2;
+const executionLedgers = new ExecutionLedgerStore();
 
-/** 廠商配置（結構兼容 main/index.ts 的 ModelSettings，避免循環依賴）。 */
 export interface AgentLoopSettings {
   provider: string;
   baseUrl: string;
   model: string;
   apiKey: string;
+  explicitTransport?: "openai" | "anthropic" | "auto";
+  reasoning?: import("../../shared/reasoning").ReasoningPreference;
 }
 
-/** CyreneAgent.run() 需要的輸入——橋層構造好後塞進 input.state 或 forwardedProps。 */
+export type AgentExecutionMode = "work" | "chat";
+
+/** CyreneAgent.run() 需要的输入——桥层构造好后塞进 input.state 或 forwardedProps。 */
 export interface CyreneRunOptions {
   settings: AgentLoopSettings;
-  /** 已經拼好 system prompt 的完整消息（含 system + user/assistant）。 */
+  /** 原始消息（不含 system）。FC 循环按阶段动态注入。 */
   messages: ChatMessage[];
+  conversationId?: string;
+  /** CITA 保留的用户原始 Query；旧调用方未传时从最后一条 user 消息读取。 */
+  originalQuery?: string;
+  /** CITA 生成的上下文化理解，供 Action Gate 显式使用。 */
+  contextualizedQuery?: string;
+  /** 独立 CITA 证据块；原始 user 消息不会被替换。 */
+  citaContextBlock?: string;
+  /** CITA 本地校验后允许 Action Gate 引用的不透明引用集合。 */
+  trustedRefs?: string[];
+  /** 临时回退开关；默认使用 LangGraph Runtime。 */
+  agentRuntime?: "langgraph" | "legacy";
+  /** Chat 跳过 CITA/Action Gate/Native FC；默认 Work。 */
+  executionMode?: AgentExecutionMode;
   timeoutMs: number;
-  /** 可選：本次 run 的工具集合。未傳時使用當前所有已啟用工具。 */
+  /** 可选：本次 run 的工具集合。未传时使用当前所有已启用工具。 */
   tools?: ToolDefinition[];
+  /** 直发图片被主模型接口拒绝时，懒加载 caption fallback 消息并重试。 */
+  imageCaptionFallback?: () => Promise<ChatMessage[]>;
+  /** 工具阶段使用的 system prompt（仅含工具调度规则 + 自动生成的工具目录）。 */
+  toolSystemContent: string;
+  /** Soul 阶段使用的基础 system prompt（人设 + 环境/记忆/关系/附件）。 */
+  soulSystemBaseContent: string;
+  /** 只应用到 Soul 最终自然语言回复，禁止影响 CITA、Action Gate 与 Native FC。 */
+  soulSampling?: ApprovedStyleSampling;
+  /** 不带时间戳前缀的 messages，给 Action Gate 用。未传时回退到 messages。 */
+  cleanMessages?: ChatMessage[];
+  /** Native FC 专用 system prompt（从 native_fc_system.md 读取）。 */
+  nativeFcSystemContent?: string;
+  /** Action Gate 专用 system prompt（从 action_gate_system.md 读取）。 */
+  actionGateSystemPrompt?: string;
+  /** [RESPONSE_CONTEXT] 文本，从 CITA 结果生成，给 Soul 动态追加。 */
+  responseContext?: string;
+  /** 本地主进程生成的可信默认城市、桌面等运行环境信息。 */
+  runtimeEnvironmentContext?: string;
+  /** Ask Soul 专用轻量提示词。 */
+  askSystemContent?: string;
+  /** Ask Soul 只使用称呼、昵称和性别约束。 */
+  trustedAskUserProfile?: TrustedAskUserProfile;
+  /** 仅 Chat：异步社交原子抽取所需的已校验证据元数据。 */
+  socialContext?: {
+    enabled: true;
+    conversationId: string;
+    userTurnId: string;
+    assistantTurnId: string;
+    retrievedAtoms: SocialAtom[];
+    now: number;
+  };
 }
 
-/** FC 循環最終結果（供橋層做副作用用）。 */
+/** FC 循环最终结果（供桥层做副作用用）。 */
 export interface CyreneRunResult {
   reply: string;
   toolResults: ToolCallResult[];
   totalUsage?: { input: number; output: number };
+  soulPhaseReason?: "no_tool" | "max_rounds" | "timeout" | "tool_error";
+  executionMode?: AgentExecutionMode;
+  socialContext?: CyreneRunOptions["socialContext"];
 }
 
-/** 把 ToolRegistry 裡的工具轉成統一 ToolSpec（與 wire 格式解耦）。 */
-function buildToolSpecs(tools: ToolDefinition[] = toolRegistry.getEnabledTools()): ToolSpec[] {
-  return tools.filter(t => t.enabled).map(t => ({
-    name: t.id,
-    description: t.description,
-    parameters: {
-      type: "object",
-      properties: t.inputSchema.properties,
-      required: t.inputSchema.required,
-    },
-  }));
+const LOG_PREFIX = "[CyreneAgent]";
+
+export function resolveAgentRuntime(runtime: CyreneRunOptions["agentRuntime"]): "langgraph" | "legacy" {
+  return runtime === "legacy" ? "legacy" : "langgraph";
 }
 
-/** 逐字切片：按字符（emoji 安全）切，每片 1 字（渲染端 CSS 漸顯用）。 */
-function sliceToDeltas(text: string, chunkSize = 1): string[] {
-  const chars = Array.from(text);
-  const out: string[] = [];
-  for (let i = 0; i < chars.length; i += chunkSize) {
-    out.push(chars.slice(i, i + chunkSize).join(""));
-  }
-  return out.length > 0 ? out : [text];
+export function resolveExecutionMode(mode: unknown): AgentExecutionMode {
+  // 兼容尚未重启的旧 renderer 与历史内部调用。
+  return mode === "chat" || mode === "soul-only" ? "chat" : "work";
 }
 
 /**
- * 把一份完整文本以 TEXT_MESSAGE 流發出。
- * 返回該文本（供調用方記到 toolResults 等用）。
+ * 把 TwoPhaseEvent 包装成 AG-UI BaseEvent。
  */
-function emitTextMessage(
-  observer: { next: (e: BaseEvent) => void },
-  messageId: string,
-  text: string,
-): void {
-  observer.next({ type: EventType.TEXT_MESSAGE_START, messageId, role: "assistant" });
-  // 逐字切片發 delta（每片 4 字，emoji 安全），渲染端逐字累積實現流式感。
-  // FC 仍是 stream:false 一次性拿全文，這裡切片只是把"整段一次"變成"多段快速"。
-  for (const delta of sliceToDeltas(text)) {
-    observer.next({ type: EventType.TEXT_MESSAGE_CONTENT, messageId, delta });
+function toAguiEvent(event: TwoPhaseEvent): BaseEvent {
+  switch (event.type) {
+    case "step_started":
+      return { type: EventType.STEP_STARTED, stepName: event.stepName };
+    case "step_finished":
+      return { type: EventType.STEP_FINISHED, stepName: event.stepName };
+    case "tool_call_start":
+      return {
+        type: EventType.TOOL_CALL_START,
+        toolCallId: event.toolCallId,
+        toolCallName: event.toolCallName,
+      };
+    case "tool_call_result":
+      return {
+        type: EventType.TOOL_CALL_RESULT,
+        toolCallId: event.toolCallId,
+        messageId: event.messageId,
+        content: event.content,
+      };
+    case "tool_call_end":
+      return { type: EventType.TOOL_CALL_END, toolCallId: event.toolCallId };
+    case "text_message_start":
+      return {
+        type: EventType.TEXT_MESSAGE_START,
+        messageId: event.messageId,
+        role: event.role,
+      };
+    case "text_message_content":
+      return {
+        type: EventType.TEXT_MESSAGE_CONTENT,
+        messageId: event.messageId,
+        delta: event.delta,
+      };
+    case "text_message_end":
+      return { type: EventType.TEXT_MESSAGE_END, messageId: event.messageId };
   }
-  observer.next({ type: EventType.TEXT_MESSAGE_END, messageId });
 }
 
 /**
- * 強制總結也失敗時的降級文案。用已收集的工具結果拼一個"任務中斷"回覆，
- * 避免整個 run 拋 subscriber.error 讓用戶徹底看不到任何回覆。
+ * 执行一个工具调用，封装权限检查 + toolRegistry 调用 + 异常转 output。
+ * 由 runTwoPhaseFcLoop 通过 executeTool 注入回调调用。
  */
-function buildFallbackReply(toolResults: ToolCallResult[], reason: string): string {
-  const lines: string[] = [
-    "抱歉，任務執行到一半被中斷了。",
-    "",
-    "中斷原因：" + reason,
-  ];
-  if (toolResults.length > 0) {
-    lines.push("", "以下是中斷前已經完成的步驟：");
-    for (const r of toolResults) {
-      // 截斷過長的工具輸出，只給模型/用戶一個概覽
-      const preview = r.output.length > 200 ? r.output.slice(0, 200) + "…" : r.output;
-      lines.push("- 「" + r.toolId + "」：" + preview);
-    }
-  } else {
-    lines.push("", "（暫無已完成的步驟信息）");
-  }
-  return lines.join("\n");
-}
-
-/**
- * 執行一輪 Function Calling 循環（廠商無關），每步發 AG-UI 事件。
- * 內聯自 function-calling.ts，保持邏輯一致，只加事件發射。
- */
-async function runFcLoopWithEvents(
-  options: CyreneRunOptions,
-  observer: { next: (e: BaseEvent) => void; error: (e: unknown) => void; complete: () => void },
-): Promise<CyreneRunResult> {
-  const { settings, messages, timeoutMs } = options;
-  const adapter = getAdapter(settings.provider);
-  const runTools = options.tools ?? toolRegistry.getEnabledTools();
-  const tools = buildToolSpecs(runTools);
-  const runnableToolIds = new Set(runTools.filter(t => t.enabled).map(t => t.id));
-  const allToolResults: ToolCallResult[] = [];
-  const startTime = Date.now();
-  let accInput = 0;
-  let accOutput = 0;
-  let consecutiveTimeouts = 0; // 連續超時計數：達到上限直接跳出走強制總結
-
-  console.log(LOG_PREFIX, `provider=${settings.provider} transport=${adapter.transport} model=${settings.model}`);
-  console.log(LOG_PREFIX, "可用工具:", tools.map(t => t.name).join(", ") || "(無)");
-  console.log(LOG_PREFIX, "消息數:", messages.length, "最後一角色:", messages[messages.length - 1]?.role);
-
-  let conversation: ChatMessage[] = messages.map(m => ({ ...m }));
-  console.log(LOG_PREFIX, "CONVERSATION DETAILED SIZES:", conversation.map(m => ({ role: m.role, length: m.content?.length })));
-
-  // 清空本輪 skill reference 已讀記錄，防止跨對話汙染
-  resetReadRefs();
-
-  for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
-    const roundStart = Date.now();
-
-    if (Date.now() - startTime > timeoutMs) {
-      console.warn(LOG_PREFIX, "Function Calling 超時，在第 " + (round + 1) + " 輪退出");
-      break;
-    }
-
-    observer.next({ type: EventType.STEP_STARTED, stepName: `round-${round + 1}` });
-    console.log(LOG_PREFIX, "第 " + (round + 1) + " 輪 LLM 調用...");
-
-    let req: ChatRequest = {
-      model: settings.model,
-      messages: conversation,
-      ...(tools.length > 0 ? { tools } : {}),
-      stream: false,
-    };
-    if (adapter.applyCacheHints) req = adapter.applyCacheHints(req, settings);
-
-    const http = adapter.buildRequest(req, settings);
-    console.log(LOG_PREFIX, "請求:", http.url);
-
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), PER_ROUND_TIMEOUT_MS);
-    let response: Response;
-    try {
-      response = await fetch(http.url, {
-        method: "POST",
-        signal: controller.signal,
-        headers: http.headers,
-        body: http.body,
-      });
-    } catch (err) {
-      if (err instanceof Error && err.name === "AbortError") {
-        consecutiveTimeouts++;
-        console.warn(LOG_PREFIX, "第 " + (round + 1) + " 輪 LLM 請求超時（" + PER_ROUND_TIMEOUT_MS + "ms），連續第 " + consecutiveTimeouts + " 次");
-        clearTimeout(timer);
-        // 連續超時即退出：再重試只會讓上下文更長更慢，註定超時。
-        // 不再往 conversation 塞"超時提示"消息（雪上加霜），直接跳出走強制總結。
-        if (consecutiveTimeouts >= MAX_CONSECUTIVE_TIMEOUTS) {
-          console.warn(LOG_PREFIX, "連續 " + MAX_CONSECUTIVE_TIMEOUTS + " 次超時，跳出 FC 循環走強制總結");
-          observer.next({ type: EventType.STEP_FINISHED, stepName: `round-${round + 1}` });
-          break;
-        }
-        observer.next({ type: EventType.STEP_FINISHED, stepName: `round-${round + 1}` });
-        continue;
-      }
-      throw err;
-    } finally {
-      clearTimeout(timer);
-    }
-
-    if (!response.ok) {
-      const errorText = await response.text().catch(() => "");
-      console.error(LOG_PREFIX, "LLM 請求失敗 HTTP " + response.status + ":", errorText.slice(0, 300));
-      throw new Error("模型請求失敗：HTTP " + response.status + (errorText ? " — " + errorText.slice(0, 200) : ""));
-    }
-
-    const data = await response.json();
-    const chat = adapter.parseResponse(data);
-
-    if (chat.usage) {
-      accInput += chat.usage.input;
-      accOutput += chat.usage.output;
-      recordUsage(chat.usage.input, chat.usage.output, 1, settings.model);
-    }
-
-    console.log(
-      LOG_PREFIX,
-      "第 " + (round + 1) + " 輪完成 finish=" + chat.finishReason +
-      " toolCalls=" + chat.toolCalls.length + " thinking=" + (chat.thinking ? "有" : "無") +
-      " 耗時=" + (Date.now() - roundStart) + "ms",
-    );
-
-    // 請求成功，重置連續超時計數
-    consecutiveTimeouts = 0;
-
-    // 把 assistant 消息加入對話（adapter 已保留 thinking / rawAssistant 供下輪迴傳）
-    conversation.push(chat.assistantMessage);
-
-    // 情況1：模型要調工具
-    if (chat.toolCalls.length > 0) {
-      console.log(
-        LOG_PREFIX,
-        "模型請求調用 " + chat.toolCalls.length + " 個工具:",
-        chat.toolCalls.map(tc => tc.name).join(", "),
-      );
-
-      const execResults: ToolExecutionResult[] = [];
-      for (const tc of chat.toolCalls) {
-        const toolStartedAt = Date.now();
-        const toolCallId = tc.id || `${tc.name}-${Date.now()}`;
-        const displayTool = toolRegistry.getById(tc.name);
-        // 工具調用開始事件（toolCallName 用顯示名，找不到工具則用 id 兜底）
-        observer.next({
-          type: EventType.TOOL_CALL_START,
-          toolCallId,
-          toolCallName: displayTool?.name ?? tc.name,
-        });
-
-        let args: Record<string, unknown> = {};
-        try {
-          args = JSON.parse(tc.arguments || "{}");
-        } catch {
-          console.warn(LOG_PREFIX, "工具參數 JSON 解析失敗:", tc.arguments?.slice(0, 100));
-        }
-
-        console.log(LOG_PREFIX, "執行工具:", tc.name, JSON.stringify(args).slice(0, 200));
-
-        let output: string;
-        const tool = runnableToolIds.has(tc.name) ? toolRegistry.getById(tc.name) : undefined;
-        if (!tool || !tool.enabled) {
-          output = "[錯誤] 工具不可用: " + tc.name;
-          console.warn(LOG_PREFIX, output);
-        } else {
-          const risk: ToolRiskLevel = (tool as ToolDefinition & { risk?: ToolRiskLevel }).risk || "safe";
-          const perm = await checkPermission({
-            toolId: tc.name,
-            toolName: tool.name,
-            toolDescription: tool.description,
-            args,
-            risk,
-          });
-          if (!perm.allowed) {
-            output = "[已拒絕] " + (perm.reason || "權限不足");
-            console.warn(LOG_PREFIX, "權限拒絕 [" + tc.name + "]:", perm.reason);
-          } else {
-            const ctx: ToolContext | undefined = tool.needsContext
-              ? { userQuery: extractLastUserQuery(conversation) }
-              : undefined;
-            try {
-              output = await tool.execute(args, ctx);
-              console.log(LOG_PREFIX, "工具返回 [" + tc.name + "]:", output.slice(0, 200));
-            } catch (err) {
-              const errMsg = err instanceof Error ? err.message : String(err);
-              output = "[工具執行失敗] " + errMsg;
-              console.error(LOG_PREFIX, "工具執行失敗 [" + tc.name + "]:", errMsg);
-            }
-          }
-        }
-
-        recordAgentActivity({
-          kind: output.startsWith("[已拒絕]") ? "permission" : "tool",
-          name: tc.name,
-          status: output.startsWith("[已拒絕]") ? "denied" : output.startsWith("[錯誤]") || output.startsWith("[工具執行失敗]") ? "failed" : "success",
-          durationMs: Date.now() - toolStartedAt,
-          args,
-          result: output,
-          ...(output.startsWith("[錯誤]") || output.startsWith("[工具執行失敗]") ? { error: output } : {}),
-        });
-
-        allToolResults.push({ toolId: tc.name, args, output });
-        // execResults 進 conversation，截斷防單條大結果爆窗
-        execResults.push({ toolCall: tc, output: truncateToolResult(output) });
-
-        // 工具調用結果事件 + 結束事件
-        observer.next({
-          type: EventType.TOOL_CALL_RESULT,
-          toolCallId,
-          messageId: `${toolCallId}-result`,
-          content: output,
-        });
-        observer.next({ type: EventType.TOOL_CALL_END, toolCallId });
-      }
-
-      conversation = adapter.appendToolResults(conversation, execResults);
-
-      // 防線②：窗口級壓縮——conversation 累積超閾值時摘要化舊輪次
-      conversation = compressConversation(conversation);
-
-      observer.next({ type: EventType.STEP_FINISHED, stepName: `round-${round + 1}` });
-      continue;
-    }
-
-    // 情況2：模型正常返回文本 → 發 TEXT_MESSAGE 流
-    const content = chat.text || "";
-    console.log(LOG_PREFIX, "Function Calling 完成，最終回覆長度=" + content.length);
-    const textMessageId = `msg-${Date.now()}`;
-    emitTextMessage(observer, textMessageId, content);
-
-    observer.next({ type: EventType.STEP_FINISHED, stepName: `round-${round + 1}` });
-    const totalUsage = (accInput > 0 || accOutput > 0) ? { input: accInput, output: accOutput } : undefined;
-    return { reply: content, toolResults: allToolResults, totalUsage };
-  }
-
-  // 超過最大輪數，強制要求模型總結（不帶 tools）
-  console.warn(LOG_PREFIX, "達到最大輪數 " + MAX_TOOL_ROUNDS + "，強制要求模型回覆");
-  conversation.push({
-    role: "user",
-    content: "請基於以上所有工具返回的信息，給出最終回覆。不要繼續調用工具。",
+async function executeToolCall(
+  tc: { id: string; name: string; arguments: string },
+  runnableToolIds: Set<string>,
+  ctx?: ToolContext,
+): Promise<ToolExecutionOutcome> {
+  const failed = (errorCode: string, output: string): ToolExecutionOutcome => ({
+    status: "failed",
+    errorCode,
+    output,
   });
-
-  observer.next({ type: EventType.STEP_STARTED, stepName: "force-summary" });
-
-  let finalReq: ChatRequest = {
-    model: settings.model,
-    messages: conversation,
-    stream: false,
-  };
-  if (adapter.applyCacheHints) finalReq = adapter.applyCacheHints(finalReq, settings);
-  const http = adapter.buildRequest(finalReq, settings);
-  console.log(LOG_PREFIX, "請求:", http.url);
-
-  const controller = new AbortController();
-  // 強制總結是最後兜底：對話歷史此時往往已很長，30s 不夠模型生成完會被 abort，
-  // 導致整個 run 拋錯用戶徹底沒回復。放寬到 90s。
-  const timer = setTimeout(() => controller.abort(), FORCE_SUMMARY_TIMEOUT_MS);
+  const displayTool = toolRegistry.getById(tc.name);
+  let args: Record<string, unknown> = {};
   try {
-    const response = await fetch(http.url, {
-      method: "POST",
-      signal: controller.signal,
-      headers: http.headers,
-      body: http.body,
-    });
+    args = JSON.parse(tc.arguments || "{}");
+  } catch {
+    return failed("E_TOOL_ARGS_INVALID", "工具参数解析失败");
+  }
 
-    if (!response.ok) {
-      throw new Error("最終回覆請求失敗：HTTP " + response.status);
-    }
+  if (!runnableToolIds.has(tc.name)) {
+    return failed("E_TOOL_UNAVAILABLE", "工具不可用: " + tc.name);
+  }
+  const tool = displayTool;
+  if (!tool || !tool.enabled) {
+    return failed("E_TOOL_UNAVAILABLE", "工具不可用: " + tc.name);
+  }
 
-    const data = await response.json();
-    const chat = adapter.parseResponse(data);
-    console.log(LOG_PREFIX, "強制回覆完成，長度=" + chat.text.length);
-    if (chat.usage) {
-      accInput += chat.usage.input;
-      accOutput += chat.usage.output;
-      recordUsage(chat.usage.input, chat.usage.output, 1, settings.model);
-    }
+  const risk: ToolRiskLevel = (tool as ToolDefinition & { risk?: ToolRiskLevel }).risk || "safe";
+  const perm = await checkPermission({
+    toolId: tc.name,
+    toolName: tool.name,
+    toolDescription: tool.description,
+    args,
+    risk,
+  });
+  if (!perm.allowed) {
+    return failed("E_PERMISSION_DENIED", perm.reason || "权限不足");
+  }
 
-    const textMessageId = `msg-${Date.now()}`;
-    emitTextMessage(observer, textMessageId, chat.text);
-
-    observer.next({ type: EventType.STEP_FINISHED, stepName: "force-summary" });
-    const totalUsage = (accInput > 0 || accOutput > 0) ? { input: accInput, output: accOutput } : undefined;
-    return { reply: chat.text, toolResults: allToolResults, totalUsage };
+  try {
+    return {
+      status: "succeeded",
+      output: await tool.execute(args, tool.needsContext ? ctx : undefined),
+    };
   } catch (err) {
-    // 兜底再失敗也別讓整個 run 崩掉（subscriber.error 會讓用戶徹底沒回復）。
-    // 用已收集的工具結果拼一個"任務中斷"文案降級返回。
-    const reason = err instanceof Error && err.name === "AbortError"
-      ? "總結請求超時"
-      : (err instanceof Error ? err.message : String(err));
-    console.error(LOG_PREFIX, "強制總結也失敗，降級返回已有結果:", reason);
-    const fallback = buildFallbackReply(allToolResults, reason);
-    const textMessageId = `msg-${Date.now()}`;
-    emitTextMessage(observer, textMessageId, fallback);
-    observer.next({ type: EventType.STEP_FINISHED, stepName: "force-summary" });
-    const totalUsage = (accInput > 0 || accOutput > 0) ? { input: accInput, output: accOutput } : undefined;
-    return { reply: fallback, toolResults: allToolResults, totalUsage };
-  } finally {
-    clearTimeout(timer);
+    const errMsg = err instanceof Error ? err.message : String(err);
+    const explicitCode = typeof err === "object" && err !== null && "code" in err
+      && typeof (err as { code?: unknown }).code === "string"
+      ? String((err as { code: string }).code)
+      : undefined;
+    const messageToken = errMsg.split(" ", 1)[0].split(":", 1)[0];
+    const errorCode = explicitCode ?? (messageToken.startsWith("E_") ? messageToken : "E_TOOL_EXECUTION_FAILED");
+    return failed(errorCode, errMsg);
   }
 }
 
 /**
- * CyreneAgent —— 單次對話一個實例。
+ * CyreneAgent —— 单次对话一个实例。
  *
  * 用法：
  *   const agent = new CyreneAgent({ threadId });
- *   const result = await agent.runAgentWith(options);  // 跑循環 + 事件流
- *
- * 注意：不直接用 runAgent(parameters)，因為我們的輸入（settings/messages）是自定義的，
- * 通過 runOptions 傳入更直接。runAgent 的 Observable 橋接在橋層做。
+ *   const result = await agent.runAgentWith(options);  // 跑循环 + 事件流
  */
 export class CyreneAgent extends AbstractAgent {
-  /** 跑循環結果，run() 完成後可取（供橋層做副作用）。 */
+  /** 跑循环结果，run() 完成后可取（供桥层做副作用）。 */
   lastResult?: CyreneRunResult;
 
   /**
-   * 跑 FC 循環並返回事件流。橋層訂閱這個流轉發給渲染進程。
-   * 傳入的 options 會原樣跑——settings/messages/timeout 都在這裡。
+   * 跑 FC 循环并返回事件流。桥层订阅这个流转发给渲染进程。
+   * 传入的 options 会原样跑——settings/messages/timeout 都在这里。
    */
   runWithEvents(options: CyreneRunOptions): Observable<BaseEvent> {
     const threadId = this.threadId;
     const runId = `run-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const abortController = new AbortController();
 
     return new Observable<BaseEvent>((subscriber) => {
       let cancelled = false;
+
       (async () => {
         try {
           subscriber.next({ type: EventType.RUN_STARTED, threadId, runId });
-          const result = await runFcLoopWithEvents(options, subscriber);
-          this.lastResult = result;
+
+          const adapterTimer = perf.begin("get_adapter");
+          const adapter = getAdapterForConfig(options.settings);
+          adapterTimer.end();
+
+          const onEvent = (event: TwoPhaseEvent) => {
+            if (cancelled) return;
+            subscriber.next(toAguiEvent(event));
+          };
+          const executionMode = resolveExecutionMode(options.executionMode);
+          const runtime = resolveAgentRuntime(options.agentRuntime);
+          debugLog(
+            `${LOG_PREFIX} executionMode=${executionMode} agentRuntime=${runtime} provider=${options.settings.provider} model=${options.settings.model}`,
+          );
+          const enabledToolCount = executionMode === "chat"
+            ? 0
+            : (options.tools ?? toolRegistry.getEnabledTools()).filter((tool) => tool.enabled).length;
+          flowLog("── 新请求 ─────────────────────────");
+          flowLog(`1. 准备上下文：${executionMode === "chat" ? "Chat" : "Work"} 模式，模型 ${options.settings.model}，${enabledToolCount} 个工具可用`);
+          flowLog(`2. 理解用户请求：${executionMode === "chat" ? "Chat 模式无需工具上下文" : `完成，可信引用 ${(options.trustedRefs ?? []).length} 个`}`);
+
+          let result: TwoPhaseFcResult;
+          if (executionMode === "chat") {
+            flowLog("3. Chat 模式：生成回复");
+            result = await perf.track("chat_loop", () => runChatLoop({
+              settings: options.settings,
+              adapter,
+              messages: options.messages,
+              soulSystemBaseContent: options.soulSystemBaseContent,
+              soulSampling: options.soulSampling,
+              timeoutMs: options.timeoutMs,
+              imageCaptionFallback: options.imageCaptionFallback,
+              onEvent,
+              signal: abortController.signal,
+            }));
+          } else {
+            const executeTool = (tc: Parameters<typeof executeToolCall>[0], runnableToolIds: Set<string>) => executeToolCall(tc, runnableToolIds, {
+              userQuery: extractLastUserQuery(options.messages),
+              conversationId: options.conversationId ?? "default",
+              runId,
+              contextRefs: contextRefRegistry,
+            });
+            const commonOptions = {
+              settings: options.settings,
+              adapter,
+              messages: options.messages,
+              tools: options.tools ?? toolRegistry.getEnabledTools(),
+              toolSystemContent: options.toolSystemContent,
+              soulSystemBaseContent: options.soulSystemBaseContent,
+              soulSampling: options.soulSampling,
+              cleanMessages: options.cleanMessages,
+              nativeFcSystemContent: options.nativeFcSystemContent,
+              actionGateSystemPrompt: options.actionGateSystemPrompt,
+              responseContext: options.responseContext,
+              runtimeEnvironmentContext: options.runtimeEnvironmentContext,
+              askSystemContent: options.askSystemContent,
+              trustedAskUserProfile: options.trustedAskUserProfile,
+              conversationId: options.conversationId ?? "default",
+              requestUserClarification,
+              timeoutMs: options.timeoutMs,
+              executeTool,
+              onEvent,
+              signal: abortController.signal,
+            };
+            const conversationId = options.conversationId ?? "default";
+            const executionLedger = executionLedgers.forScope(`${conversationId}:messages-${options.messages.length}`);
+            result = runtime === "langgraph"
+              ? await perf.track("langgraph_agent_loop", () => runLangGraphAgentLoop({
+                ...commonOptions,
+                originalQuery: options.originalQuery ?? extractLastUserQuery(options.messages),
+                contextualizedQuery: options.contextualizedQuery ?? options.originalQuery ?? extractLastUserQuery(options.messages),
+                citaContextBlock: options.citaContextBlock ?? "",
+                trustedRefs: options.trustedRefs ?? [],
+                imageCaptionFallback: options.imageCaptionFallback,
+                executionLedger,
+              }))
+              : await perf.track("legacy_agent_loop", () => runTwoPhaseFcLoop({
+                ...commonOptions,
+                imageCaptionFallback: options.imageCaptionFallback,
+              }));
+          }
+
+          this.lastResult = {
+            reply: result.reply,
+            toolResults: result.toolResults,
+            totalUsage: result.totalUsage,
+            soulPhaseReason: result.soulPhaseReason,
+            executionMode,
+            socialContext: options.socialContext,
+          };
+          flowLog("── 本轮完成 ────────────────────────");
+
           if (cancelled) return;
           subscriber.next({
             type: EventType.RUN_FINISHED,
@@ -451,7 +354,10 @@ export class CyreneAgent extends AbstractAgent {
         }
       })();
 
-      return () => { cancelled = true; };
+      return () => {
+        cancelled = true;
+        abortController.abort();
+      };
     });
   }
 

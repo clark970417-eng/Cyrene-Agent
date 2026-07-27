@@ -1,32 +1,41 @@
-// 工具註冊表 — 統一管理所有可被 LLM Router 調度的工具
-// Worldbook 不在此註冊，它走獨立常駐檢索路徑
+// 工具注册表 — 统一管理所有可被 LLM Router 调度的工具
+// Worldbook 不在此注册，它走独立常驻检索路径
 
 import { searchMemory } from "../rag/index";
 import type { ToolRiskLevel } from "../permission";
 import type { ToolContext } from "./tool-context";
 
-/** JSON Schema 片段：參數可以是簡單類型，也可以是 array/object（含 items/properties）。 */
+/** JSON Schema 片段：参数可以是简单类型，也可以是 array/object（含 items/properties）。 */
 export type JsonSchemaProp =
   | { type: string; description?: string; enum?: string[] }
   | { type: "array"; description?: string; items: JsonSchemaProp }
   | { type: "object"; description?: string; properties: Record<string, JsonSchemaProp>; required?: string[] };
 
 export interface ToolDefinition {
-  id: string;           // 工具唯一標識，如 "imported_docs"
-  name: string;         // 展示名，如 "導入文檔"
-  description: string;  // 一句話描述，供 LLM Router 的 Prompt 使用
-  enabled: boolean;     // 用戶是否啟用（對應設置面板的開關）
-  // 危險等級：決定該工具在哪些權限檔位下可調用；不填默認 "safe"
+  id: string;           // 工具唯一标识，如 "imported_docs"
+  name: string;         // 展示名，如 "导入文档"
+  description: string;  // 一句话描述，供 LLM Router 的 Prompt 使用
+  /** 工具目录里展示的一句话用途（可选）。未填时回落 description 第一行。
+   *  只用于运行时生成的工具目录，完整参数仍走 tools Schema。 */
+  catalogHint?: string;
+  /** 可选分类标签，第一期暂不强制使用。 */
+  category?: string;
+  /** Action Gate 使用的稳定能力标识；未填时回落到工具 id。 */
+  capability?: string;
+  /** Runtime 校验受控参数来源；这些值不能由模型自由编造。 */
+  controlledInput?: Record<string, "context_ref" | "context_ref_array" | "tool_result">;
+  enabled: boolean;     // 用户是否启用（对应设置面板的开关）
+  // 危险等级：决定该工具在哪些权限档位下可调用；不填默认 "safe"
   risk?: ToolRiskLevel;
-  // MCP 兼容字段：參數 schema，後續接 MCP 時直接複用
+  // MCP 兼容字段：参数 schema，后续接 MCP 时直接复用
   inputSchema: {
     type: "object";
     properties: Record<string, JsonSchemaProp>;
     required?: string[];
   };
-  /** 工具若聲明 needsContext，調度層執行時會傳入 ToolContext。默認不聲明=不傳。 */
+  /** 工具若声明 needsContext，调度层执行时会传入 ToolContext。默认不声明=不传。 */
   needsContext?: boolean;
-  // 執行器：內置工具指向本地函數，外部 MCP 工具指向 transport 調用
+  // 执行器：内置工具指向本地函数，外部 MCP 工具指向 transport 调用
   execute: (args: Record<string, unknown>, ctx?: ToolContext) => Promise<string>;
 }
 

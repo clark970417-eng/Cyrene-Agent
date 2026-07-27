@@ -16,10 +16,15 @@ export interface MemoryEntry {
 
 export interface SearchResult {
   entry: MemoryEntry;
-  score: number;        // 加權後的綜合分數（餘弦 × weight × 衰減）
+  score: number;        // 加权后的综合分数（余弦 × weight × 衰减）
 }
 
-// ── 餘弦相似度（嵌入已歸一化，等價於點積） ──
+export interface VectorSearchOptions {
+  importIds?: string[];
+  allowedEntryIds?: string[];
+}
+
+// ── 余弦相似度（嵌入已归一化，等价于点积） ──
 export function cosineSimilarity(a: number[], b: number[]): number {
   let dot = 0;
   for (let i = 0; i < a.length; i++) {
@@ -62,7 +67,12 @@ function kmeansPlusPlusInit(
       return minDist * minDist;
     });
     const totalDist = dists.reduce((a, b) => a + b, 0);
-    if (totalDist <= 0) break;
+    if (totalDist <= 0) {
+      while (centroids.length < K) {
+        centroids.push(vectors[centroids.length % vectors.length].slice());
+      }
+      break;
+    }
     let r = Math.random() * totalDist;
     for (let i = 0; i < dists.length; i++) {
       r -= dists[i];
@@ -253,20 +263,44 @@ export class JsonVectorStore {
     return entry;
   }
 
-  // 批量添加（用於導入文檔 chunk）
+  async addUnique(
+    text: string,
+    source: string,
+    provider: EmbeddingProvider,
+    metadata?: Record<string, unknown>,
+  ): Promise<MemoryEntry> {
+    const embedding = await provider.embed(text);
+    return this.addPreparedBatch([{ text, source, embedding, metadata }])[0];
+  }
+
+  // 批量添加（用于导入文档 chunk）
   async addBatch(
     items: Array<{ text: string; source: string; metadata?: Record<string, unknown> }>,
-    provider: EmbeddingProvider
+    provider: EmbeddingProvider,
+    options?: { isCancelled?: () => boolean },
   ): Promise<MemoryEntry[]> {
-    const texts = items.map((i) => i.text);
-    const embeddings = await provider.embedBatch(texts);
+    const results: MemoryEntry[] = [];
+    const batchSize = 16;
+    for (let start = 0; start < items.length; start += batchSize) {
+      if (options?.isCancelled?.()) throw new Error("cancelled");
+      const batch = items.slice(start, start + batchSize);
+      const embeddings = await provider.embedBatch(batch.map((item) => item.text));
+      if (options?.isCancelled?.()) throw new Error("cancelled");
+      results.push(...this.addPreparedBatch(batch.map((item, index) => ({ ...item, embedding: embeddings[index] }))));
+    }
+    return results;
+  }
+
+  addPreparedBatch(
+    items: Array<{ text: string; source: string; embedding: number[]; metadata?: Record<string, unknown> }>,
+  ): MemoryEntry[] {
     const results: MemoryEntry[] = [];
 
     for (let i = 0; i < items.length; i++) {
       const entry: MemoryEntry = {
         id: `${items[i].source}_${Date.now()}_${i}_${Math.random().toString(36).slice(2, 6)}`,
         text: items[i].text,
-        embedding: embeddings[i],
+        embedding: items[i].embedding,
         source: items[i].source,
         weight: 1.0,
         createdAt: Date.now(),
@@ -300,7 +334,8 @@ export class JsonVectorStore {
     source?: string,
     provider?: EmbeddingProvider,
     topK = 5,
-    minScore = 0.3
+    minScore = 0.3,
+    options: VectorSearchOptions = {},
   ): Promise<SearchResult[]> {
     if (this.entries.length === 0) return [];
 
@@ -309,19 +344,24 @@ export class JsonVectorStore {
 
     const queryEmbedding = await embeddingProvider.embed(query);
 
-    // 確保索引已構建
+    // 确保索引已构建
     this.ensureIndex();
 
     const now = Date.now();
     const results: SearchResult[] = [];
+    const allowedImportIds = new Set(options.importIds ?? []);
+    const allowedEntryIds = options.allowedEntryIds ? new Set(options.allowedEntryIds) : null;
+    const shouldKeep = (entry: MemoryEntry) =>
+      (!allowedImportIds.size || allowedImportIds.has(String(entry.metadata?.importId ?? ""))) &&
+      (!allowedEntryIds || allowedEntryIds.has(entry.id));
 
     if (this.ivf && !source) {
-      // ── IVF 加速路徑（無 source 過濾時） ──
+      // ── IVF 加速路径（无 source 过滤时） ──
       const K = this.ivf.centroids.length;
-      // nprobe：搜索約 1/8 的簇（至少 2 個）
+      // nprobe：搜索约 1/8 的簇（至少 2 个）
       const nprobe = Math.max(2, Math.round(K / 8));
 
-      // 找最近的 nprobe 個簇
+      // 找最近的 nprobe 个簇
       const clusterDists: Array<{ idx: number; dist: number }> = [];
       for (let c = 0; c < K; c++) {
         const sim = cosineSimilarity(queryEmbedding, this.ivf.centroids[c]);
@@ -334,6 +374,7 @@ export class JsonVectorStore {
       for (const clusterIdx of probeClusters) {
         for (const entryIdx of this.ivf.clusters[clusterIdx]) {
           const entry = this.entries[entryIdx];
+          if (!shouldKeep(entry)) continue;
           const sim = cosineSimilarity(queryEmbedding, entry.embedding);
           const hoursSinceRecall = (now - entry.lastRecalledAt) / (1000 * 60 * 60);
           const decayFactor = Math.pow(0.95, hoursSinceRecall / 24);
@@ -345,12 +386,13 @@ export class JsonVectorStore {
         }
       }
     } else {
-      // ── 全量搜索路徑（有 source 過濾時，或索引未就緒） ──
+      // ── 全量搜索路径（有 source 过滤时，或索引未就绪） ──
       for (const entry of this.entries) {
         if (source && entry.source !== source) continue;
+        if (!shouldKeep(entry)) continue;
 
         const sim = cosineSimilarity(queryEmbedding, entry.embedding);
-        // 時間衰減：24h 未提及權重 ×0.95
+        // 时间衰减：24h 未提及权重 ×0.95
         const hoursSinceRecall = (now - entry.lastRecalledAt) / (1000 * 60 * 60);
         const decayFactor = Math.pow(0.95, hoursSinceRecall / 24);
         const weightedScore = sim * entry.weight * decayFactor;
@@ -388,16 +430,30 @@ export class JsonVectorStore {
     return before - this.entries.length;
   }
 
-  // 刪除導入文檔
+  deleteEntriesByIds(ids: string[], source?: string): number {
+    const idSet = new Set(ids);
+    if (idSet.size === 0) return 0;
+    const before = this.entries.length;
+    this.entries = this.entries.filter((entry) => !idSet.has(entry.id) || (source !== undefined && entry.source !== source));
+    const deleted = before - this.entries.length;
+    if (deleted > 0) {
+      this.dirty = true;
+      this.markIndexDirty();
+      this.save();
+    }
+    return deleted;
+  }
+
+  // 删除导入文档
   deleteImportedDoc(importId: string, fileName?: string): number {
     const before = this.entries.length;
     this.entries = this.entries.filter((e) => {
       if (e.source !== "imported_doc") return true;
-      // 新數據：按 importId 精確匹配
+      // 新数据：按 importId 精确匹配
       if (e.metadata?.importId) {
         return e.metadata.importId !== importId;
       }
-      // 舊數據：按 fileName 匹配
+      // 旧数据：按 fileName 匹配
       if (fileName && e.metadata?.fileName === fileName) {
         return false;
       }
@@ -412,7 +468,13 @@ export class JsonVectorStore {
     return deleted;
   }
 
-  // 統計
+  hasImportedDocumentChunks(importId: string): boolean {
+    return this.entries.some(
+      (entry) => entry.source === "imported_doc" && String(entry.metadata?.importId ?? "") === importId,
+    );
+  }
+
+  // 统计
   get stats() {
     const sources: Record<string, number> = {};
     for (const e of this.entries) {

@@ -4,6 +4,8 @@
 dist/main/
 dist/preload/
 dist/renderer/assets
+dist/renderer/feeling/
+dist/renderer/status/
 dist/renderer/call/index.html
 dist/renderer/chat/index.html
 dist/renderer/settings/index.html
@@ -13,8 +15,13 @@ dist/renderer/tasks/index.html
 dist/renderer/index.html
 dist/renderer/live2dcubismcore.min.js
 dist/sim/
+dist/skills/
+release/
 *.js.map
 *.tsbuildinfo
+
+# Native screenshot helper is built locally and staged for electron-builder.
+resources/bin/*.exe
 
 # NOTE: dist/renderer/audio, dist/renderer/avatars, dist/renderer/models,
 # dist/renderer/stickers are intentionally NOT ignored (product assets).
@@ -27,8 +34,13 @@ coverage/
 verify-*.js
 verify-*.png
 verify-*.html
-.cyrene-cache/
-.playwright-mcp/
+test-output/
+scripts/test-action-gate-anthropic.mjs
+scripts/test-action-gate-contract.mjs
+scripts/test-cita-fc-compare.mjs
+scripts/test-cita-minimax.mjs
+.zcode/
+.worktrees/
 
 # Debug previews / scratch files generated during UI work
 cyrene-*-preview.html
@@ -67,10 +79,34 @@ Thumbs.db
 # Video/preview render projects (not source code)
 videos/
 
+# Local AI model files (用户下载到 models/，二进制不跟踪 — 见 docs/local-models.md)
+# 模型目录约定：
+#   - models/Xenova/<repo>/         Embedding 模型（bge-m3 等）
+#   - models/<reranker>/            Reranker 模型（bge-reranker-base / ms-marco-MiniLM-L-6-v2）
+# 规则说明：
+#   - models/Xenova/ 完整目录忽略（用户下载的完整 embedding 模型，含 tokenizer + config + onnx）
+#   - 已跟踪的 reranker JSON 元数据保持跟踪（config/tokenizer 等小文件）
+#   - 所有 .onnx / onnx_data / .bin / .safetensors 大模型权重永远忽略
+models/Xenova/
+**/onnx/
+**/*.onnx
+**/*.onnx_data
+**/*.bin
+**/*.safetensors
+
+# Local opener voice pack files. Keep the directory and installation note tracked.
+opener-pack/*
+!opener-pack/.gitkeep
+!opener-pack/README.md
+
+# Playwright MCP 运行时产物
+.playwright-mcp/
+
 # Private design docs — not published
 docs/
 !docs/
 !docs/local-models.md
+!docs/opener-pack.md
 !docs/electron-33-to-43-upgrade-assessment.md
 PRODUCT.md
 sticker-descriptions/
