@@ -16,6 +16,10 @@
   box-sizing: border-box;
 }
 
+[hidden] {
+  display: none !important;
+}
+
 html, body {
   width: 100%;
   height: 100%;
@@ -377,13 +381,33 @@ html, body {
   padding: 12px;
 }
 
-.profile-card__avatar {
+.profile-card__live-status {
   width: 42px;
   height: 42px;
   border-radius: 50%;
   border: 2.5px solid rgba(168, 85, 247, 0.4);
-  background: #1a0f26;
+  background: radial-gradient(circle at 35% 30%, rgba(192, 132, 252, 0.32), rgba(26, 15, 38, 0.96));
   box-shadow: 0 0 10px rgba(168, 85, 247, 0.2);
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  font-size: 18px;
+  transition: border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
+}
+
+.profile-card__live-status[data-active="true"] {
+  border-color: rgba(103, 232, 249, 0.72);
+  background: radial-gradient(circle at 35% 30%, rgba(103, 232, 249, 0.35), rgba(17, 24, 39, 0.96));
+  box-shadow: 0 0 14px rgba(103, 232, 249, 0.3);
+  animation: profile-status-pulse 1.8s ease-in-out infinite;
+}
+
+@keyframes profile-status-pulse {
+  50% { box-shadow: 0 0 22px rgba(103, 232, 249, 0.48); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .profile-card__live-status[data-active="true"] { animation: none; }
 }
 
 .profile-card__text {
@@ -424,6 +448,10 @@ html, body {
 }
 
 .card-header__link {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  font: inherit;
   font-size: 11px;
   font-weight: 500;
   color: var(--text-muted);
@@ -433,6 +461,11 @@ html, body {
 
 .card-header__link:hover {
   color: var(--accent-hover);
+}
+
+.card-header__link:focus-visible {
+  outline: 2px solid var(--accent-hover);
+  outline-offset: 3px;
 }
 
 /* 接下來（日程）卡片 */

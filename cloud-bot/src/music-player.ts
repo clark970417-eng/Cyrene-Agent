@@ -4,6 +4,7 @@ import { access, chmod, mkdir, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { gunzipSync } from "node:zlib";
 import {
+  type AudioResource,
   AudioPlayerStatus,
   NoSubscriberBehavior,
   StreamType,
@@ -40,8 +41,13 @@ type RunningTrack = {
 
 export type CloudMusicSnapshot = {
   current: CloudFavorite | null;
+  upcoming: CloudFavorite[];
+  history: CloudFavorite[];
   queueLength: number;
+  voiceActive: boolean;
   status: "playing" | "paused" | "idle";
+  volumePercent: number;
+  elapsedMs?: number;
 };
 
 export class CloudMusicPlayer {
@@ -49,6 +55,9 @@ export class CloudMusicPlayer {
   private connection: VoiceConnection | null = null;
   private queue: CloudFavorite[] = [];
   private running: RunningTrack | null = null;
+  private resource: AudioResource | null = null;
+  private history: CloudFavorite[] = [];
+  private volumePercent = 100;
   private advancing = false;
   private toolsPromise: Promise<{ ytDlp: string; ffmpeg: string }> | null = null;
 
@@ -100,12 +109,18 @@ export class CloudMusicPlayer {
     const state = this.player.state.status;
     return {
       current: this.running?.favorite ?? null,
+      upcoming: [...this.queue],
+      history: [...this.history].reverse(),
       queueLength: this.queue.length,
+      // 暫停播放時仍然留在 Discord 語音頻道，也屬於陪伴通話。
+      voiceActive: this.connection !== null,
       status: state === AudioPlayerStatus.Paused || state === AudioPlayerStatus.AutoPaused
         ? "paused"
         : state === AudioPlayerStatus.Playing || state === AudioPlayerStatus.Buffering
           ? "playing"
           : "idle",
+      volumePercent: this.volumePercent,
+      elapsedMs: this.resource?.playbackDuration ?? 0,
     };
   }
 
@@ -129,10 +144,36 @@ export class CloudMusicPlayer {
     return true;
   }
 
+  setVolume(percent: number): number {
+    this.volumePercent = Math.max(0, Math.min(150, Math.round(percent)));
+    this.resource?.volume?.setVolume(this.volumePercent / 100);
+    return this.volumePercent;
+  }
+
+  clearQueue(): number {
+    const removed = this.queue.length;
+    this.queue = [];
+    return removed;
+  }
+
+  remove(position: number): CloudFavorite | null {
+    const index = Math.max(0, Math.floor(position) - 1);
+    if (index >= this.queue.length) return null;
+    return this.queue.splice(index, 1)[0] ?? null;
+  }
+
+  previous(): boolean {
+    const previous = this.history.at(-2);
+    if (!previous || !this.connection || !this.running) return false;
+    this.queue.unshift(previous);
+    return this.skip();
+  }
+
   stop(): void {
     this.queue = [];
     this.stopProcesses();
     this.player.stop(true);
+    this.resource = null;
     try { this.connection?.destroy(); } catch { /* 已經斷線 */ }
     this.connection = null;
   }
@@ -186,7 +227,9 @@ export class CloudMusicPlayer {
       ffmpeg.once("error", (error) => console.error("[CloudMusic] 無法啟動 ffmpeg", error));
 
       const resource = createAudioResource(ffmpeg.stdout, { inputType: StreamType.Raw, inlineVolume: true });
-      resource.volume?.setVolume(1);
+      resource.volume?.setVolume(this.volumePercent / 100);
+      this.resource = resource;
+      this.history = [...this.history.filter((entry) => entry.url !== favorite.url), favorite].slice(-50);
       this.player.play(resource);
       console.log(`[CloudMusic] 開始播放：${favorite.title}`);
     } finally {
@@ -206,12 +249,21 @@ export class CloudMusicPlayer {
   private async resolveTrack(url: URL): Promise<CloudFavorite> {
     const tools = await this.ensureTools();
     const metadata = await readTrackMetadata(tools.ytDlp, url.toString());
+    const firstEntry = Array.isArray(metadata.entries) && metadata.entries[0] && typeof metadata.entries[0] === "object"
+      ? metadata.entries[0] as Record<string, unknown>
+      : metadata;
+    const resolvedTitle = typeof firstEntry.title === "string" && firstEntry.title.trim()
+      ? firstEntry.title.trim()
+      : typeof firstEntry.fulltitle === "string" && firstEntry.fulltitle.trim()
+        ? firstEntry.fulltitle.trim()
+        : url.hostname;
+    console.log(`[CloudMusic] 媒體資訊：${resolvedTitle}`);
     return {
       id: `direct-${Date.now()}`,
-      title: typeof metadata.title === "string" && metadata.title.trim() ? metadata.title.trim() : url.hostname,
-      url: typeof metadata.webpage_url === "string" && metadata.webpage_url ? metadata.webpage_url : url.toString(),
-      thumbnail: typeof metadata.thumbnail === "string" ? metadata.thumbnail : undefined,
-      duration: typeof metadata.duration === "number" && Number.isFinite(metadata.duration) ? metadata.duration : undefined,
+      title: resolvedTitle,
+      url: typeof firstEntry.webpage_url === "string" && firstEntry.webpage_url ? firstEntry.webpage_url : url.toString(),
+      thumbnail: typeof firstEntry.thumbnail === "string" ? firstEntry.thumbnail : undefined,
+      duration: typeof firstEntry.duration === "number" && Number.isFinite(firstEntry.duration) ? firstEntry.duration : undefined,
       savedAt: new Date().toISOString(),
     };
   }
@@ -228,6 +280,10 @@ export class CloudMusicPlayer {
       });
     }
     return await this.toolsPromise;
+  }
+
+  isVoiceConnected(): boolean {
+    return this.connection !== null;
   }
 }
 

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
-import { DiscordVoiceCall, discordMusicVolumeGain, formatDiscordMusicActivity, parseDiscordVoiceCommand, stereo48kToMono16k } from "./voice-call";
+import { DiscordVoiceCall, discordMusicVolumeGain, formatDiscordMusicActivity, formatDiscordMusicActivityDescription, parseDiscordVoiceCommand, stereo48kToMono16k } from "./voice-call";
 import * as musicSource from "./music-source";
 
 describe("Discord voice commands", () => {
@@ -39,12 +39,16 @@ describe("Discord PCM conversion", () => {
 describe("Discord music presence", () => {
   it("uses the song portion of a Bilibili multi-part title", () => {
     expect(formatDiscordMusicActivity("【音乐集】超时空辉夜姬 p01 【剧中歌】星降る海（繁星坠海）"))
-      .toBe("🎧 星降る海（繁星墜海）｜劇中歌");
+      .toBe("星降る海（繁星墜海）");
+    expect(formatDiscordMusicActivityDescription("【音乐集】超时空辉夜姬 p01 【剧中歌】星降る海（繁星坠海）"))
+      .toBe("劇中歌");
   });
 
   it("adds the song role and work name without repeating playlist metadata", () => {
     expect(formatDiscordMusicActivity("【第一季 OP】勇者", "葬送的芙莉莲 音乐集"))
-      .toBe("🎧 勇者｜第一季 OP｜葬送的芙莉蓮");
+      .toBe("勇者");
+    expect(formatDiscordMusicActivityDescription("【第一季 OP】勇者", "葬送的芙莉莲 音乐集", 2, 12))
+      .toBe("第一季 OP・葬送的芙莉蓮 · 第 2/12 首");
   });
 
   it("limits Discord activity names to 128 code points", () => {
@@ -165,6 +169,7 @@ describe("Discord desktop music state", () => {
 
     expect(voice.getMusicState()).toEqual({
       active: true,
+      resumable: false,
       paused: true,
       current: { id: "one", title: "Song one", url: "https://example.com/1", index: 1, total: 2, duration: 120 },
       queue: [{ id: "two", title: "Song two", url: "https://example.com/2", index: 2, total: 2, duration: 90 }],
@@ -174,5 +179,30 @@ describe("Discord desktop music state", () => {
       autoplay: false,
       elapsed: 12,
     });
+  });
+
+  it("keeps the current song, progress and queue resumable after leaving", async () => {
+    const voice = new DiscordVoiceCall({ user: { setPresence: () => undefined } } as never, () => ({ enabled: true } as never), async () => null);
+    const internal = voice as unknown as Record<string, any>;
+    internal.mode = "music";
+    internal.connection = { destroy: () => undefined };
+    internal.player = { state: { status: "playing" }, stop: () => true };
+    internal.currentMusicTrack = { title: "Current", url: "https://example.com/1", index: 44, total: 100, duration: 225, queueOrder: 44 };
+    internal.musicQueue = [{ title: "Next", url: "https://example.com/2", index: 45, total: 100, queueOrder: 45 }];
+    internal.musicOwnerId = "owner";
+    internal.musicResource = { playbackDuration: 210_000 };
+
+    await voice.leave();
+
+    expect(voice.getMusicState()).toMatchObject({
+      active: false,
+      resumable: true,
+      paused: true,
+      current: { title: "Current", index: 44 },
+      queue: [{ title: "Next", index: 45 }],
+      elapsed: 210,
+    });
+    expect(voice.canControlMusic("owner")).toBe(true);
+    expect(voice.canControlMusic("someone-else")).toBe(false);
   });
 });

@@ -4,8 +4,8 @@
 
 ## 第一階段包含
 
-- Discord 私訊、`@Bot` 群組訊息
-- `/chat`、`/status`、`/forget`
+- Discord 私訊、`@Bot` 群組訊息；附圖時自動辨識，不需要額外指令
+- `/chat`（可附圖）、`/status`、`/forget`
 - OpenAI 相容聊天 API
 - `/data` 持久化短期對話
 - `/health` 健康檢查
@@ -29,6 +29,8 @@ npm test
 必要秘密：
 
 - `DISCORD_BOT_TOKEN`
-- `LLM_API_KEY`
+- `OPENROUTER_API_KEY`（也相容既有的 `LLM_API_KEY`）
 
 建議另外設定 `DISCORD_ALLOWED_USER_IDS`，只允許自己的 Discord User ID。
+
+使用 OpenRouter 時可設定 `OPENROUTER_API_KEY`、`LLM_BASE_URL=https://openrouter.ai/api/v1`、`LLM_MODEL=openrouter/free`。`LLM_VISION_MODEL` 預設沿用聊天模型；維持 `openrouter/free` 會自動路由至能看圖的免費模型，也能填入 OpenRouter 上的 Gemini 模型名稱，讓附圖訊息固定交給 Gemini。

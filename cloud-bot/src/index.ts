@@ -1,18 +1,12 @@
 import {
-  ActionRowBuilder,
   ActivityType,
-  ButtonBuilder,
-  ButtonStyle,
   Client,
-  EmbedBuilder,
   GatewayIntentBits,
   Partials,
   REST,
   Routes,
   SlashCommandBuilder,
   type ChatInputCommandInteraction,
-  type ButtonInteraction,
-  type InteractionEditReplyOptions,
   type Message,
 } from "discord.js";
 import { loadConfig } from "./config.js";
@@ -21,19 +15,24 @@ import { startHealthServer } from "./health.js";
 import { generateReply } from "./llm.js";
 import { MemoryStore } from "./memory.js";
 import { loadSystemPrompt } from "./prompt.js";
-import { FavoriteStore } from "./favorites.js";
 import { EventClaimStore } from "./event-claims.js";
-import { CloudMusicPlayer } from "./music-player.js";
+import { FavoriteStore } from "./favorites.js";
+import { CloudMusicPlayer, extractPlayableUrl } from "./music-player.js";
+import { MusicUsageStore } from "./music-usage.js";
 
 const config = loadConfig();
 const memory = new MemoryStore(config.dataDir, config.historyMessages);
-const favorites = new FavoriteStore(`${config.dataDir}/music-favorites.json`);
 const eventClaims = new EventClaimStore(config.dataDir);
+const favorites = new FavoriteStore(`${config.dataDir}/music-favorites.json`);
 const music = new CloudMusicPlayer(config.dataDir);
+const musicUsage = new MusicUsageStore(`${config.dataDir}/cloud-music-usage.json`, config.musicMonthlyMinutes);
 eventClaims.prune();
 const systemPrompt = await loadSystemPrompt(config);
 const startedAt = Date.now();
 const queues = new Map<string, Promise<void>>();
+const MAX_IMAGES_PER_MESSAGE = 4;
+const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+const SUPPORTED_IMAGE_MIMES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
 
 const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildVoiceStates, GatewayIntentBits.GuildMessages, GatewayIntentBits.DirectMessages, GatewayIntentBits.MessageContent],
@@ -48,22 +47,44 @@ function enqueue(sessionId: string, task: () => Promise<void>): void {
   queues.set(sessionId, current);
 }
 
-function formatFavorites(): string {
-  const entries = favorites.list(25);
-  return entries.length
-    ? `**雲端收藏 · ${entries.length} 筆**\n${entries.map((entry, index) => `${String(index + 1).padStart(2, "0")}　[${escapeMarkdown(entry.title)}](${entry.url})`).join("\n")}`
-    : "雲端收藏目前是空的。使用 `/like 網址` 儲存單曲或播放清單。";
-}
-
 async function replyToMessage(message: Message, text: string): Promise<void> {
   for (const chunk of splitDiscordText(text)) await message.reply({ content: chunk, allowedMentions: { repliedUser: false } });
 }
 
-async function runConversation(sessionId: string, input: string): Promise<string> {
+type DiscordImageInput = { url: string; mime?: string; name?: string };
+
+function isSupportedImage(name: string, contentType: string | null): boolean {
+  if (contentType && SUPPORTED_IMAGE_MIMES.has(contentType.toLowerCase())) return true;
+  return /\.(?:png|jpe?g|webp|gif)$/i.test(name);
+}
+
+function imageInputsFromMessage(message: Message): DiscordImageInput[] {
+  return [...message.attachments.values()]
+    .filter((attachment) => attachment.size <= MAX_IMAGE_BYTES && isSupportedImage(attachment.name, attachment.contentType))
+    .slice(0, MAX_IMAGES_PER_MESSAGE)
+    .map((attachment) => ({ url: attachment.url, mime: attachment.contentType ?? undefined, name: attachment.name }));
+}
+
+async function runConversation(sessionId: string, input: string, images: DiscordImageInput[] = []): Promise<string> {
   await memory.append(sessionId, "user", input);
-  const reply = await generateReply(config, systemPrompt, memory.get(sessionId));
+  const reply = await generateReply(config, systemPrompt, memory.get(sessionId), images);
   await memory.append(sessionId, "assistant", reply);
   return reply;
+}
+
+function isBlockedMusicAiRequest(input: string): boolean {
+  return /(?:搜尋|找|推薦|分析|辨識).{0,12}(?:歌|音樂|歌曲|歌手)|(?:歌|音樂|歌曲|歌手).{0,12}(?:搜尋|推薦|分析)/iu.test(input);
+}
+
+function musicLimitMessage(): string {
+  return `本月雲端音樂已使用 ${musicUsage.used()}/${config.musicMonthlyMinutes} 分鐘；達到限制後會停止播放，以預留 Google Cloud 免費流量。`;
+}
+
+async function voiceChannelFor(interaction: ChatInputCommandInteraction) {
+  const member = interaction.guild
+    ? await interaction.guild.members.fetch(interaction.user.id).catch(() => null)
+    : null;
+  return member?.voice.channel ?? null;
 }
 
 async function fastInteractionReply(interaction: ChatInputCommandInteraction, content: string, ephemeral = true): Promise<void> {
@@ -76,64 +97,26 @@ async function fastInteractionReply(interaction: ChatInputCommandInteraction, co
   if (!response.ok) throw new Error(`Discord interaction callback HTTP ${response.status}: ${(await response.text()).slice(0, 300)}`);
 }
 
-type InteractionEditPayload = InteractionEditReplyOptions;
-
-async function editInteractionReply(interaction: ChatInputCommandInteraction, payload: string | InteractionEditPayload): Promise<void> {
+async function editInteractionReply(interaction: ChatInputCommandInteraction, content: string): Promise<void> {
   const response = await fetch(`https://discord.com/api/v10/webhooks/${interaction.applicationId}/${interaction.token}/messages/@original`, {
     method: "PATCH",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify(typeof payload === "string" ? { content: payload } : payload),
+    body: JSON.stringify({ content }),
     signal: AbortSignal.timeout(5_000),
   });
   if (!response.ok) throw new Error(`Discord interaction edit HTTP ${response.status}: ${(await response.text()).slice(0, 300)}`);
 }
 
-function formatDuration(seconds: number | undefined): string {
-  if (!seconds || !Number.isFinite(seconds)) return "未知";
-  const total = Math.max(0, Math.round(seconds));
-  const hours = Math.floor(total / 3600);
-  const minutes = Math.floor((total % 3600) / 60);
-  const rest = total % 60;
-  return hours
-    ? `${hours}:${String(minutes).padStart(2, "0")}:${String(rest).padStart(2, "0")}`
-    : `${minutes}:${String(rest).padStart(2, "0")}`;
-}
-
-function musicPanelPayload(channelName: string): InteractionEditPayload {
-  const snapshot = music.snapshot();
-  const current = snapshot.current;
-  if (!current) return { content: "播放器目前沒有歌曲。", embeds: [], components: [] };
-  const statusLabel = snapshot.status === "paused" ? "⏸️ 已暫停" : "▶️ 播放中";
-  const embed = new EmbedBuilder()
-    .setColor(0xd986b2)
-    .setAuthor({ name: "CYRENE CLOUD PLAYER · NOW PLAYING" })
-    .setTitle(current.title)
-    .setURL(current.url)
-    .setDescription(`**${statusLabel}**\n在 **${channelName}** 陪你聽歌`)
-    .addFields(
-      { name: "長度", value: formatDuration(current.duration), inline: true },
-      { name: "接下來", value: snapshot.queueLength ? `${snapshot.queueLength} 首` : "播放完畢後離開", inline: true },
-      { name: "來源", value: new URL(current.url).hostname, inline: true },
-    )
-    .setFooter({ text: "永晝花庭 · 雲端播放控制" });
-  if (current.thumbnail) embed.setThumbnail(current.thumbnail);
-  const controls = new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder().setCustomId("cloudmusic:toggle").setLabel(snapshot.status === "paused" ? "繼續" : "暫停").setEmoji(snapshot.status === "paused" ? "▶️" : "⏸️").setStyle(ButtonStyle.Primary),
-    new ButtonBuilder().setCustomId("cloudmusic:next").setLabel("下一首").setEmoji("⏭️").setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId("cloudmusic:leave").setLabel("離開").setEmoji("👋").setStyle(ButtonStyle.Danger),
-    new ButtonBuilder().setCustomId("cloudmusic:refresh").setLabel("重新整理").setEmoji("🔄").setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId("cloudmusic:like").setLabel("收藏").setEmoji("💗").setStyle(ButtonStyle.Success),
-  );
-  return { content: "", embeds: [embed.toJSON()], components: [controls.toJSON()] };
-}
-
 client.on("messageCreate", (message) => {
   if (message.author.bot || !client.user) return;
   const mentioned = message.mentions.users.has(client.user.id) || mentionsBot(message.content, client.user.id);
-  const input = normalizeInvocation(message.content, client.user.id);
+  const images = imageInputsFromMessage(message);
+  const normalizedInput = normalizeInvocation(message.content, client.user.id);
+  const input = images.length && normalizedInput === "嗨" ? "請看看我附上的圖片。" : normalizedInput;
   const command = input.trim().toLowerCase().replace(/^[!/]/, "");
-  const knownCommand = command === "status" || command === "favorites" || command === "forget";
-  const explicitTextCommand = /^!(status|favorites|forget)$/i.test(message.content.trim());
+  const knownCommand = command === "status" || command === "forget";
+  const disabledCommand = /^(?:spotify|bilibili|history|shuffle|repeat|join)$/i.test(command);
+  const explicitTextCommand = /^!(status|forget)$/i.test(message.content.trim());
   console.log(`[Discord] 收到訊息：guild=${message.guildId ?? "dm"} channel=${message.channelId} mentioned=${mentioned} command=${knownCommand ? command : "chat"}`);
   const canHandle = shouldHandleMessage({
     userId: message.author.id,
@@ -150,18 +133,11 @@ client.on("messageCreate", (message) => {
   enqueue(sessionId, async () => {
     try {
       if (command === "status") {
-        await replyToMessage(message, `雲端連線正常，已守望 ${Math.floor((Date.now() - startedAt) / 60_000)} 分鐘。`);
+        await replyToMessage(message, `雲端文字聊天已連線，已守望 ${Math.floor((Date.now() - startedAt) / 60_000)} 分鐘。`);
         return;
       }
-      if (command === "favorites") {
-        const channel = message.member?.voice.channel;
-        if (!channel) {
-          await replyToMessage(message, `請先加入語音頻道，再使用 \`!favorites\`。\n\n${formatFavorites()}`);
-          return;
-        }
-        const entries = favorites.list(500).reverse();
-        const first = await music.playFavorites(channel, entries);
-        await replyToMessage(message, `▶️ 已加入 **${channel.name}**，從「${first.title}」開始播放 ${entries.length} 筆雲端收藏。`);
+      if (disabledCommand) {
+        await replyToMessage(message, "雲端版不使用 AI 搜尋、推薦或分析音樂。請使用 `/play` 貼直接網址，或播放既有收藏。");
         return;
       }
       if (command === "forget") {
@@ -169,8 +145,12 @@ client.on("messageCreate", (message) => {
         await replyToMessage(message, "這個頻道的雲端短期對話已清空。");
         return;
       }
+      if (isBlockedMusicAiRequest(input)) {
+        await replyToMessage(message, "為節省 AI 額度，雲端版不搜尋、推薦或分析音樂；請直接貼網址給 `/play`。");
+        return;
+      }
       await message.channel.sendTyping().catch(() => undefined);
-      await replyToMessage(message, await runConversation(sessionId, input));
+      await replyToMessage(message, await runConversation(sessionId, input, images));
     } catch (error) {
       console.error("[Discord] 回覆失敗", error);
     }
@@ -190,134 +170,141 @@ async function handleSlash(interaction: ChatInputCommandInteraction): Promise<vo
     return;
   }
   const sessionId = sessionIdFor(interaction.user.id, interaction.channelId);
+  const cloudCommands = ["chat", "forget", "status", "play", "favorites", "like", "queue", "pause", "next", "previous", "leave", "volume"];
+  if (!cloudCommands.includes(interaction.commandName)) {
+    await fastInteractionReply(interaction, "雲端版不使用 AI 搜尋、推薦或分析音樂；只接受直接網址、既有收藏與固定播放器控制。");
+    return;
+  }
   if (interaction.commandName === "forget") {
     await memory.forget(sessionId);
     await fastInteractionReply(interaction, "這個頻道的雲端短期對話已清空。");
     return;
   }
   if (interaction.commandName === "status") {
-    await fastInteractionReply(interaction, `雲端連線正常，已守望 ${Math.floor((Date.now() - startedAt) / 60_000)} 分鐘。`);
+    await fastInteractionReply(interaction, `雲端已連線，已守望 ${Math.floor((Date.now() - startedAt) / 60_000)} 分鐘。\n${musicLimitMessage()}`);
     return;
   }
-  if (interaction.commandName === "favorites") {
-    const member = interaction.guild
-      ? await interaction.guild.members.fetch(interaction.user.id).catch(() => null)
-      : null;
-    const channel = member?.voice.channel;
+  if (interaction.commandName === "play") {
+    if (musicUsage.exhausted()) {
+      await fastInteractionReply(interaction, musicLimitMessage());
+      return;
+    }
+    const value = interaction.options.getString("url", true).trim();
+    try { extractPlayableUrl(value); } catch {
+      await fastInteractionReply(interaction, "請貼上 YouTube、Bilibili 或其他可播放的直接網址；雲端版不會用歌名搜尋。");
+      return;
+    }
+    const channel = await voiceChannelFor(interaction);
     if (!channel) {
-      await fastInteractionReply(interaction, `請先加入語音頻道，再使用 \`/favorites\`。\n\n${formatFavorites()}`);
+      await fastInteractionReply(interaction, "請先加入語音頻道，再使用 `/play`。");
       return;
     }
-    const entries = favorites.list(500).reverse();
-    if (!entries.length) {
-      await fastInteractionReply(interaction, formatFavorites());
-      return;
-    }
-    await fastInteractionReply(interaction, "🎧 正在加入語音頻道並準備雲端收藏；第一次播放需要下載音訊工具，請稍候。", false);
+    await fastInteractionReply(interaction, "正在讀取你提供的直接網址…", false);
     try {
-      const first = await music.playFavorites(channel, entries);
-      console.log(`[CloudMusic] 收藏播放面板：${first.title}`);
-      await editInteractionReply(interaction, musicPanelPayload(channel.name));
+      const track = await music.playUrl(channel, value);
+      await editInteractionReply(interaction, `▶️ 正在播放：**${track.title}**\n${musicLimitMessage()}`);
     } catch (error) {
-      console.error("[CloudMusic] 無法播放收藏", error);
       await editInteractionReply(interaction, `播放失敗：${error instanceof Error ? error.message : String(error)}`);
     }
     return;
   }
-  if (interaction.commandName === "play") {
-    const member = interaction.guild
-      ? await interaction.guild.members.fetch(interaction.user.id).catch(() => null)
-      : null;
-    const channel = member?.voice.channel;
-    if (!channel) {
-      await fastInteractionReply(interaction, "請先加入語音頻道，再使用 `/play 網址`。");
+  if (interaction.commandName === "favorites") {
+    if (musicUsage.exhausted()) {
+      await fastInteractionReply(interaction, musicLimitMessage());
       return;
     }
-    const url = interaction.options.getString("url", true).trim();
-    await fastInteractionReply(interaction, "🎧 正在加入語音頻道並準備播放網址，請稍候。", false);
+    const entries = favorites.list(500).reverse();
+    if (!entries.length) {
+      await fastInteractionReply(interaction, "收藏歌單目前是空的；使用 `/like url:<直接網址>` 新增。");
+      return;
+    }
+    const channel = await voiceChannelFor(interaction);
+    if (!channel) {
+      await fastInteractionReply(interaction, "請先加入語音頻道，再使用 `/favorites`。");
+      return;
+    }
+    await fastInteractionReply(interaction, "正在播放既有收藏…", false);
     try {
-      await music.playUrl(channel, url);
-      await editInteractionReply(interaction, musicPanelPayload(channel.name));
+      const first = await music.playFavorites(channel, entries);
+      await editInteractionReply(interaction, `▶️ 從 **${first.title}** 開始播放 ${entries.length} 首收藏。\n${musicLimitMessage()}`);
     } catch (error) {
-      console.error("[CloudMusic] 無法播放網址", error);
       await editInteractionReply(interaction, `播放失敗：${error instanceof Error ? error.message : String(error)}`);
     }
     return;
   }
   if (interaction.commandName === "like") {
-    const url = interaction.options.getString("url")?.trim();
+    const value = interaction.options.getString("url")?.trim();
+    const current = music.snapshot().current;
+    const url = value || current?.url;
     if (!url) {
-      await fastInteractionReply(interaction, "雲端沒有目前播放中的歌曲，請使用 `/like 網址` 儲存單曲或播放清單。");
+      await fastInteractionReply(interaction, "請提供直接網址，或先播放一首歌再收藏。");
       return;
     }
-    const saved = await favorites.save(url);
-    await fastInteractionReply(interaction, saved.added ? `已存入雲端收藏：${saved.entry.title}` : `這個連結已經收藏過了：${saved.entry.title}`);
+    try { extractPlayableUrl(url); } catch {
+      await fastInteractionReply(interaction, "只能收藏直接網址；雲端版不會用歌名搜尋。");
+      return;
+    }
+    const saved = await favorites.save(url, current?.url === url ? current.title : undefined);
+    await fastInteractionReply(interaction, saved.added ? `❤️ 已收藏：${saved.entry.title}` : `已經收藏過：${saved.entry.title}`);
     return;
   }
-  if (interaction.commandName === "save") {
-    await fastInteractionReply(interaction, "雲端沒有目前播放中的歌曲，請改用 `/like 網址` 儲存。");
+  if (interaction.commandName === "queue") {
+    const state = music.snapshot();
+    const upcoming = state.upcoming.slice(0, 15).map((entry, index) => `${index + 1}. ${entry.title}`).join("\n");
+    await fastInteractionReply(interaction, state.current
+      ? `正在播放：**${state.current.title}**\n${upcoming ? `接下來：\n${upcoming}` : "佇列已空。"}`
+      : "目前沒有播放音樂。");
     return;
   }
-  if (interaction.commandName !== "chat") {
-    await fastInteractionReply(interaction, "這個指令需要昔漣桌面程式保持開啟。雲端版目前可使用 `/chat`、`/play`、`/favorites`、`/like`、`/forget`、`/status`。");
+  if (interaction.commandName === "pause") {
+    const state = music.pauseOrResume();
+    await fastInteractionReply(interaction, state === "playing" ? "▶️" : state === "paused" ? "⏸️" : "目前沒有播放音樂。");
     return;
   }
-  const input = interaction.options.getString("message", true);
+  if (interaction.commandName === "next") {
+    await fastInteractionReply(interaction, music.skip() ? "⏭️" : "目前沒有播放音樂。");
+    return;
+  }
+  if (interaction.commandName === "previous") {
+    await fastInteractionReply(interaction, music.previous() ? "⏮️" : "沒有可以返回的上一首。");
+    return;
+  }
+  if (interaction.commandName === "leave") {
+    music.stop();
+    await fastInteractionReply(interaction, "👋");
+    return;
+  }
+  if (interaction.commandName === "volume") {
+    const percent = interaction.options.getInteger("percent", true);
+    await fastInteractionReply(interaction, `🔊 ${music.setVolume(percent)}%`);
+    return;
+  }
+  const image = interaction.options.getAttachment("image");
+  if (image && (image.size > MAX_IMAGE_BYTES || !isSupportedImage(image.name, image.contentType))) {
+    await fastInteractionReply(interaction, "圖片需為 PNG、JPEG、WebP 或 GIF，且不可超過 10 MB。");
+    return;
+  }
+  const images: DiscordImageInput[] = image
+    ? [{ url: image.url, mime: image.contentType ?? undefined, name: image.name }]
+    : [];
+  const input = interaction.options.getString("message")?.trim() || (images.length ? "請看看我附上的圖片。" : "");
+  if (!input) {
+    await fastInteractionReply(interaction, "請輸入訊息或附上一張圖片。");
+    return;
+  }
+  if (isBlockedMusicAiRequest(input)) {
+    await fastInteractionReply(interaction, "為節省 AI 額度，雲端版不搜尋、推薦或分析音樂；請直接貼網址給 `/play`。");
+    return;
+  }
   await interaction.deferReply();
   try {
-    const chunks = splitDiscordText(await runConversation(sessionId, input));
+    const chunks = splitDiscordText(await runConversation(sessionId, input, images));
     await interaction.editReply(chunks[0]);
     for (const chunk of chunks.slice(1)) await interaction.followUp(chunk);
   } catch (error) {
     console.error("[Discord] 指令回覆失敗", error);
     await interaction.editReply("雲層暫時擋住了訊息，請稍後再試一次。");
   }
-}
-
-async function handleMusicButton(interaction: ButtonInteraction): Promise<void> {
-  if (!shouldHandleMessage({
-    userId: interaction.user.id,
-    guildId: interaction.guildId,
-    channelId: interaction.channelId,
-    isDm: !interaction.guildId,
-    mentioned: true,
-  }, config)) {
-    await interaction.reply({ content: "這個播放控制目前沒有開放。", ephemeral: true });
-    return;
-  }
-  await interaction.deferUpdate();
-  const action = interaction.customId.slice("cloudmusic:".length);
-  if (action === "leave") {
-    music.stop();
-    await interaction.editReply({ content: "👋 已停止播放並離開語音頻道。", embeds: [], components: [] });
-    return;
-  }
-  if (action === "toggle") music.pauseOrResume();
-  if (action === "next") {
-    const before = music.snapshot();
-    if (!music.skip()) {
-      await interaction.editReply({ content: "播放器目前沒有歌曲。", embeds: [], components: [] });
-      return;
-    }
-    if (!before.queueLength) {
-      await interaction.editReply({ content: "⏭️ 播放佇列已結束，已離開語音頻道。", embeds: [], components: [] });
-      return;
-    }
-    await new Promise((resolve) => setTimeout(resolve, 350));
-  }
-  if (action === "like") {
-    const current = music.snapshot().current;
-    if (!current) {
-      await interaction.editReply({ content: "播放器目前沒有歌曲。", embeds: [], components: [] });
-      return;
-    }
-    await favorites.save(current.url, current.title);
-  }
-  const member = interaction.guild
-    ? await interaction.guild.members.fetch(interaction.user.id).catch(() => null)
-    : null;
-  const channelName = member?.voice.channel?.name ?? "語音頻道";
-  await interaction.editReply(musicPanelPayload(channelName));
 }
 
 client.on("interactionCreate", (interaction) => {
@@ -332,21 +319,6 @@ client.on("interactionCreate", (interaction) => {
       if (interaction.deferred || interaction.replied) await interaction.editReply(content).catch(() => undefined);
       else await interaction.reply({ content, ephemeral: true }).catch(() => undefined);
     });
-    return;
-  }
-  if (interaction.isButton() && interaction.customId.startsWith("cloudmusic:")) {
-    if (!eventClaims.claim(interaction.id)) {
-      console.log(`[Discord] 已忽略重複播放控制：${interaction.id}`);
-      return;
-    }
-    void handleMusicButton(interaction).catch(async (error) => {
-      console.error("[CloudMusic] 播放控制失敗", error);
-      if (interaction.deferred || interaction.replied) {
-        await interaction.editReply({ content: "播放控制失敗，請重新執行 `/play`。", embeds: [], components: [] }).catch(() => undefined);
-      } else {
-        await interaction.reply({ content: "播放控制失敗，請重新執行 `/play`。", ephemeral: true }).catch(() => undefined);
-      }
-    });
   }
 });
 
@@ -354,15 +326,23 @@ client.once("ready", async (readyClient) => {
   readyClient.user.setPresence({ status: "online", activities: [{ name: config.activity, type: ActivityType.Playing }] });
   console.log(`[Cyrene Cloud] Discord 已連線：${readyClient.user.tag}`);
   const commands = [
-    new SlashCommandBuilder().setName("chat").setDescription("和雲端昔漣說話").addStringOption((option) => option.setName("message").setDescription("想說的話").setRequired(true)),
+    new SlashCommandBuilder().setName("chat").setDescription("和雲端昔漣說話，可直接附圖")
+      .addStringOption((option) => option.setName("message").setDescription("想說的話（附圖時可留空）").setRequired(false))
+      .addAttachmentOption((option) => option.setName("image").setDescription("PNG、JPEG、WebP 或 GIF 圖片").setRequired(false)),
     new SlashCommandBuilder().setName("forget").setDescription("清除目前頻道的雲端短期對話"),
     new SlashCommandBuilder().setName("status").setDescription("查看雲端連線狀態"),
-    new SlashCommandBuilder().setName("favorites").setDescription("加入你的語音頻道並播放雲端收藏"),
-    new SlashCommandBuilder().setName("play").setDescription("加入你的語音頻道並直接播放網址")
-      .addStringOption((option) => option.setName("url").setDescription("YouTube、Bilibili 或其他支援的音樂網址").setRequired(true)),
-    new SlashCommandBuilder().setName("like").setDescription("儲存單曲或播放清單網址")
-      .addStringOption((option) => option.setName("url").setDescription("單曲或播放清單網址").setRequired(false)),
-    new SlashCommandBuilder().setName("save").setDescription("說明如何將目前內容保存至雲端"),
+    new SlashCommandBuilder().setName("play").setDescription("播放你提供的直接音樂網址（不使用 AI 搜尋）")
+      .addStringOption((option) => option.setName("url").setDescription("YouTube、Bilibili 或其他直接網址").setRequired(true)),
+    new SlashCommandBuilder().setName("favorites").setDescription("播放既有收藏歌單"),
+    new SlashCommandBuilder().setName("like").setDescription("收藏目前歌曲或直接網址")
+      .addStringOption((option) => option.setName("url").setDescription("可省略；單一歌曲或影片網址").setRequired(false)),
+    new SlashCommandBuilder().setName("queue").setDescription("查看目前播放與佇列"),
+    new SlashCommandBuilder().setName("pause").setDescription("暫停或繼續播放"),
+    new SlashCommandBuilder().setName("next").setDescription("播放下一首"),
+    new SlashCommandBuilder().setName("previous").setDescription("返回上一首"),
+    new SlashCommandBuilder().setName("leave").setDescription("停止播放並離開語音頻道"),
+    new SlashCommandBuilder().setName("volume").setDescription("調整雲端播放器音量")
+      .addIntegerOption((option) => option.setName("percent").setDescription("0 到 150").setMinValue(0).setMaxValue(150).setRequired(true)),
   ].map((command) => command.toJSON());
   try {
     const rest = new REST({ version: "10" }).setToken(config.discordToken);
@@ -381,19 +361,27 @@ client.once("ready", async (readyClient) => {
   }
 });
 
-function escapeMarkdown(value: string): string {
-  return value.replace(/[\\[\]()*_~`>]/g, "\\$&");
-}
-
-await Promise.all([memory.init(), favorites.init()]);
+await Promise.all([memory.init(), favorites.init(), musicUsage.init()]);
+const musicUsageTimer = setInterval(() => {
+  if (music.snapshot().status !== "playing") return;
+  void musicUsage.addMinute().then((remaining) => {
+    if (remaining <= 0) {
+      console.warn("[CloudMusic] 已達每月免費流量保護限制，自動停止播放");
+      music.stop();
+    }
+  }).catch((error) => console.error("[CloudMusic] 無法記錄播放用量", error));
+}, 60_000);
+musicUsageTimer.unref();
 const healthServer = startHealthServer(config.port, () => ({
   discord: client.isReady() ? "connected" : "connecting",
+  voiceActive: music.snapshot().voiceActive,
   uptimeSeconds: Math.floor((Date.now() - startedAt) / 1_000),
 }));
 
 async function shutdown(signal: string) {
   console.log(`[Cyrene Cloud] 收到 ${signal}，安全停止`);
   healthServer.close();
+  clearInterval(musicUsageTimer);
   music.stop();
   client.destroy();
   process.exit(0);
