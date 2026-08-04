@@ -4,6 +4,7 @@ import { PassThrough, type Readable } from "node:stream";
 import { constants as fsConstants, promises as fs } from "node:fs";
 import { createHash } from "node:crypto";
 import os from "node:os";
+import ffmpegStaticPath from "ffmpeg-static";
 import { toTraditionalTaiwan } from "../../../utils/opencc";
 
 // 足以涵蓋 Bilibili 跨作品音樂合集，同時避免無界清單耗盡記憶體。
@@ -768,6 +769,7 @@ export function discordMusicSeekArgs(startAtSeconds = 0): string[] {
 }
 
 export function discordMusicStreamArgs(source: string, startAtSeconds = 0): string[] {
+  const ffmpegPath = ffmpegStaticPath?.replace("app.asar", "app.asar.unpacked");
   return [
     ...bilibiliCookieArgs(source),
     "--no-playlist",
@@ -777,6 +779,7 @@ export function discordMusicStreamArgs(source: string, startAtSeconds = 0): stri
     "--fragment-retries", "5",
     "--retry-sleep", "1",
     "--socket-timeout", "20",
+    ...(ffmpegPath ? ["--ffmpeg-location", ffmpegPath] : []),
     "--format", "bestaudio/best",
     ...discordMusicSeekArgs(startAtSeconds),
     "--output", "-",

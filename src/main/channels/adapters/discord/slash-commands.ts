@@ -24,51 +24,59 @@ export function buildDiscordHelp(profile: { username?: string; avatarUrl?: strin
       name: `${profile.username ?? "Cyrene"}  ·  COMMAND GUIDE`,
       iconURL: profile.avatarUrl,
     })
-    .setTitle("想聊天、聽歌，直接叫我就好 ✦")
+    .setTitle("✨ 昔漣語音與音樂陪伴指南 ✦")
     .setDescription([
-      "所有 `/` 指令都可以直接使用，不需要標註 Bot。",
-      "要播放音樂時，先進入一個 Discord 語音頻道。",
+      "昔漣（Cyrene）提供高品質的語音通話與多平台音樂代播服務。",
+      "所有指令皆可直接輸入使用，無需標註 Bot 喔！",
     ].join("\n"))
     .addFields(
       {
-        name: "💬  Chat & Voice",
-        value: "`/chat` 和 Cyrene 聊天\n`/join` 開始語音通話　`/leave` 結束通話並離開頻道",
+        name: "💬  語音與聊天 (Chat & Voice)",
+        value: [
+          "• `/chat <訊息>` - 與昔漣展開心靈對話 💗",
+          "• `/join` - 邀請昔漣進入您的語音頻道",
+          "• `/leave` - 結束陪伴並讓昔漣離開語音頻道",
+        ].join("\n"),
         inline: false,
       },
       {
-        name: "🎮  Play & Draw",
-        value: "`/game` 直接在 Discord 內開啟《繩結同行》\n`/draw` 將繪圖委託交給 Codex（僅擁有者）",
+        name: "🎧  音樂播放 (Music Playback)",
+        value: [
+          "• `/play [歌名/網址]` - 播放 YouTube／Bilibili／Spotify 歌曲連結；省略時自動播放 **Spotify anime 歌單**",
+          "• `/list` - 選擇播放 **My Liked Songs（YT/Bili）** 或 **My Spotify Playlists**，可選擇指定歌曲或歌單",
+          "• `/status` - 確認目前 Bot 的連線、延遲與語音伺服器狀態",
+        ].join("\n"),
         inline: false,
       },
       {
-        name: "🎧  Music Playback",
-        value: "`/play` 搜尋歌曲或播放音樂連結\n`/nowplaying` 顯示播放器控制面板\n`/spotify` 播放 Spotify 歌單或搜尋作者",
+        name: "❤️  收藏與庫存 (Bili/YT Library)",
+        value: [
+          "• **快捷收藏**：點擊播放控制面板的 ❤️ **Like** 按鈕：",
+          "   ↳ *Bili/YT 歌曲* ➔ 自動存入個人收藏，可透過 `/list` → **My Liked Songs** 播放",
+          "   ↳ *Spotify Playlist* ➔ 只保存名稱與歌單連結到 **Spotify Playlist** 資料夾，不複製帳號內容",
+        ].join("\n"),
         inline: false,
       },
       {
-        name: "♡  Music Library",
-        value: "`/like` 收藏目前歌曲或連結\n`/favorites` 播放收藏歌單　`/history` 查看播放紀錄",
+        name: "⚙️  佇列與播放控制 (Playback Control)",
+        value: [
+          "• **控制面板**：播歌時昔漣會發送互動面板，支援上一首、暫停／播放、下一首、收藏與離開",
+          "• **捷徑按鈕**：點擊下方按鈕可快速呼叫 **我的收藏**、**歷史紀錄**、**播放佇列**",
+        ].join("\n"),
         inline: false,
       },
       {
-        name: "⚙  Playback Queue",
-        value: "`/queue` 查看播放佇列　`/remove` 移出指定歌曲　`/clear` 清空後續佇列",
+        name: "🎮  娛樂與繪圖 (Play & Draw)",
+        value: [
+          "• `/game` - 直接在 Discord 內啟動語音遊戲《繩結同行》",
+          "• `/draw <描述>` - 將 AI 繪圖委託交給 Codex 處理（僅限擁有者）",
+        ].join("\n"),
         inline: false,
-      },
-      {
-        name: "✦  Quick start",
-        value: "進入語音頻道 → 使用 `/play` 播放音樂 → 透過卡片按鈕進行控制。\n使用 `/status` 可確認 Bot 的連線、延遲與語音狀態。",
-        inline: false,
-      },
+      }
     )
     .setFooter({ text: "Only visible to you  ·  Cyrene Music & Companion" });
   if (profile.avatarUrl) embed.setThumbnail(profile.avatarUrl);
-  const shortcuts = new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder().setCustomId(`${DISCORD_MUSIC_BUTTON_PREFIX}favorites`).setLabel("Favorites").setEmoji("💖").setStyle(ButtonStyle.Primary),
-    new ButtonBuilder().setCustomId(`${DISCORD_MUSIC_BUTTON_PREFIX}history`).setLabel("History").setEmoji("🕘").setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId(`${DISCORD_MUSIC_BUTTON_PREFIX}queue`).setLabel("Queue").setEmoji("📃").setStyle(ButtonStyle.Secondary),
-  );
-  return { content: "", embeds: [embed], components: [shortcuts] };
+  return { content: "", embeds: [embed] };
 }
 
 export function buildDiscordMusicControls(paused = false, resumeOnly = false): ActionRowBuilder<ButtonBuilder> {
@@ -339,39 +347,70 @@ export function buildDiscordMusicHistory(entries: DiscordMusicHistoryEntry[]) {
 export function buildDiscordMusicPlaylists(
   playlists: DiscordMusicPlaylist[],
   selectedPlaylistId?: string,
+  _legacyAccountPlaylists: DiscordSpotifyPlaylistChoice[] = [],
 ) {
   const selected = playlists.find(p => p.id === selectedPlaylistId);
 
   if (!selectedPlaylistId || !selected) {
     // 1. Show Playlists Menu
-    const visible = playlists.slice(0, 25);
+    const visibleLocal = playlists.filter((playlist) => playlist.folder !== "spotify").slice(0, 25);
+    const visibleSpotify = playlists.filter((playlist) => playlist.folder === "spotify").slice(0, 25 - visibleLocal.length);
+    const lines: string[] = [];
+
+    // Bili/YT local playlists
+    for (const [index, p] of visibleLocal.entries()) {
+      const trackCount = p.url ? (p.total ?? 0) : p.tracks.length;
+      const titleDisplay = p.url ? `[${p.name}](${p.url})` : p.name;
+      lines.push(`\`${String(index + 1).padStart(2, "0")}\` 📂 **${titleDisplay}** (${trackCount} tracks)${p.url ? " · Spotify" : ""}`);
+    }
+
+    // Cyrene-owned Spotify link folder. This never reads or mutates the user's
+    // Spotify account playlist library.
+    if (visibleSpotify.length) {
+      lines.push("");
+      lines.push("**📁 Spotify Playlist**");
+      for (const [i, p] of visibleSpotify.entries()) {
+        const num = visibleLocal.length + i + 1;
+        lines.push(`\`${String(num).padStart(2, "0")}\` 🟢 **[${p.name}](${p.url ?? ""})**${p.total ? ` (${p.total} tracks)` : ""}`);
+      }
+    }
+
     const embed = new EmbedBuilder()
       .setColor(0xd95fa8)
       .setAuthor({ name: "Cyrene Music  ·  PLAYLISTS" })
       .setTitle("My Playlists")
-      .setDescription(playlists.length
-        ? playlists.map((p, index) => `\`${String(index + 1).padStart(2, "0")}\` 📂 **${p.name}** (${p.tracks.length} tracks)${p.url ? " · Spotify" : ""}`).join("\n")
-        : "No playlists found. Click ➕ below to create one!"
-      )
-      .setFooter({ text: "Only visible to you  ·  Select a playlist to view tracks" });
+      .setDescription(lines.length ? lines.join("\n") : "No playlists found. Click ➕ below to create one!")
+      .setFooter({ text: "Only visible to you  ·  Spotify folder stores links, not account data" });
 
     const components: Array<ActionRowBuilder<StringSelectMenuBuilder> | ActionRowBuilder<ButtonBuilder>> = [];
-    if (visible.length) {
+    if (visibleLocal.length || visibleSpotify.length) {
       components.push(new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
         new StringSelectMenuBuilder()
           .setCustomId(`${DISCORD_MUSIC_BUTTON_PREFIX}playlist-select`)
-          .setPlaceholder("📂 Select a playlist to view")
-          .addOptions(visible.map((p) => ({
-            label: p.name.slice(0, 100),
-            description: `${p.tracks.length} tracks${p.url ? " (stream link)" : ""}`.slice(0, 100),
-            value: p.id,
-          }))),
+          .setPlaceholder("📂 Select a playlist to view or play")
+          .addOptions([
+            ...visibleLocal.map((p) => {
+              const trackCount = p.url ? (p.total ?? 0) : p.tracks.length;
+              return {
+                label: `📂 ${p.name}`.slice(0, 100),
+                description: `${trackCount} tracks${p.url ? " (stream link)" : ""}`.slice(0, 100),
+                value: p.id,
+              };
+            }),
+            ...visibleSpotify.map((p) => ({
+              label: `🟢 ${p.name}`.slice(0, 100),
+              description: `${p.total ? `${p.total} tracks · ` : ""}Saved Spotify link`.slice(0, 100),
+              value: `spotify:${p.id}`,
+            }))
+          ]),
       ));
     }
 
+    const canDelete = playlists.some((playlist) => playlist.id !== "default");
     components.push(new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId(`${DISCORD_MUSIC_BUTTON_PREFIX}playlist-add`).setLabel("➕ Add Playlist").setStyle(ButtonStyle.Success),
-      new ButtonBuilder().setCustomId(`${DISCORD_MUSIC_BUTTON_PREFIX}playlist-delete-menu`).setLabel("🗑️ Delete Playlist").setStyle(ButtonStyle.Danger).setDisabled(playlists.length <= 1),
+      new ButtonBuilder().setCustomId(`${DISCORD_MUSIC_BUTTON_PREFIX}playlist-edit`).setLabel("✏️ Edit Playlist").setStyle(ButtonStyle.Secondary).setDisabled(!playlists.length),
+      new ButtonBuilder().setCustomId(`${DISCORD_MUSIC_BUTTON_PREFIX}playlist-delete-menu`).setLabel("🗑️ Delete Playlist").setStyle(ButtonStyle.Danger).setDisabled(!canDelete),
     ));
 
     return { content: "", embeds: [embed], components };
@@ -434,8 +473,8 @@ export function buildDiscordSpotifyPlaylists(playlists: DiscordSpotifyPlaylistCh
     .setTitle("選擇 Spotify 播放清單")
     .setDescription(visible.length
       ? visible.map((playlist, index) => `\`${String(index + 1).padStart(2, "0")}\` **${playlist.name.slice(0, 150)}** · ${playlist.savedLink ? "已儲存連結" : `${playlist.total} 首`}`).join("\n")
-      : "你的 Spotify 帳號目前沒有可讀取的播放清單。")
-    .setFooter({ text: "只有你看得到  ·  選擇後 Cyrene 會自動加入語音頻道" });
+      : "Spotify Playlist 資料夾目前是空的。播放 Spotify 歌單後按 ❤️ Like，或在 Playlists 使用 Add Playlist 儲存連結。")
+    .setFooter({ text: "只有你看得到  ·  這裡只讀取 Cyrene 保存的 playlist 連結" });
   if (visible[0]?.imageUrl && /^https?:\/\//i.test(visible[0].imageUrl)) embed.setThumbnail(visible[0].imageUrl);
   const components = visible.length
     ? [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
@@ -512,8 +551,9 @@ export function musicRequestFromButton(
 const commands = [
   new SlashCommandBuilder()
     .setName("chat")
-    .setDescription("直接和 Cyrene 聊天，不需要標註她")
-    .addStringOption((option) => option.setName("message").setDescription("想對她說的話").setRequired(true)),
+    .setDescription("直接和 Cyrene 聊天，不需要標註她，可直接附圖")
+    .addStringOption((option) => option.setName("message").setDescription("想對她說的話").setRequired(false))
+    .addAttachmentOption((option) => option.setName("image").setDescription("PNG、JPEG、WebP 或 GIF 圖片").setRequired(false)),
   new SlashCommandBuilder()
     .setName("draw")
     .setDescription("由 Codex 生成圖片並透過 Discord 私訊回傳（僅擁有者）")
@@ -522,29 +562,22 @@ const commands = [
   new SlashCommandBuilder()
     .setName("play")
     .setDescription("搜尋歌曲，或播放 YouTube／Bilibili／SoundCloud／Spotify 連結")
-    .addStringOption((option) => option.setName("url").setDescription("歌曲名稱、音樂網址或播放清單").setRequired(true)),
-  new SlashCommandBuilder().setName("nowplaying").setDescription("顯示並更新目前的音樂播放器"),
-  new SlashCommandBuilder().setName("queue").setDescription("查看目前歌曲與接下來的播放佇列"),
-  new SlashCommandBuilder().setName("history").setDescription("查看最近聽過的歌曲與影片"),
+    .addStringOption((option) => option.setName("url").setDescription("可省略，預設播放 Spotify 的 anime 歌單；或輸入歌曲名稱、音樂網址/播放清單").setRequired(false)),
   new SlashCommandBuilder()
-    .setName("like")
-    .setDescription("收藏目前歌曲，或收藏一個 Bilibili／YouTube／Spotify 單曲連結")
-    .addStringOption((option) => option.setName("url").setDescription("可省略；單一歌曲或影片連結").setRequired(false)),
-  new SlashCommandBuilder().setName("favorites").setDescription("從第一首開始播放收藏歌單"),
-  new SlashCommandBuilder()
-    .setName("spotify")
-    .setDescription("選擇 Spotify 播放清單，或搜尋作者並播放熱門歌曲")
-    .addStringOption((option) => option.setName("artist").setDescription("可省略；輸入想聽的作者名稱").setRequired(false))
-    .addStringOption((option) => option.setName("playlist").setDescription("可省略；直接輸入 Spotify 播放清單網址以播放歌曲").setRequired(false)),
-  new SlashCommandBuilder().setName("clear").setDescription("清空接下來的歌曲，但保留目前歌曲"),
-  new SlashCommandBuilder()
-    .setName("remove")
-    .setDescription("從播放佇列移除指定歌曲")
-    .addIntegerOption((option) => option.setName("position").setDescription("歌單中顯示的序號").setMinValue(1).setRequired(true)),
+    .setName("list")
+    .setDescription("播放收藏清單（YT/Bili）或 Spotify 歌單")
+    .addStringOption((option) =>
+      option.setName("name")
+        .setDescription("搜尋你的 YT/Bili 收藏歌曲或 Spotify 歌單名稱（留空顯示全部）")
+        .setAutocomplete(true)
+        .setRequired(false)
+    ),
   new SlashCommandBuilder().setName("join").setDescription("讓 Cyrene 加入你的語音頻道進行 AI 通話"),
   new SlashCommandBuilder().setName("leave").setDescription("讓 Cyrene 離開目前的語音頻道"),
   new SlashCommandBuilder().setName("status").setDescription("查看 Bot、延遲、伺服器與語音狀態"),
   new SlashCommandBuilder().setName("help").setDescription("顯示 Cyrene 的 Discord 功能與指令"),
+  new SlashCommandBuilder().setName("emojis").setDescription("查看昔漣使用不同表情符號的統計次數"),
+  new SlashCommandBuilder().setName("forget").setDescription("清除目前頻道的雲端短期對話"),
 ];
 
 export const DISCORD_SLASH_COMMANDS: RESTPostAPIChatInputApplicationCommandsJSONBody[] = commands

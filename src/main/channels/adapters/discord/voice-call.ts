@@ -31,6 +31,13 @@ import { recordDiscordMusicInNotebook } from "./notebook-activity";
 import { recordDiscordMusicHistory } from "./music-history";
 import { toTraditionalTaiwan } from "../../../utils/opencc";
 import { startCallUsage, stopCallUsage } from "../../../call-usage-store";
+import {
+  clearDiscordMusicResumeSession,
+  getDiscordMusicResumePath,
+  loadDiscordMusicResumeData,
+  saveDiscordMusicResumeSession,
+  type PersistedDiscordMusicSession,
+} from "./music-resume-store";
 
 const LOG = "[DiscordVoice]";
 const MAX_UTTERANCE_BYTES = 48_000 * 2 * 2 * 30;
@@ -75,17 +82,12 @@ export interface DiscordMusicState {
   elapsed: number;
 }
 
-interface SuspendedMusicSession {
-  current: DiscordMusicTrack & { queueOrder: number };
-  queue: Array<DiscordMusicTrack & { queueOrder: number }>;
-  history: Array<DiscordMusicTrack & { queueOrder: number }>;
-  ownerId: string | null;
-  volume: number;
-  repeat: "off" | "track" | "queue";
-  shuffle: boolean;
-  autoplay: boolean;
-  elapsed: number;
+export function shouldAutoShuffleSpotifyPlaylist(tracks: DiscordMusicTrack[]): boolean {
+  return tracks.length > 1
+    && tracks.some((track) => /^https:\/\/open\.spotify\.com\/playlist\//i.test(track.playlistUrl ?? ""));
 }
+
+type SuspendedMusicSession = Omit<PersistedDiscordMusicSession, "savedAt">;
 
 export interface DiscordMusicControlResult {
   ok: boolean;
@@ -156,6 +158,7 @@ export class DiscordVoiceCall {
   private guildId: string | null = null;
   private textChannelId: string | null = null;
   private activeUserId: string | null = null;
+  sendMusicStatusCallback?: (content: string, userId: string | null) => Promise<boolean>;
   private activeUserName: string | undefined;
   private processing = false;
   private speaking = false;
@@ -192,6 +195,7 @@ export class DiscordVoiceCall {
     private readonly getConfig: () => DiscordChannelConfig,
     private readonly dispatch: (msg: IncomingMessage) => Promise<OutgoingMessage | null>,
     private readonly onMusicStateChange?: (state: DiscordMusicState) => void | Promise<void>,
+    private readonly resumeFilePath = getDiscordMusicResumePath(),
   ) {}
 
   private notifyMusicStateChange(): void {
@@ -235,6 +239,35 @@ export class DiscordVoiceCall {
     };
   }
 
+  async restoreSuspendedMusicSession(): Promise<boolean> {
+    const stored = (await loadDiscordMusicResumeData(this.resumeFilePath)).session;
+    if (!stored || Date.now() - Date.parse(stored.savedAt) > 7 * 24 * 60 * 60 * 1_000) return false;
+    const { savedAt: _savedAt, ...session } = stored;
+    this.suspendedMusicSession = session;
+    this.musicVolume = session.volume;
+    this.notifyMusicStateChange();
+    return true;
+  }
+
+  async checkpointMusicSession(): Promise<void> {
+    let session = this.suspendedMusicSession;
+    if (this.mode === "music" && this.currentMusicTrack) {
+      const state = this.getMusicState();
+      session = {
+        current: { ...this.currentMusicTrack },
+        queue: this.musicQueue.map((track) => ({ ...track })),
+        history: this.musicHistory.map((track) => ({ ...track })),
+        ownerId: this.musicOwnerId,
+        volume: this.musicVolume,
+        repeat: this.musicRepeat,
+        shuffle: this.musicShuffle,
+        autoplay: this.musicAutoplay,
+        elapsed: state.elapsed,
+      };
+    }
+    if (session) await saveDiscordMusicResumeSession({ ...session, savedAt: new Date().toISOString() }, this.resumeFilePath);
+  }
+
   async resumeSuspendedMusic(message: Message): Promise<DiscordMusicControlResult> {
     const suspended = this.suspendedMusicSession;
     if (!suspended) return { ok: false, message: "沒有可以繼續的播放工作階段。" };
@@ -263,6 +296,7 @@ export class DiscordVoiceCall {
       );
       this.musicResumeOffsetSeconds = resumeAt;
       this.suspendedMusicSession = null;
+      await clearDiscordMusicResumeSession(this.resumeFilePath);
       this.notifyMusicStateChange();
       void this.advanceMusic(true);
       return { ok: true, message: `已回到語音頻道，從 ${formatMusicDuration(resumeAt) || "剛才的位置"} 繼續播放。` };
@@ -363,7 +397,7 @@ export class DiscordVoiceCall {
     return { ok: false, message: "不支援這個播放控制。" };
   }
 
-  async handleMusicRequest(message: Message, request: DiscordMusicRequest): Promise<boolean> {
+  async handleMusicRequest(message: Message, request: DiscordMusicRequest, clearQueue = false): Promise<boolean> {
     if (this.mode === "music" && request.command !== "queue" && !this.canControlMusic(message.author.id)) {
       await message.reply("這個播放工作階段由其他人控制；你不能修改她的音樂。");
       return true;
@@ -399,6 +433,16 @@ export class DiscordVoiceCall {
       if (this.mode !== "music" || this.guildId !== channel.guild.id || !this.connection || !this.player) {
         await this.connectForMusic(message);
       }
+      if (clearQueue) {
+        this.musicQueue = [];
+        this.stopPrefetchedMusic();
+        this.stopMusicProcess();
+        this.currentMusicTrack = null;
+        this.player?.stop(true);
+      }
+      if (shouldAutoShuffleSpotifyPlaylist(tracks)) {
+        this.musicShuffle = true;
+      }
       const queued = tracks.map((track) => ({ ...track, queueOrder: this.musicOrder++ }));
       if (this.musicShuffle) this.shuffleTracks(queued);
       this.musicQueue.push(...queued);
@@ -419,7 +463,7 @@ export class DiscordVoiceCall {
     return true;
   }
 
-  async handleResolvedMusicTracks(message: Message, tracks: DiscordMusicTrack[]): Promise<boolean> {
+  async handleResolvedMusicTracks(message: Message, tracks: DiscordMusicTrack[], clearQueue = false): Promise<boolean> {
     if (this.mode === "music" && !this.canControlMusic(message.author.id)) {
       await message.reply("這個播放工作階段由其他人控制；你不能修改她的音樂。");
       return true;
@@ -444,6 +488,16 @@ export class DiscordVoiceCall {
     try {
       if (this.mode !== "music" || this.guildId !== channel.guild.id || !this.connection || !this.player) {
         await this.connectForMusic(message);
+      }
+      if (clearQueue) {
+        this.musicQueue = [];
+        this.stopPrefetchedMusic();
+        this.stopMusicProcess();
+        this.currentMusicTrack = null;
+        this.player?.stop(true);
+      }
+      if (shouldAutoShuffleSpotifyPlaylist(tracks)) {
+        this.musicShuffle = true;
       }
       const queued = tracks.map((track) => ({ ...track, queueOrder: this.musicOrder++ }));
       if (this.musicShuffle) this.shuffleTracks(queued);
@@ -537,8 +591,10 @@ export class DiscordVoiceCall {
         autoplay: this.musicAutoplay,
         elapsed: liveState.elapsed,
       };
+      await this.checkpointMusicSession();
     } else if (this.mode === "music") {
       this.suspendedMusicSession = null;
+      await clearDiscordMusicResumeSession(this.resumeFilePath);
     }
     this.mode = null;
     this.processing = false;
@@ -612,7 +668,10 @@ export class DiscordVoiceCall {
     const channel = message.member?.voice.channel;
     if (!channel) throw new Error("你已經離開語音頻道");
     await this.leave();
-    if (!preserveSuspendedSession) this.suspendedMusicSession = null;
+    if (!preserveSuspendedSession) {
+      this.suspendedMusicSession = null;
+      await clearDiscordMusicResumeSession(this.resumeFilePath);
+    }
     this.mode = "music";
     this.musicOwnerId = message.author.id;
     this.guildId = channel.guild.id;
@@ -681,6 +740,11 @@ export class DiscordVoiceCall {
       }
 
       let next = this.musicQueue.shift();
+      if (!next && this.musicHistory.length > 0) {
+        this.musicQueue.push(...this.musicHistory);
+        this.musicHistory = [];
+        next = this.musicQueue.shift();
+      }
       if (!next && finished && this.musicAutoplay) {
         const seen = new Set([finished.url, ...this.musicHistory.map((track) => track.url)]);
         const recommendations = await searchDiscordMusicTracks(`${finished.title} music`, 5).catch(() => []);
@@ -851,13 +915,20 @@ export class DiscordVoiceCall {
 
   private musicErrorMessage(error: unknown): string {
     const raw = error instanceof Error ? error.message : String(error);
-    const line = raw.split(/\r?\n/).map((item) => item.trim()).filter(Boolean).at(-1) ?? "未知錯誤";
+    const lines = raw.split(/\r?\n/).map((item) => item.trim()).filter(Boolean);
+    const errorLines = lines.filter((line) => !line.startsWith("["));
+    const line = errorLines.at(-1) ?? lines.at(-1) ?? "未知錯誤";
     if (/sign in|cookies|bot/i.test(raw)) return "YouTube 要求登入驗證，請稍後再試或改用另一個連結。";
     if (/private|permission|login/i.test(raw)) return "內容需要登入或沒有觀看權限。";
     return line.slice(0, 350);
   }
 
   private async sendMusicStatus(content: string): Promise<void> {
+    if (this.sendMusicStatusCallback) {
+      const userId = this.mode === "music" ? this.musicOwnerId : this.activeUserId;
+      const handled = await this.sendMusicStatusCallback(content, userId).catch(() => false);
+      if (handled) return;
+    }
     const channelId = this.textChannelId;
     if (!channelId) return;
     const channel = await this.client.channels.fetch(channelId).catch(() => null);

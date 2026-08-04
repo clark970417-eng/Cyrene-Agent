@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, screen, shell, dialog, protocol, net, desktopCapturer } from "electron";
+import { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, screen, shell, dialog, protocol, net, desktopCapturer, globalShortcut } from "electron";
 import * as path from "path";
 import * as fs from "fs";
 import * as os from "os";
@@ -13,7 +13,7 @@ import { getEmbeddingProvider, getSceneEmbeddingProvider } from "./rag/embedding
 import { ingestPaths } from "./rag/file-ingest";
 import { buildAlwaysOnContext, buildMemoryInjection, runFunctionCallingLoop, scheduleMemoryWrite } from "./orchestrator";
 import { CyreneAgent } from "./orchestrator/cyrene-agent";
-import { indexConversationTurn } from "./orchestrator/history-tools";
+import { backfillStoredConversationHistory, buildProactiveHistoryContext, indexConversationTurn, indexDurablePhotoMemory, registerRecallHistoryTool } from "./orchestrator/history-tools";
 import { buildToneInjection } from "./orchestrator/tone-injector";
 import { getAdapter, buildVendorUrl, getAdapterForConfig, createSseReader } from "./orchestrator/vendors";
 import type { VendorConfig } from "./orchestrator/vendors";
@@ -26,6 +26,8 @@ import { loadChannelsSettings } from "./channels/settings-store";
 import { channelManager } from "./channels/manager";
 // 觸發 built-in-tools 的副作用註冊（fetch_url / run_shell / install_mcp_server）
 import "./orchestrator/built-in-tools";
+import { readNotebook, addNotebookEntry, updateNotebookEntry, deleteNotebookEntry, getSharedNotebookPath, onNotebookChanged } from "./notebook-manager";
+
 // 觸發 fs-tools 的副作用註冊（read_file / list_dir / write_file / read_image）
 import "./orchestrator/fs-tools";
 import { initMcpManager, addMcpServer, removeMcpServer, listMcpServers, pruneMcpServersByIds } from "./orchestrator/mcp-manager";
@@ -46,6 +48,7 @@ import { normalizeWindowVisibilitySettings } from "./window-visibility-settings"
 import type { StickerConfigItem } from "../shared/sticker-types";
 import { initReranker, getRerankerInstallStatus } from "./rag/reranker";
 import { memoryStore } from "./memory/memory-store"
+import { appendConversationEntry } from "./memory/conversation-archive"
 import type { L0Profile, L1Profile, MemoryEvidence } from "./memory/memory-types";
 import { entityGraph } from "./memory/entity-graph";
 import { buildMemoryGraphView } from "./memory/memory-views";
@@ -61,7 +64,6 @@ import { startOpener, stopOpener, configureOpener, setLive2dWindow, reloadManife
 import type { OpenerRuntimeConfig } from "./opener/opener-types";
 import { registerAgUiIpc, type AguiRunInput } from "./agui-bridge";
 import { setWeatherConfig, setSearchConfig, loadTodos, onTodosChange, setDelegateSettings, getCurrentTodos } from "./orchestrator/built-in-tools";
-import { registerRecallHistoryTool } from "./orchestrator/history-tools";
 import { registerDocumentTools } from "./orchestrator/document-tools";
 import { registerLifeTools, setTranslateConfig } from "./orchestrator/life-tools";
 import { registerTravelTools, setTravelConfig } from "./orchestrator/travel-tools";
@@ -72,16 +74,20 @@ import { initSkills, skillRegistry, buildSkillCatalog, parseSlashCommand, setSki
 import { initGameBot } from "./game-bot";
 import { initGameRoom } from "./game-room";
 import { initChannels, shutdownChannels } from "./channels/init";
-import { buildAutomaticImageContext } from "./channels/auto-image-vision";
+import { buildAutomaticImageContext, buildDurablePhotoMemory } from "./channels/auto-image-vision";
 import { setDispatcherBuildAndRunAgent, setDispatcherSynthesizeTts, setDispatcherBroadcastChat, setDispatcherLoadRecentHistory } from "./channels/dispatcher";
 import { setDiscordVoiceServices } from "./channels/adapters/discord/voice-call";
 import {
-  getGeminiOwnerFallback,
-  isDiscordNonOwnerQuotaFailure,
+  activateDiscordGeminiFallback,
+  canTryAlternateGeminiModel,
+  DISCORD_OWNER_ID,
+  GEMINI_STABLE_FALLBACK_MODEL,
+  getConfiguredGeminiFallback,
+  isDiscordGeminiFallbackActive,
+  isOpenRouterFreeQuotaError,
+  isRetryableGeminiError,
 } from "./channels/adapters/discord/model-fallback";
 import {
-  getSharedNotebookPath,
-  onSharedNotebookChanged,
   recordDiscordToolActionsInNotebook,
 } from "./channels/adapters/discord/notebook-activity";
 import {
@@ -110,7 +116,7 @@ let sidebarWindow: BrowserWindow | null = null;
 let sidebarRestoreBounds: { x: number; y: number; width: number; height: number } | null = null;
 let isSidebarExpanded = false;
 
-onSharedNotebookChanged(() => {
+onNotebookChanged(() => {
   if (sidebarWindow && !sidebarWindow.isDestroyed()) {
     sidebarWindow.webContents.send("shared-notebook:changed");
   }
@@ -370,6 +376,10 @@ interface ModelSettings {
 
 /** 視覺模型配置。syncWithMain=true 時三字段不落盤，運行時強制從主配置讀。 */
 interface VisionModelConfig {
+  enabled: boolean;
+  autoAnalyze: boolean;
+  maxImages: number;
+  maxImageMb: number;
   syncWithMain: boolean;
   baseUrl: string;
   apiKey: string;
@@ -623,10 +633,10 @@ function updatePetDockPosition(): void {
     petWidth = petBounds.width;
     petHeight = petBounds.height;
   }
-  
+
   const targetX = sidebarBounds.x + lastSlotBounds.x + (lastSlotBounds.width - petWidth) / 2;
   const targetY = sidebarBounds.y + lastSlotBounds.y + lastSlotBounds.height - petHeight + 16;
-  
+
   isProgrammaticMoving = true;
   mainWindow.setBounds({
     x: Math.round(targetX),
@@ -934,16 +944,22 @@ function normalizeProviderProfile(input: Partial<ProviderProfile> | null | undef
 function normalizeVisionConfig(input: Partial<VisionModelConfig> | undefined): VisionModelConfig | undefined {
   if (!input || typeof input !== "object") return undefined;
   const syncWithMain = input.syncWithMain === true;
+  const policy = {
+    enabled: input.enabled !== false,
+    autoAnalyze: input.autoAnalyze !== false,
+    maxImages: Math.max(1, Math.min(4, Math.floor(input.maxImages ?? 4))),
+    maxImageMb: [1, 5, 10].includes(input.maxImageMb ?? 10) ? (input.maxImageMb ?? 10) : 10,
+  };
   if (syncWithMain) {
     // syncWithMain=true：強制忽略三字段（即便手動編輯配置文件寫了也忽略），運行時從主配置讀
-    return { syncWithMain: true, baseUrl: "", apiKey: "", model: "" };
+    return { ...policy, syncWithMain: true, baseUrl: "", apiKey: "", model: "" };
   }
   const baseUrl = typeof input.baseUrl === "string" ? input.baseUrl.trim() : "";
   const apiKey = typeof input.apiKey === "string" ? input.apiKey.trim() : "";
   const model = typeof input.model === "string" ? input.model.trim() : "";
   // 三項全空 = 未啟用
-  if (!baseUrl && !apiKey && !model) return undefined;
-  return { syncWithMain: false, baseUrl, apiKey, model };
+  if (!baseUrl && !apiKey && !model && policy.enabled) return undefined;
+  return { ...policy, syncWithMain: false, baseUrl, apiKey, model };
 }
 
 function normalizeModelSettings(input: Partial<ModelSettings> | null | undefined): ModelSettings {
@@ -1025,7 +1041,7 @@ function loadModelSettings(): ModelSettings {
 export function loadVisionConfig(): VisionConfig | null {
   const settings = loadModelSettings();
   const v = settings.vision;
-  if (!v) return null;
+  if (!v || !v.enabled) return null;
 
   if (v.syncWithMain) {
     // 從主配置讀
@@ -1046,6 +1062,32 @@ export function loadVisionConfig(): VisionConfig | null {
   // 獨立配置
   if (!v.baseUrl || !v.apiKey || !v.model) return null;
   return { baseUrl: v.baseUrl, apiKey: v.apiKey, model: v.model };
+}
+
+interface VisionRuntimePolicy {
+  enabled: boolean;
+  autoAnalyze: boolean;
+  maxImages: number;
+  maxImageBytes: number;
+}
+
+function loadVisionRuntimePolicy(): VisionRuntimePolicy {
+  const vision = loadModelSettings().vision;
+  return {
+    enabled: vision?.enabled === true,
+    autoAnalyze: vision?.autoAnalyze !== false,
+    maxImages: vision?.maxImages ?? 4,
+    maxImageBytes: (vision?.maxImageMb ?? 10) * 1024 * 1024,
+  };
+}
+
+/** 關閉自動查看時，只有明確提到圖片／觀看意圖才送視覺 API。 */
+function explicitlyRequestsImageUnderstanding(text: string): boolean {
+  return /(?:看|看看|照片|圖片|這張|圖中|辨識|識別|讀圖|午餐|晚餐|早餐|吃(?:了|的|什麼)?|分享).{0,16}(?:嗎|什麼|怎樣|如何|這個|一下)?/i.test(text);
+}
+
+function shouldAnalyzeImages(text: string, policy: VisionRuntimePolicy): boolean {
+  return policy.enabled && (policy.autoAnalyze || explicitlyRequestsImageUnderstanding(text));
 }
 
 /**
@@ -1236,7 +1278,7 @@ function applyGeneralSettings(settings: GeneralSettings): void {
   else mainWindow?.hide();
   // 未簽名的開發版 Electron 在 macOS 呼叫此 API 會固定被系統拒絕並輸出
   // platform_util_mac 錯誤；正式封裝版才有可註冊的登入項目。
-  if (!isDev) app.setLoginItemSettings({ openAtLogin: settings.launchAtLogin });
+  if (!isDev && app.isPackaged) app.setLoginItemSettings({ openAtLogin: settings.launchAtLogin });
   applyPetZoom(isPetDocked ? 0.45 : settings.petZoom);
   syncPetChatInputVisibility(settings);
 }
@@ -1682,22 +1724,23 @@ function normalizeChatMessages(input: unknown): Array<{ role: "system" | "user" 
       if (!item || typeof item !== "object") return null;
       const record = item as Partial<ChatRequestMessage>;
       if (typeof record.content !== "string" || !record.content.trim()) return null;
-      
+
       // Filter out connection failure system logs from history context
       if (record.content.includes("連接模型失敗：模型請求失敗")) return null;
-      
+
       const role = record.role === "user" || record.role === "system" ? record.role : "assistant";
       let content = stripThinkBlocks(record.content).trim();
-      
-      // Truncate massive messages (like long game code generated earlier) to save tokens
-      if (content.length > 800) {
+
+      // 用戶原話不可截斷；只有模型先前的大型輸出（常見為遊戲/網頁代碼）才節流。
+      // 永久檔案另有完整副本，舊回覆需要時可由主動召回取回相關原文。
+      if (content.length > 800 && record.role !== "user") {
         if (content.includes("<!DOCTYPE html>") || content.includes("<html") || content.includes("style>")) {
           content = "[此處已為您省略昔漣編寫的網頁/遊戲代碼以節省 Token 空間，棋盤小遊戲運行正常]";
         } else {
           content = content.slice(0, 800) + "... (此處長對話已省略)";
         }
       }
-      
+
       return { role, content };
     })
     .filter((item): item is { role: "system" | "user" | "assistant"; content: string } => item !== null)
@@ -1874,36 +1917,41 @@ function logWorldbookInjection(alwaysOnContext: string, systemContent: string): 
 function buildSystemPrompt(styleFile: string): string {
   const parts: string[] = [];
 
-  // styleFile 以 "talk" 開頭時走純聊天模式，以 "study" 開頭時走學習模式，以 "game" 開頭時走遊戲模式
+  // 核心規則永遠只載入一份；各模式只追加短補充，避免把語言、身份與工具規則
+  // 複製到多份文件後逐漸互相矛盾。
   const isTalkMode = styleFile.startsWith("talk");
   const isStudyMode = styleFile.startsWith("study");
   const isGameMode = styleFile.startsWith("game");
-  const system = loadPromptFile(
-    isTalkMode
-      ? "talk_system.md"
-      : isStudyMode
-        ? "study_system.md"
-        : isGameMode
-          ? "game_system.md"
-          : "system.md"
-  );
+  const system = loadPromptFile("system.md");
   if (system) parts.push(system);
-  
+
+  const modePromptFile = isTalkMode
+    ? "talk_system.md"
+    : isStudyMode
+      ? "study_system.md"
+      : isGameMode
+        ? "game_system.md"
+        : "";
+  if (modePromptFile) {
+    const modePrompt = loadPromptFile(modePromptFile);
+    if (modePrompt) parts.push(modePrompt);
+  }
+
   const identity = loadPromptFile("identity.md");
   if (identity) parts.push(identity);
-  
+
   const soul = loadPromptFile("soul.md");
   if (soul) parts.push(soul);
-  
+
   const canon = loadPromptFile("canon_quotes.md");
   if (canon) parts.push(canon);
-  
-  // 純聊天模式與遊戲模式不加載額外的 styles/ 文件
-  if (!isTalkMode && !isGameMode) {
+
+  // 專用模式已有自己的語氣補充，不再把不存在或衝突的 style 文件疊上去。
+  if (!isTalkMode && !isStudyMode && !isGameMode) {
     const style = loadPromptFile("styles/" + styleFile);
     if (style) parts.push(style);
   }
-  
+
   return parts.join("\n\n---\n\n");
 }
 
@@ -1998,7 +2046,7 @@ async function observeRuntimeState(
 function isEnglishText(text: string): boolean {
   const trimmed = text.trim();
   if (!trimmed) return false;
-  
+
   const cleanText = trimmed
     .replace(/<@!?\d+>/g, "")
     .replace(/[0-9\s\p{P}\p{S}]/gu, "");
@@ -2470,6 +2518,10 @@ function createWindow(): void {
       let memoryInjection = "";
       try { memoryInjection = await buildMemoryInjection(userText); } catch { /* ignore */ }
 
+      // ③.5 永久跨渠道歷史主動召回（桌面、Discord、歷次通話共用）
+      let proactiveHistory = "";
+      try { proactiveHistory = await buildProactiveHistoryContext(userText, { topK: 8 }); } catch { /* ignore */ }
+
       // ④ 通話專用人設 prompt
       const phoneParts: string[] = [];
       const phoneSystem = loadPromptFile("phone_system.md");
@@ -2498,6 +2550,7 @@ function createWindow(): void {
       return timeStr + "\n\n" +
         (alwaysOnContext ? alwaysOnContext + "\n\n" : "") +
         (memoryInjection ? memoryInjection + "\n\n" : "") +
+        (proactiveHistory ? proactiveHistory + "\n\n" : "") +
         phonePrompt +
         (skillCatalog ? "\n\n---\n\n" + skillCatalog : "") +
         skillActivation +
@@ -3107,6 +3160,108 @@ ipcMain.handle("sidebar:open-shared-notebook", async () => {
     console.error("Failed to open shared notebook:", err);
   }
   return false;
+});
+
+// ── 共同筆記本增強 IPC ──────────────────────────────────────
+ipcMain.handle("sidebar:get-notebook-entries", async () => {
+  try {
+    const { entries } = await readNotebook();
+    return entries;
+  } catch (err) {
+    console.error("[NotebookIPC] Failed to get entries:", err);
+    return [];
+  }
+});
+
+ipcMain.handle("sidebar:add-notebook-entry", async (_e, options) => {
+  try {
+    const entry = await addNotebookEntry(options);
+    return { ok: true, entry };
+  } catch (err) {
+    console.error("[NotebookIPC] Failed to add entry:", err);
+    return { ok: false, error: String(err) };
+  }
+});
+
+ipcMain.handle("sidebar:update-notebook-entry", async (_e, id: string, content: string, title?: string) => {
+  try {
+    const ok = await updateNotebookEntry(id, content, title);
+    return { ok };
+  } catch (err) {
+    console.error("[NotebookIPC] Failed to update entry:", err);
+    return { ok: false, error: String(err) };
+  }
+});
+
+ipcMain.handle("sidebar:delete-notebook-entry", async (_e, id: string) => {
+  try {
+    const ok = await deleteNotebookEntry(id);
+    return { ok };
+  } catch (err) {
+    console.error("[NotebookIPC] Failed to delete entry:", err);
+    return { ok: false, error: String(err) };
+  }
+});
+
+// ── 記憶管理中心 IPC ──────────────────────────────────────
+ipcMain.handle("memory:get-all-memories", async () => {
+  try {
+    const store = await memoryStore.load();
+    return {
+      ok: true,
+      l0: store.l0,
+      l1: store.l1,
+      l2: store.l2 || [],
+    };
+  } catch (err) {
+    console.error("[MemoryIPC] Failed to load store:", err);
+    return { ok: false, error: String(err) };
+  }
+});
+
+ipcMain.handle("memory:update-l0", async (_e, patch) => {
+  try {
+    await memoryStore.updateL0(patch);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+});
+
+ipcMain.handle("memory:update-l1", async (_e, patch) => {
+  try {
+    await memoryStore.updateL1(patch);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+});
+
+ipcMain.handle("memory:add-l2", async (_e, memoryInput) => {
+  try {
+    const mem = await memoryStore.addL2Memory(memoryInput);
+    return { ok: true, memory: mem };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+});
+
+ipcMain.handle("memory:delete-l2", async (_e, id: string) => {
+  try {
+    await memoryStore.deleteL2(id);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+});
+
+ipcMain.handle("memory:pin-l2", async (_e, id: string, pinned: boolean) => {
+  try {
+    await memoryStore.pinL2(id, pinned);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
 });
 
 ipcMain.on(IPC.TASKS_MINIMIZE, () => {
@@ -4252,6 +4407,11 @@ app.whenReady().then(async () => {
   // 聊天會話存儲 IPC（chats-store.initialize 會建好 cyrene-chats 目錄並加載 index）
   registerChatsIpc();
 
+  // 將舊 Electron 會話逐字回填到永久跨渠道檔案；向量建立失敗時下次啟動自動續跑。
+  void backfillStoredConversationHistory().catch((error) => {
+    console.warn("[History] 永久歷史回填失敗，稍後啟動會重試:", error);
+  });
+
   // 歷史召回工具（recall_history）——讓模型能回憶滾出窗口的對話
   registerRecallHistoryTool();
 
@@ -4348,29 +4508,29 @@ function buildFriendsVagueMemoryPrompt(): string {
     const data: FriendsMemoryData = JSON.parse(fs.readFileSync(file, "utf8"));
     const interactions = data.interactions ?? [];
     if (!interactions.length) return "";
-    
+
     const groups: Record<string, number> = {};
     for (const item of interactions) {
       const date = new Date(item.timestamp);
       const dateStr = date.getFullYear() + "-" + String(date.getMonth() + 1).padStart(2, "0") + "-" + String(date.getDate()).padStart(2, "0");
       groups[dateStr] = (groups[dateStr] ?? 0) + 1;
     }
-    
+
     const now = new Date();
     const todayStr = now.getFullYear() + "-" + String(now.getMonth() + 1).padStart(2, "0") + "-" + String(now.getDate()).padStart(2, "0");
-    
+
     const lines: string[] = [];
     lines.push("昔漣的記憶片段（朋友來訪）：");
-    
+
     if (groups[todayStr]) {
       lines.push("- 今天（" + todayStr + "）：夥伴帶了許多朋友來陪你玩喔！你跟夥伴的朋友在 Discord 等頻道進行了 " + groups[todayStr] + " 次簡單對話。你僅記得「有和朋友發過話」，但你絕對沒有記錄任何聊天細節、聊天內容、對話文字，也完全沒有記住其他使用者的名字或 ID，在你的世界裡，他們全部都是『夥伴的朋友』或『朋友』。");
     }
-    
+
     const pastDates = Object.keys(groups).filter(d => d !== todayStr).sort().reverse().slice(0, 3);
     for (const d of pastDates) {
       lines.push("- 之前（" + d + "）：有夥伴的朋友來找你玩（共進行了 " + groups[d] + " 次簡單對話）。同樣地，你只知道有朋友來過，沒有留下任何對話細節或對方姓名。");
     }
-    
+
     return lines.join("\n");
   } catch (err) {
     console.error("[FriendsMemory] Failed to build prompt:", err);
@@ -4382,33 +4542,47 @@ function buildFriendsVagueMemoryPrompt(): string {
     const isOwner = msg.channel !== "discord" || msg.senderId === "798893182883463179";
     const shouldRestrict = !isOwner;
 
+    if (!shouldRestrict) {
+      const archiveTurnId = `channel:${msg.channel}:${sessionId}:${msg.messageId || msg.at.getTime()}`;
+      // 屋主/私人渠道入站即逐字落盤；Discord 訪客維持既有無痕隱私規則。
+      appendConversationEntry({
+        id: `${archiveTurnId}:user`,
+        sessionId,
+        channel: msg.channel,
+        role: "user",
+        content: msg.text,
+        at: msg.at.getTime(),
+        sourceMessageId: msg.messageId,
+      });
+    }
+
     // 安全與隱私保護過濾器
     if (shouldRestrict) {
       recordFriendInteraction(msg.channel);
       const lowerText = msg.text.toLowerCase();
-      
+
       // 不雅、不好聽的字眼
       const profanities = [
-        '幹', '尻', '靠北', '靠杯', '三小', '機掰', '雞掰', '機八', '機8', '婊', '賤', '垃圾', '廢物', 
+        '幹', '尻', '靠北', '靠杯', '三小', '機掰', '雞掰', '機八', '機8', '婊', '賤', '垃圾', '廢物',
         '白癡', '白痴', '智障', '腦殘', '滾開', '去死', '他媽的', '王八蛋', '混蛋',
         'fuck', 'shit', 'bitch', 'asshole', 'bastard', 'cunt', 'dick', 'pussy', 'slut'
       ];
       if (profanities.some(word => lowerText.includes(word))) {
         return "昔漣不喜歡粗魯或是不禮貌的話，請有禮貌一點喔！(•͈⌔•͈⑅)";
       }
-      
+
       // 機密與金鑰防護：防止非屋主打聽 API Key, token, password, 密鑰等
       const securityKeywords = ['api', 'key', 'token', 'secret', '金鑰', '密鑰', '密碼', 'password', '帳號', '帳密'];
       if (securityKeywords.some(keyword => lowerText.includes(keyword))) {
         return "昔漣不知道這些事情喔！(•͈⌔•͈⑅)";
       }
-      
+
       // 隱私防護：打聽屋主與昔漣的秘密或對話關係
       const privacyKeywords = ['clark', 'owner', '屋主', '老大', '主子', '羅育穎', 'yuying'];
       if (privacyKeywords.some(name => lowerText.includes(name))) {
         const privacyTriggers = [
-          '關係', '秘密', '祕密', '悄悄話', '私聊', '私訊', '感情', '私密', 
-          '對話', '聊天內容', '聊了什麼', '記憶', '喜歡', '討厭', '是誰', 
+          '關係', '秘密', '祕密', '悄悄話', '私聊', '私訊', '感情', '私密',
+          '對話', '聊天內容', '聊了什麼', '記憶', '喜歡', '討厭', '是誰',
           '做什麼', '資料', '訊息', '照片', '哪裡', '幾歲'
         ];
         if (privacyTriggers.some(action => lowerText.includes(action))) {
@@ -4474,11 +4648,28 @@ function buildFriendsVagueMemoryPrompt(): string {
 
     // 把 IncomingMessage 轉成 AguiRunInput，調 CyreneAgent
     const vagueMemoryStr = buildFriendsVagueMemoryPrompt();
+    const imageQuery = msg.text.replace(/\n?\[附件:[^\]]+\]/g, "").trim();
+    const visionPolicy = loadVisionRuntimePolicy();
+    const hasImageAttachment = (msg.attachments ?? []).some((attachment) => attachment.kind === "image");
     const automaticImageContext = await buildAutomaticImageContext(
       msg.attachments,
-      msg.text.replace(/\n?\[附件:[^\]]+\]/g, "").trim(),
-      loadVisionConfig(),
+      imageQuery,
+      shouldAnalyzeImages(imageQuery, visionPolicy) ? loadVisionConfig() : null,
+      { maxImages: visionPolicy.maxImages, maxImageBytes: visionPolicy.maxImageBytes },
     );
+    const channelArchiveTurnId = `channel:${msg.channel}:${sessionId}:${msg.messageId || msg.at.getTime()}`;
+    if (automaticImageContext && !shouldRestrict) {
+      const photoMemory = buildDurablePhotoMemory(automaticImageContext, imageQuery, msg.attachments);
+      if (photoMemory) {
+        void indexDurablePhotoMemory({
+          id: `${channelArchiveTurnId}:image-memory`,
+          sessionId,
+          channel: msg.channel,
+          content: photoMemory,
+          at: msg.at.getTime(),
+        });
+      }
+    }
     const agentMessages = [
       ...historyMessages,
       ...(msg.agentContext ? [{ role: "system" as const, content: msg.agentContext }] : []),
@@ -4517,6 +4708,16 @@ ${vagueMemoryStr ? vagueMemoryStr : ""}`
     // 放在身份／隱私規則之後，成為本輪最後且最高優先的事實，避免舊的能力提示覆蓋視覺結果。
     if (automaticImageContext) {
       agentMessages.push({ role: "system", content: automaticImageContext } as any);
+    } else if (hasImageAttachment) {
+      const reason = !visionPolicy.enabled
+        ? "視覺功能目前已在設定中關閉"
+        : !visionPolicy.autoAnalyze && !explicitlyRequestsImageUnderstanding(imageQuery)
+          ? "自動查看附圖目前關閉，且本輪沒有明確要求查看圖片"
+          : "圖片讀取或辨識失敗";
+      agentMessages.push({
+        role: "system",
+        content: `【本輪圖片未辨識：${reason}】不可猜測圖片內容；請如實、簡短告知使用者。`,
+      } as any);
     }
 
     const customizedBuildOptionsDeps = !shouldRestrict ? buildOptionsDeps : {
@@ -4528,7 +4729,9 @@ ${vagueMemoryStr ? vagueMemoryStr : ""}`
       buildRelationshipContext: async () => {
         console.log(`[Channels] Incognito mode: bypassing buildRelationshipContext for non-owner ${msg.senderId}`);
         return "";
-      }
+      },
+      buildMemoryInjection: async () => "",
+      buildProactiveHistoryContext: async () => "",
     };
 
     const { options } = await buildAgentRunOptions(
@@ -4547,6 +4750,16 @@ ${vagueMemoryStr ? vagueMemoryStr : ""}`
     // 把過濾後的 tools 注入 options（覆蓋默認的 getEnabledTools）
     options.tools = filteredTools;
 
+    // Discord 一旦確認 OpenRouter Free 額度用盡，本次程序後續都直接走
+    // Gemini；非屋主在送進模型前就停止，避免把他人的內容交給 Gemini。
+    let activeGeminiProfile: ReturnType<typeof getConfiguredGeminiFallback> = null;
+    if (msg.channel === "discord" && isDiscordGeminiFallbackActive()) {
+      if (msg.senderId !== DISCORD_OWNER_ID) return "";
+      const configuredModels = loadModelSettings();
+      activeGeminiProfile = getConfiguredGeminiFallback({ ...configuredModels, ...options.settings });
+      if (activeGeminiProfile) options.settings = activeGeminiProfile;
+    }
+
     const runChannelAgent = (candidate: CyreneAgent): Promise<string> => new Promise<string>((resolve, reject) => {
       candidate.runWithEvents(options).subscribe({
         complete: () => {
@@ -4559,30 +4772,69 @@ ${vagueMemoryStr ? vagueMemoryStr : ""}`
       threadId: `thread-${sessionId}-${Date.now()}`,
       description: `bot:${msg.channel}:${msg.senderId}`,
     });
+
+    const runGeminiWithResilience = async (
+      profile: NonNullable<ReturnType<typeof getConfiguredGeminiFallback>>,
+    ): Promise<string> => {
+      const models = [...new Set([profile.model, GEMINI_STABLE_FALLBACK_MODEL])];
+      let lastError: unknown = new Error("Gemini 沒有可用模型");
+
+      for (const model of models) {
+        const attempts = model === profile.model ? 2 : 1;
+        for (let attempt = 0; attempt < attempts; attempt += 1) {
+          if (attempt > 0) {
+            await new Promise((resolve) => setTimeout(resolve, 900 * attempt));
+          }
+          options.settings = { ...profile, model };
+          agent = new CyreneAgent({
+            threadId: `thread-${sessionId}-${Date.now()}-gemini-${model}-${attempt + 1}`,
+            description: `bot:${msg.channel}:${msg.senderId}:gemini-fallback`,
+          });
+          try {
+            return await runChannelAgent(agent);
+          } catch (error) {
+            lastError = error;
+            console.warn(
+              `[Channels] Gemini ${model} 第 ${attempt + 1}/${attempts} 次失敗：`,
+              error instanceof Error ? error.message : error,
+            );
+            if (!isRetryableGeminiError(error)) break;
+          }
+        }
+        if (!canTryAlternateGeminiModel(lastError)) throw lastError;
+      }
+      throw lastError;
+    };
+
     let reply: string;
-    try {
-      reply = await runChannelAgent(agent);
-    } catch (error) {
-      const configuredModels = loadModelSettings();
-      const fallbackSource = { ...configuredModels, ...options.settings };
-      const gemini = msg.channel === "discord"
-        ? getGeminiOwnerFallback(fallbackSource, msg.senderId, error)
-        : null;
-      if (gemini) {
-        console.warn("[Channels] OpenRouter 免費額度用盡；僅為 Discord 屋主切換 Gemini 備援。");
-        options.settings = gemini;
-        agent = new CyreneAgent({
-          threadId: `thread-${sessionId}-${Date.now()}-gemini-fallback`,
-          description: `bot:${msg.channel}:${msg.senderId}:gemini-fallback`,
-        });
+    if (activeGeminiProfile) {
+      try {
+        reply = await runGeminiWithResilience(activeGeminiProfile);
+      } catch (error) {
+        console.error("[Channels] Gemini 備援模型全部失敗:", error);
+        return "Gemini 現在有點忙，已經替你重試過了；請稍等一下再叫我喔！";
+      }
+    } else {
+      try {
         reply = await runChannelAgent(agent);
-      } else if (
-        msg.channel === "discord"
-        && isDiscordNonOwnerQuotaFailure(fallbackSource, msg.senderId, error)
-      ) {
-        return "今天的免費聊天額度已經用完了，請晚一點再來找昔漣喔！";
-      } else {
-        throw error;
+      } catch (error) {
+        const configuredModels = loadModelSettings();
+        const fallbackSource = { ...configuredModels, ...options.settings };
+        const quotaExhausted = msg.channel === "discord"
+          && isOpenRouterFreeQuotaError(error, fallbackSource);
+        const gemini = quotaExhausted ? getConfiguredGeminiFallback(fallbackSource) : null;
+        if (!gemini) throw error;
+
+        activateDiscordGeminiFallback();
+        console.warn("[Channels] OpenRouter 免費額度用盡；Discord 已持續切換至 Gemini，僅處理屋主訊息。");
+        if (msg.senderId !== DISCORD_OWNER_ID) return "";
+
+        try {
+          reply = await runGeminiWithResilience(gemini);
+        } catch (geminiError) {
+          console.error("[Channels] Gemini 備援模型全部失敗:", geminiError);
+          return "Gemini 現在有點忙，已經替你重試過了；請稍等一下再叫我喔！";
+        }
       }
     }
     // 視覺模型已成功回答時，主聊天模型若仍受舊上下文影響而否認看圖，直接採用視覺答案兜底。
@@ -4608,7 +4860,10 @@ ${vagueMemoryStr ? vagueMemoryStr : ""}`
             companionName: msg.senderName,
           });
         }
-        void indexConversationTurn(sessionId, msg.text, reply);
+        void indexConversationTurn(sessionId, msg.text, reply, {
+          channel: msg.channel,
+          turnId: channelArchiveTurnId,
+        });
       } else {
         console.log(`[Channels] Incognito mode: bypassing onAgentRunFinished/stickers/notebook/index for non-owner ${msg.senderId}`);
       }
@@ -4629,7 +4884,10 @@ ${vagueMemoryStr ? vagueMemoryStr : ""}`
     }
     // 落歷史
     if (!shouldRestrict) {
-      void indexConversationTurn(sessionId, msg.text, reply);
+      void indexConversationTurn(sessionId, msg.text, reply, {
+        channel: msg.channel,
+        turnId: channelArchiveTurnId,
+      });
     }
     return reply;
   });
@@ -4812,6 +5070,8 @@ ${vagueMemoryStr ? vagueMemoryStr : ""}`
     getSceneEmbeddingProvider: () => getSceneEmbeddingProvider() as unknown,
     buildAlwaysOnContext: (async (userText, messages) =>
       buildAlwaysOnContext(userText, messages as any)) as BuildOptionsDeps["buildAlwaysOnContext"],
+    buildMemoryInjection,
+    buildProactiveHistoryContext,
     buildRelationshipContext,
     buildSystemPrompt,
     logWorldbookInjection,
@@ -4847,7 +5107,65 @@ ${vagueMemoryStr ? vagueMemoryStr : ""}`
     getChatWindow: () => chatWindow,
   };
   registerAgUiIpc(
-    async (input: AguiRunInput) => buildAgentRunOptions(input, buildOptionsDeps),
+    async (input: AguiRunInput) => {
+      const imageAttachments = (input.attachments ?? [])
+        .filter((attachment) => attachment.kind === "image" && attachment.filePath)
+        .map((attachment) => ({
+          kind: "image" as const,
+          filePath: attachment.filePath,
+          mime: attachment.mime,
+          caption: attachment.name,
+        }));
+
+      if (imageAttachments.length === 0) {
+        return buildAgentRunOptions(input, buildOptionsDeps);
+      }
+
+      const latestUserMessage = [...input.messages]
+        .reverse()
+        .find((message): message is { role: "user"; content: string } => {
+          if (!message || typeof message !== "object") return false;
+          const candidate = message as { role?: unknown; content?: unknown };
+          return candidate.role === "user" && typeof candidate.content === "string";
+        });
+      const latestUserText = latestUserMessage
+        ?.content.replace(/\n\n【本輪文件】[\s\S]*$/, "")
+        ?.trim() ?? "請看看我分享的圖片";
+      const visionPolicy = loadVisionRuntimePolicy();
+      const visionConfig = shouldAnalyzeImages(latestUserText, visionPolicy) ? loadVisionConfig() : null;
+      const imageContext = await buildAutomaticImageContext(
+        imageAttachments,
+        latestUserText,
+        visionConfig,
+        { maxImages: visionPolicy.maxImages, maxImageBytes: visionPolicy.maxImageBytes },
+      );
+      if (imageContext) {
+        const photoMemory = buildDurablePhotoMemory(imageContext, latestUserText, imageAttachments);
+        if (photoMemory) {
+          void indexDurablePhotoMemory({
+            id: `desktop-photo:${input.sessionId || "default"}:${Date.now()}`,
+            sessionId: input.sessionId || "default",
+            channel: input.channel || "desktop",
+            content: photoMemory,
+          });
+        }
+      }
+      const fallbackContext = !visionPolicy.enabled
+        ? "【本輪附有圖片，但視覺功能已關閉】不可猜測圖片內容；請簡短告訴使用者可到設定的模型區開啟視覺功能。"
+        : !visionPolicy.autoAnalyze && !explicitlyRequestsImageUnderstanding(latestUserText)
+          ? "【本輪圖片未自動查看】不可猜測圖片內容；請告訴使用者可說『看看這張圖片』來觸發辨識。"
+          : visionConfig
+        ? "【本輪圖片讀取失敗】不可猜測圖片內容；請簡短告訴使用者圖片暫時無法辨識，建議稍後重試。"
+        : "【本輪附有圖片，但尚未設定視覺模型】不可猜測圖片內容；請簡短告訴使用者到設定的模型區啟用或同步視覺模型。";
+
+      return buildAgentRunOptions({
+        ...input,
+        messages: [
+          ...input.messages,
+          { role: "system", content: imageContext || fallbackContext },
+        ],
+      }, buildOptionsDeps);
+    },
     async (result, latestUserText) => {
       await onAgentRunFinished(result, latestUserText, onRunFinishedDeps);
     },
@@ -4899,6 +5217,11 @@ ${vagueMemoryStr ? vagueMemoryStr : ""}`
     console.error("[Cyrene] RAG init FAILED:", err);
   }
 
+  // setup 階段先確保原文已歸檔；RAG 初始化完成後再補跑一次，將所有未索引原文批量向量化。
+  void backfillStoredConversationHistory().catch((error) => {
+    console.warn("[History] RAG 就緒後補建歷史索引失敗，稍後啟動會重試:", error);
+  });
+
   // 初始化表情包 embedding 索引
   try {
     const provider = getEmbeddingProvider();
@@ -4937,7 +5260,7 @@ ${vagueMemoryStr ? vagueMemoryStr : ""}`
       if (!settings.apiKey) {
         throw new Error("還沒有填寫 API Key，請先在設置裡保存 API 配置。");
       }
-      
+
       const promptMessages = [
         {
           role: "system" as const,
@@ -4948,7 +5271,7 @@ ${vagueMemoryStr ? vagueMemoryStr : ""}`
           content: description
         }
       ];
-      
+
       const result = await callChatCompletions(
         settings,
         promptMessages,
@@ -5158,7 +5481,114 @@ ${vagueMemoryStr ? vagueMemoryStr : ""}`
   });
 
   schedulerEngine.start();
+  try {
+    registerGlobalMediaShortcuts();
+  } catch (err) {
+    console.warn("[GlobalShortcuts] Initialization failed:", err);
+  }
 });
+
+function registerGlobalMediaShortcuts(): void {
+  const getDiscordAdapter = () => {
+    try {
+      return channelManager.getAdapter("discord") as any;
+    } catch {
+      return null;
+    }
+  };
+
+  const reg = (key: string, handler: () => void) => {
+    try {
+      const success = globalShortcut.register(key, handler);
+      if (!success) {
+        console.warn(`[GlobalShortcuts] Failed to register: ${key}`);
+      } else {
+        console.log(`[GlobalShortcuts] Successfully registered: ${key}`);
+      }
+    } catch (err) {
+      console.warn(`[GlobalShortcuts] Error registering: ${key}`, err);
+    }
+  };
+
+  // F7 / MediaPreviousTrack -> Previous Track
+  const handlePrevious = async () => {
+    console.log("[GlobalShortcuts] Previous track command triggered");
+    const adapter = getDiscordAdapter();
+    if (adapter?.voiceCall) {
+      await adapter.voiceCall.controlMusic("previous");
+    }
+  };
+  reg("F7", handlePrevious);
+  reg("MediaPreviousTrack", handlePrevious);
+
+  // F8 / MediaPlayPause -> Play/Pause
+  const handlePlayPause = async () => {
+    console.log("[GlobalShortcuts] Play/Pause command triggered");
+    const adapter = getDiscordAdapter();
+    if (adapter?.voiceCall) {
+      const state = adapter.getMusicState();
+      const command = state.paused ? "resume" : "pause";
+      await adapter.voiceCall.controlMusic(command);
+    }
+  };
+  reg("F8", handlePlayPause);
+  reg("MediaPlayPause", handlePlayPause);
+
+  // F9 / MediaNextTrack -> Next Track (Skip)
+  const handleNext = async () => {
+    console.log("[GlobalShortcuts] Next track command triggered");
+    const adapter = getDiscordAdapter();
+    if (adapter?.voiceCall) {
+      await adapter.voiceCall.controlMusic("skip");
+    }
+  };
+  reg("F9", handleNext);
+  reg("MediaNextTrack", handleNext);
+
+  // F10 -> Toggle Mute
+  let lastVolume = 100;
+  const handleMute = async () => {
+    console.log("[GlobalShortcuts] Toggle Mute triggered");
+    const adapter = getDiscordAdapter();
+    if (adapter?.voiceCall) {
+      const state = adapter.getMusicState();
+      const currentVol = state.volume ?? 100;
+      if (currentVol > 0) {
+        lastVolume = currentVol;
+        await adapter.voiceCall.controlMusic("volume", 0);
+      } else {
+        await adapter.voiceCall.controlMusic("volume", lastVolume);
+      }
+    }
+  };
+  reg("F10", handleMute);
+
+  // F11 -> Volume Down
+  const handleVolumeDown = async () => {
+    console.log("[GlobalShortcuts] Volume Down triggered");
+    const adapter = getDiscordAdapter();
+    if (adapter?.voiceCall) {
+      const state = adapter.getMusicState();
+      const currentVol = state.volume ?? 100;
+      const targetVol = Math.max(0, currentVol - 10);
+      await adapter.voiceCall.controlMusic("volume", targetVol);
+    }
+  };
+  reg("F11", handleVolumeDown);
+
+  // F12 -> Volume Up
+  const handleVolumeUp = async () => {
+    console.log("[GlobalShortcuts] Volume Up triggered");
+    const adapter = getDiscordAdapter();
+    if (adapter?.voiceCall) {
+      const state = adapter.getMusicState();
+      const currentVol = state.volume ?? 100;
+      const targetVol = Math.min(150, currentVol + 10);
+      await adapter.voiceCall.controlMusic("volume", targetVol);
+    }
+  };
+  reg("F12", handleVolumeUp);
+}
 
 // 雲端 Discord Bot 會持續在線；桌面視窗全關閉時也應真正結束本機程序，
 // 避免隱藏在背景的 Discord client 與雲端同時搶同一個 interaction。
@@ -5173,6 +5603,12 @@ app.on("before-quit", () => {
   flushTokenUsage();
   flushCallUsage();
   void shutdownChannels();
+  try {
+    globalShortcut.unregisterAll();
+    console.log("[GlobalShortcuts] Unregistered all shortcuts.");
+  } catch (err) {
+    console.warn("[GlobalShortcuts] Failed to unregister shortcuts:", err);
+  }
 });
 
 app.on("activate", () => {

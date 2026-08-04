@@ -5,6 +5,13 @@ export type CloudBotConfig = {
   llmModel: string;
   /** 有圖片時使用的 OpenRouter／OpenAI 相容模型；未設定則沿用 llmModel。 */
   llmVisionModel: string;
+  /** OpenRouter 免費額度耗盡時使用的 Google Gemini OpenAI 相容端點。 */
+  geminiApiKey?: string;
+  geminiBaseUrl: string;
+  geminiModel: string;
+  spotifyClientId?: string;
+  spotifyClientSecret?: string;
+  spotifyRefreshToken?: string;
   allowedUserIds: Set<string>;
   allowedGuildIds: Set<string>;
   allowedChannelIds: Set<string>;
@@ -51,6 +58,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): CloudBotConfig
     llmBaseUrl: (env.LLM_BASE_URL?.trim() || (openRouterKey ? "https://openrouter.ai/api/v1" : "https://api.openai.com/v1")).replace(/\/+$/, ""),
     llmModel: env.LLM_MODEL?.trim() || (openRouterKey ? "openrouter/free" : "gpt-4.1-mini"),
     llmVisionModel: env.LLM_VISION_MODEL?.trim() || env.LLM_MODEL?.trim() || (openRouterKey ? "openrouter/free" : "gpt-4.1-mini"),
+    geminiApiKey: env.GEMINI_API_KEY?.trim() || undefined,
+    geminiBaseUrl: (env.GEMINI_BASE_URL?.trim() || "https://generativelanguage.googleapis.com/v1beta/openai").replace(/\/+$/, ""),
+    geminiModel: env.GEMINI_MODEL?.trim() || "gemini-3.5-flash-lite",
+    spotifyClientId: env.SPOTIFY_CLIENT_ID?.trim() || undefined,
+    spotifyClientSecret: env.SPOTIFY_CLIENT_SECRET?.trim() || undefined,
+    spotifyRefreshToken: env.SPOTIFY_REFRESH_TOKEN?.trim() || undefined,
     allowedUserIds,
     allowedGuildIds: parseIdList(env.DISCORD_ALLOWED_GUILD_IDS),
     allowedChannelIds: parseIdList(env.DISCORD_ALLOWED_CHANNEL_IDS),

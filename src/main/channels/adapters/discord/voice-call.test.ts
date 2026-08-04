@@ -1,10 +1,22 @@
 import { describe, expect, it, vi } from "vitest";
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
-import { DiscordVoiceCall, discordMusicVolumeGain, formatDiscordMusicActivity, formatDiscordMusicActivityDescription, parseDiscordVoiceCommand, stereo48kToMono16k } from "./voice-call";
+import os from "node:os";
+import path from "node:path";
+import { promises as fs } from "node:fs";
+import { DiscordVoiceCall, discordMusicVolumeGain, formatDiscordMusicActivity, formatDiscordMusicActivityDescription, parseDiscordVoiceCommand, shouldAutoShuffleSpotifyPlaylist, stereo48kToMono16k } from "./voice-call";
 import * as musicSource from "./music-source";
 
 describe("Discord voice commands", () => {
+  it("automatically enables shuffle only for multi-track Spotify playlists", () => {
+    expect(shouldAutoShuffleSpotifyPlaylist([
+      { title: "A", url: "https://open.spotify.com/track/a", playlistUrl: "https://open.spotify.com/playlist/mix", index: 1, total: 2 },
+      { title: "B", url: "https://open.spotify.com/track/b", playlistUrl: "https://open.spotify.com/playlist/mix", index: 2, total: 2 },
+    ])).toBe(true);
+    expect(shouldAutoShuffleSpotifyPlaylist([
+      { title: "A", url: "https://youtube.com/watch?v=a", index: 1, total: 1 },
+    ])).toBe(false);
+  });
   it.each(["加入通話", "進來通話！", "加入語音頻道", "陪我通話"])("parses join: %s", (text) => {
     expect(parseDiscordVoiceCommand(text)).toBe("join");
   });
@@ -182,7 +194,13 @@ describe("Discord desktop music state", () => {
   });
 
   it("keeps the current song, progress and queue resumable after leaving", async () => {
-    const voice = new DiscordVoiceCall({ user: { setPresence: () => undefined } } as never, () => ({ enabled: true } as never), async () => null);
+    const voice = new DiscordVoiceCall(
+      { user: { setPresence: () => undefined } } as never,
+      () => ({ enabled: true } as never),
+      async () => null,
+      undefined,
+      path.join(os.tmpdir(), `cyrene-resume-${process.pid}-${Date.now()}.json`),
+    );
     const internal = voice as unknown as Record<string, any>;
     internal.mode = "music";
     internal.connection = { destroy: () => undefined };
@@ -192,7 +210,9 @@ describe("Discord desktop music state", () => {
     internal.musicOwnerId = "owner";
     internal.musicResource = { playbackDuration: 210_000 };
 
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     await voice.leave();
+    warn.mockRestore();
 
     expect(voice.getMusicState()).toMatchObject({
       active: false,
@@ -204,5 +224,55 @@ describe("Discord desktop music state", () => {
     });
     expect(voice.canControlMusic("owner")).toBe(true);
     expect(voice.canControlMusic("someone-else")).toBe(false);
+  });
+
+  it("restores a complete resumable session in a brand-new voice-call instance", async () => {
+    const resumePath = path.join(os.tmpdir(), `cyrene-restart-${process.pid}-${Date.now()}.json`);
+    const createVoice = () => new DiscordVoiceCall(
+      { user: { setPresence: () => undefined } } as never,
+      () => ({ enabled: true } as never),
+      async () => null,
+      undefined,
+      resumePath,
+    );
+    try {
+      const beforeRestart = createVoice();
+      const internal = beforeRestart as unknown as Record<string, any>;
+      internal.mode = "music";
+      internal.connection = {};
+      internal.player = { state: { status: "playing" } };
+      internal.currentMusicTrack = { title: "unlasting — LiSA", url: "https://open.spotify.com/track/current", index: 47, total: 100, duration: 295, queueOrder: 47 };
+      internal.musicQueue = [
+        { title: "Next A", url: "https://example.com/a", index: 48, total: 100, queueOrder: 48 },
+        { title: "Next B", url: "https://example.com/b", index: 49, total: 100, queueOrder: 49 },
+      ];
+      internal.musicHistory = [{ title: "Previous", url: "https://example.com/previous", index: 46, total: 100, queueOrder: 46 }];
+      internal.musicOwnerId = "owner";
+      internal.musicVolume = 75;
+      internal.musicRepeat = "queue";
+      internal.musicShuffle = true;
+      internal.musicAutoplay = true;
+      internal.musicResource = { playbackDuration: 211_000 };
+      await beforeRestart.checkpointMusicSession();
+
+      const afterRestart = createVoice();
+      expect(await afterRestart.restoreSuspendedMusicSession()).toBe(true);
+      expect(afterRestart.getMusicState()).toMatchObject({
+        active: false,
+        resumable: true,
+        paused: true,
+        current: { title: "unlasting — LiSA", index: 47, total: 100 },
+        queue: [{ title: "Next A" }, { title: "Next B" }],
+        volume: 75,
+        repeat: "queue",
+        shuffle: true,
+        autoplay: true,
+        elapsed: 211,
+      });
+      expect(afterRestart.canControlMusic("owner")).toBe(true);
+      expect(afterRestart.canControlMusic("intruder")).toBe(false);
+    } finally {
+      await fs.rm(resumePath, { force: true });
+    }
   });
 });

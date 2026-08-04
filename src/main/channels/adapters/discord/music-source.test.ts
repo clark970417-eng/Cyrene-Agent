@@ -54,6 +54,7 @@ describe("Discord music request parsing", () => {
       "--fragment-retries", "5",
       "--retry-sleep", "1",
       "--socket-timeout", "20",
+      "--ffmpeg-location", expect.stringMatching(/ffmpeg-static[\\/]ffmpeg$/),
       "--format", "bestaudio/best",
       "--output", "-",
       "ytsearch1:Song Artist",

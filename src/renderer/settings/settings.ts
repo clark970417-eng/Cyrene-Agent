@@ -6,6 +6,7 @@ import {
   formatChatRelativeTime,
   type ChatSessionMetaUI,
 } from "../../shared/chat-ui";
+import type { Chart as ChartInstance, ChartConfiguration } from "chart.js";
 
 // Inline modal (to avoid Vite tree-shaking)
 let _cyModalOverlay: HTMLElement | null = null;
@@ -168,6 +169,10 @@ interface ModelSettings {
   stickerSize: "small" | "standard" | "large";
   stickerSimilarityThreshold: number;
   vision?: {
+    enabled?: boolean;
+    autoAnalyze?: boolean;
+    maxImages?: number;
+    maxImageMb?: number;
     syncWithMain: boolean;
     baseUrl: string;
     apiKey: string;
@@ -891,6 +896,10 @@ const visionModelInput = document.getElementById("vision-model") as HTMLInputEle
 const visionFieldsWrap = document.querySelector(".vision-fields") as HTMLElement;
 const testVisionBtn = document.getElementById("test-vision-btn") as HTMLButtonElement;
 const visionTestStatus = document.getElementById("vision-test-status") as HTMLElement;
+const visionEnabledInput = document.getElementById("vision-enabled") as HTMLInputElement;
+const visionAutoAnalyzeInput = document.getElementById("vision-auto-analyze") as HTMLInputElement;
+const visionMaxImagesSelect = document.getElementById("vision-max-images") as HTMLSelectElement;
+const visionMaxImageMbSelect = document.getElementById("vision-max-image-mb") as HTMLSelectElement;
 
 // 渲染端內存緩存：保存每個廠商上一次填寫的 baseUrl / model / apiKey
 // 切廠商時從這裡讀，保存時同步進去；持久化由 main 進程的 saveModelSettings 負責（perProvider 字段）。
@@ -1124,7 +1133,15 @@ function getCurrentModelValue(): string {
  * 用 visionBaseUrl 填視覺框，讓用戶看到的就是正確的視覺入口，不用手動改。
  */
 function applyVisionSyncUI(): void {
+  const enabled = visionEnabledInput.checked;
   const synced = visionSyncMainBtn.classList.contains("is-active");
+  visionSyncMainBtn.disabled = !enabled;
+  visionSyncIndepBtn.disabled = !enabled;
+  visionAutoAnalyzeInput.disabled = !enabled;
+  visionMaxImagesSelect.disabled = !enabled;
+  visionMaxImageMbSelect.disabled = !enabled;
+  testVisionBtn.disabled = !enabled;
+  visionFieldsWrap.closest(".vision-config-section")?.classList.toggle("is-disabled", !enabled);
   if (synced) {
     visionFieldsWrap.classList.add("is-locked");
     // 找當前廠商 preset，看有沒有 visionBaseUrl
@@ -1135,6 +1152,9 @@ function applyVisionSyncUI(): void {
     visionModelInput.value = getCurrentModelValue();
   } else {
     visionFieldsWrap.classList.remove("is-locked");
+  }
+  for (const input of [visionBaseUrlInput, visionApiKeyInput, visionModelInput]) {
+    input.disabled = !enabled;
   }
 }
 
@@ -1232,6 +1252,10 @@ async function loadConfig(): Promise<void> {
     // 視覺模型配置
     const vision = cfg.vision;
     if (vision) {
+      visionEnabledInput.checked = vision.enabled !== false;
+      visionAutoAnalyzeInput.checked = vision.autoAnalyze !== false;
+      visionMaxImagesSelect.value = String(Math.max(1, Math.min(4, vision.maxImages ?? 4)));
+      visionMaxImageMbSelect.value = String([1, 5, 10].includes(vision.maxImageMb ?? 10) ? (vision.maxImageMb ?? 10) : 10);
       setVisionSyncState(vision.syncWithMain);
       visionBaseUrlInput.value = vision.baseUrl || "";
       visionApiKeyInput.value = vision.apiKey || "";
@@ -1240,6 +1264,10 @@ async function loadConfig(): Promise<void> {
       // 用戶從未配過視覺。按當前主模型 supportsVision 決定默認——
       // 多模態主模型用戶開箱即用（默認"與主相同"），非視覺主模型則默認"獨立配置"。
       const preset = findPreset(cfg.provider);
+      visionEnabledInput.checked = preset?.supportsVision === true;
+      visionAutoAnalyzeInput.checked = true;
+      visionMaxImagesSelect.value = "4";
+      visionMaxImageMbSelect.value = "10";
       setVisionSyncState(preset?.supportsVision === true);
       visionBaseUrlInput.value = "";
       visionApiKeyInput.value = "";
@@ -1345,10 +1373,16 @@ petZoomInput.addEventListener("change", () => {
 });
 
 uiThemeSelect.querySelectorAll<HTMLButtonElement>(".option-block").forEach((button) => {
-  button.addEventListener("click", () => {
+  button.addEventListener("click", async () => {
     const theme = normalizeUiTheme(button.dataset.theme);
     applyUiThemeSelection(theme);
-    setGeneralSaveStatus("有未保存的更改");
+    setGeneralSaveStatus("正在套用主題…");
+    try {
+      await window.settings!.saveGeneral({ uiTheme: theme });
+      setGeneralSaveStatus("主題已套用", "is-ok");
+    } catch {
+      setGeneralSaveStatus("主題套用失敗", "is-error");
+    }
   });
 });
 
@@ -2118,6 +2152,13 @@ visionSyncIndepBtn.addEventListener("click", () => {
   applyVisionSyncUI();
   setSaveStatus("有未保存的更改");
 });
+visionEnabledInput.addEventListener("change", () => {
+  applyVisionSyncUI();
+  setSaveStatus("有未保存的更改");
+});
+for (const control of [visionAutoAnalyzeInput, visionMaxImagesSelect, visionMaxImageMbSelect]) {
+  control.addEventListener("change", () => setSaveStatus("有未保存的更改"));
+}
 
 // 主配置變化時，若處於"與主相同"，聯動更新視覺三框。
 // baseUrl 用 visionBaseUrl（若有），其他直接複製。
@@ -2327,6 +2368,10 @@ async function persistApiSettings(): Promise<void> {
     apiKey: apiKeyInput.value.trim(),
     explicitTransport: transportSelect.value as "openai" | "anthropic" | "auto",
     vision: {
+      enabled: visionEnabledInput.checked,
+      autoAnalyze: visionAutoAnalyzeInput.checked,
+      maxImages: Number(visionMaxImagesSelect.value),
+      maxImageMb: Number(visionMaxImageMbSelect.value),
       syncWithMain: isVisionSynced(),
       // syncWithMain=true 時三字段傳空（main 進程不落盤，運行時從主配置讀）
       baseUrl: isVisionSynced() ? "" : visionBaseUrlInput.value.trim(),
@@ -2553,12 +2598,16 @@ function switchSection(section: string): void {
   if (isSkills) void renderSkills();
   const tokenPanel = document.getElementById("token-panel");
   if (tokenPanel) tokenPanel.classList.toggle("is-hidden", !isTokens);
-  if (isTokens) void refreshAgentActivity(7);
+  if (isTokens) {
+    void refreshTokenPanel(tokenRangeDays);
+    void refreshAgentActivity(tokenRangeDays);
+  }
   const securityPanel = document.getElementById("security-panel");
   if (securityPanel) securityPanel.classList.toggle("is-hidden", !isSecurity);
   if (isSecurity) void loadSecurityPanel();
   const channelsPanel = document.getElementById("channels-panel");
   if (channelsPanel) channelsPanel.classList.toggle("is-hidden", !isChannels);
+  setChannelsPolling(isChannels);
   if (isChannels) {
     void loadChannelsPanel().then(() => {
       if (!isDiscordChannel) return;
@@ -2977,6 +3026,27 @@ let discordMusicRefreshTimer: number | null = null;
 let discordMusicVolumeTimer: number | null = null;
 let spotifyStatus: SpotifyPlaybackStatus = { configured: false, connected: false, devices: [] };
 let spotifyRefreshTimer: number | null = null;
+
+function setChannelsPolling(active: boolean): void {
+  if (discordMusicRefreshTimer != null) {
+    window.clearInterval(discordMusicRefreshTimer);
+    discordMusicRefreshTimer = null;
+  }
+  if (spotifyRefreshTimer != null) {
+    window.clearInterval(spotifyRefreshTimer);
+    spotifyRefreshTimer = null;
+  }
+  if (!active || document.visibilityState === "hidden") return;
+
+  // 音樂狀態需要接近即時，但只在使用者真的看著「連接手機」面板時輪詢。
+  discordMusicRefreshTimer = window.setInterval(() => void refreshDiscordMusic(), 2_000);
+  spotifyRefreshTimer = window.setInterval(() => void refreshSpotify(), 5_000);
+}
+
+document.addEventListener("visibilitychange", () => {
+  const channelsPanel = document.getElementById("channels-panel");
+  setChannelsPolling(!!channelsPanel && !channelsPanel.classList.contains("is-hidden"));
+});
 let spotifyVolumeTimer: number | null = null;
 
 function setDiscordProfileFeedback(kind: "info" | "ok" | "err", message: string): void {
@@ -3483,10 +3553,6 @@ async function loadChannelsPanel(): Promise<void> {
     renderChannelStatus(channelsFeishuStatusEl, status.feishu?.phase ?? "offline", status.feishu?.message);
     renderChannelStatus(channelsDiscordStatusEl, status.discord?.phase ?? "offline", status.discord?.message);
     await Promise.all([refreshDiscordProfile(), refreshDiscordMusic(), refreshSpotify(), refreshBilibili()]);
-    if (discordMusicRefreshTimer == null) {
-      discordMusicRefreshTimer = window.setInterval(() => void refreshDiscordMusic(), 1000);
-    }
-    if (spotifyRefreshTimer == null) spotifyRefreshTimer = window.setInterval(() => void refreshSpotify(), 3000);
     // Phase 3.4：拉一次消息日誌
     void refreshChannelsLog();
 
@@ -4034,9 +4100,6 @@ channelsLogClearBtn?.addEventListener("click", async () => {
   await refreshChannelsLog();
 });
 
-// 首次進入 channels panel 時拉一次日誌
-// （也可以在用戶展開 details 時再拉，但保持簡單直接拉）
-void loadChannelsPanel();
 // 啟動時讀 URL hash 決定初始標籤（main 通過 loadURL 帶 #api 實現"切換模型按鈕跳 API"）。
 // 無 hash 默認 general。
 const initialSection = (window.location.hash || "#general").slice(1);
@@ -5473,9 +5536,15 @@ window.chatStore?.onActiveSessionChanged((sessionId) => {
    - 全空時顯示空態（暫無用量數據）
    ============================================================ */
 
-import { Chart, registerables, type ChartConfiguration } from "chart.js";
+let chartModulePromise: Promise<typeof import("chart.js")> | null = null;
 
-Chart.register(...registerables);
+async function loadChartModule(): Promise<typeof import("chart.js")> {
+  chartModulePromise ??= import("chart.js").then((module) => {
+    module.Chart.register(...module.registerables);
+    return module;
+  });
+  return chartModulePromise;
+}
 
 interface TokenDayData {
   date: string;       // ISO 日期 "06-15"
@@ -5603,12 +5672,14 @@ function hideTokenTooltip(): void {
 }
 
 // Chart.js 波浪面積圖
-let tokenTrendChart: Chart | null = null;
+let tokenTrendChart: ChartInstance | null = null;
 let tokenRangeDays = 7;
 
-function renderTokenTrendChart(data: TokenDayData[]): void {
+async function renderTokenTrendChart(data: TokenDayData[]): Promise<void> {
   const canvas = document.getElementById("token-trend-chart") as HTMLCanvasElement | null;
   if (!canvas) return;
+
+  const { Chart } = await loadChartModule();
 
   // 銷燬舊實例避免重疊
   if (tokenTrendChart) { tokenTrendChart.destroy(); tokenTrendChart = null; }
@@ -5762,7 +5833,7 @@ async function refreshTokenPanel(days: number): Promise<void> {
   if (chartsEl) chartsEl.classList.remove("is-hidden");
   updateTokenStats(data);
   renderTokenBarChart(data);
-  renderTokenTrendChart(data);
+  await renderTokenTrendChart(data);
 }
 
 // 時間範圍按鈕交互
@@ -5852,9 +5923,7 @@ document.getElementById("diagnostic-export-btn")?.addEventListener("click", asyn
   }
 });
 
-// 初始渲染
-void refreshTokenPanel(7);
-void refreshAgentActivity(tokenRangeDays);
+// Token 圖表與 Chart.js 只在切到此面板時載入，避免每次打開設定頁都先解析大型圖表套件。
 
 /* ============================================================
    🎙️ TTS 設置面板交互

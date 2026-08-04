@@ -80,6 +80,7 @@ export const IPC = {
 
   // chat sessions (multi-conversation history, persisted to userData/cyrene-chats/)
   CHATS_LIST: "chats:list",
+  CHATS_STATS: "chats:stats",
   CHATS_GET: "chats:get",
   CHATS_CREATE: "chats:create",
   CHATS_APPEND: "chats:append",

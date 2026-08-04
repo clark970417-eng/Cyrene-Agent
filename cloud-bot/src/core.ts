@@ -2,7 +2,17 @@ import { createHash } from "node:crypto";
 import type { CloudBotConfig } from "./config.js";
 
 export type ChatRole = "user" | "assistant";
-export type ChatEntry = { sessionId: string; role: ChatRole; content: string; at: number };
+export type ChatEntryKind = "message" | "image_memory";
+export type ChatEntry = {
+  /** 新版永久檔案的穩定事件 ID；舊資料載入時會自動補上。 */
+  id?: string;
+  sessionId: string;
+  channel?: string;
+  role: ChatRole;
+  kind?: ChatEntryKind;
+  content: string;
+  at: number;
+};
 
 function allowed(allowlist: Set<string>, id: string | null | undefined): boolean {
   return allowlist.size === 0 || (!!id && allowlist.has(id));

@@ -178,6 +178,38 @@
                 <h2>視覺模型（可選）</h2>
                 <p>配置後昔漣能看懂圖片。留空則遇到圖片會誠實告知看不了。</p>
               </div>
+              <label class="vision-master-switch" title="Enable vision">
+                <input id="vision-enabled" type="checkbox" checked />
+                <span aria-hidden="true"></span>
+                <b>啟用</b>
+              </label>
+            </div>
+
+            <div class="vision-behavior-grid">
+              <label class="vision-auto-card">
+                <input id="vision-auto-analyze" type="checkbox" checked />
+                <span>
+                  <b>自動查看附圖</b>
+                  <small>開啟後，分享午餐或照片時不必另外說「看圖片」</small>
+                </span>
+              </label>
+              <label class="field">
+                <span>每次最多辨識</span>
+                <select id="vision-max-images">
+                  <option value="1">1 張</option>
+                  <option value="2">2 張</option>
+                  <option value="3">3 張</option>
+                  <option value="4" selected>4 張</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>單張大小上限</span>
+                <select id="vision-max-image-mb">
+                  <option value="1">1 MB</option>
+                  <option value="5">5 MB</option>
+                  <option value="10" selected>10 MB</option>
+                </select>
+              </label>
             </div>
 
             <div class="vision-sync-row">

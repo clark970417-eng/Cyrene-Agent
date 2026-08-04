@@ -1,3 +1,6 @@
+import "../ui/theme";
+import { startVisiblePolling } from "../ui/visible-polling";
+
 declare global {
   interface Window {
     sidebar?: {
@@ -43,7 +46,7 @@ declare global {
     };
     chatStore?: {
       list: () => Promise<Array<{ id: string; title: string; updatedAt: number }>>;
-      getMessages?: (sessionId: string) => Promise<Array<{ role: string }>>;
+      stats: () => Promise<{ sessionCount: number; messageCount: number; userMessageCount: number }>;
       rename: (id: string, title: string) => Promise<unknown>;
       delete: (id: string) => Promise<boolean>;
       onChanged?: (cb: () => void) => () => void;
@@ -82,11 +85,14 @@ if (nextCard) nextCard.style.display = "none";
 if (connCard) connCard.style.display = "none";
 
 const infoPanel = document.querySelector(".info-panel") as HTMLElement | null;
+const compactInfoPanelQuery = window.matchMedia("(max-width: 1120px)");
+let infoPanelRequestedVisible = true;
 
-function setInfoPanelVisible(visible: boolean) {
-  if (infoPanel) {
-    infoPanel.style.display = visible ? "flex" : "none";
-  }
+function setInfoPanelVisible(visible: boolean): boolean {
+  infoPanelRequestedVisible = visible;
+  infoPanel?.classList.toggle("is-tab-hidden", !visible);
+  infoPanel?.style.removeProperty("display");
+  return visible && !compactInfoPanelQuery.matches;
 }
 
 let petDockLayoutRevision = 0;
@@ -125,9 +131,9 @@ tabs.forEach((tab) => {
       setInfoPanelVisible(false);
       syncPetDockVisibilityAfterLayout(false);
     } else {
-      setInfoPanelVisible(true);
+      const panelVisible = setInfoPanelVisible(true);
       const activeInfoTab = document.querySelector(".info-tab.is-active")?.textContent?.trim();
-      syncPetDockVisibilityAfterLayout(activeInfoTab === "概覽");
+      syncPetDockVisibilityAfterLayout(panelVisible && activeInfoTab === "概覽");
     }
 
     if (targetTab === "chat") {
@@ -150,6 +156,12 @@ tabs.forEach((tab) => {
       iframe.src = "../settings/index.html#general";
     }
   });
+});
+
+compactInfoPanelQuery.addEventListener("change", () => {
+  const activeInfoTab = document.querySelector(".info-tab.is-active")?.textContent?.trim();
+  const panelVisible = infoPanelRequestedVisible && !compactInfoPanelQuery.matches;
+  syncPetDockVisibilityAfterLayout(panelVisible && activeInfoTab === "概覽");
 });
 
 let activeMode = "chat";
@@ -452,7 +464,7 @@ async function initStatusSync() {
     void updateRuntimeDisplay();
     window.runtimeState.onChanged(() => { void updateRuntimeDisplay(); });
     window.modelConfig.onChanged(() => { void updateRuntimeDisplay(); });
-    window.setInterval(() => void updateRuntimeDisplay(), 5_000);
+    startVisiblePolling(updateRuntimeDisplay, 30_000);
   }
 
   // 5. 數據統計讀取 (今日概覽)
@@ -554,7 +566,7 @@ async function initStatusSync() {
   // Token 數據來自主進程的持久化用量存儲；定期重讀，讓聊天後的
   // input/output token 累加能在面板仍開啟時同步顯示。
   void updateTokenUsageStats();
-  window.setInterval(() => void updateTokenUsageStats(), 10_000);
+  startVisiblePolling(updateTokenUsageStats, 30_000);
 
   function formatCallDuration(ms: number, compact = false): string {
     const seconds = Math.max(0, Math.floor(ms / 1000));
@@ -623,7 +635,7 @@ async function initStatusSync() {
   }
 
   void updateCallUsageStats();
-  window.setInterval(() => void updateCallUsageStats(), 5_000);
+  startVisiblePolling(updateCallUsageStats, 5_000);
 
   async function updateScheduleVisibility() {
     const summary = document.getElementById("schedule-summary");
@@ -660,31 +672,19 @@ async function initStatusSync() {
   async function updateChatStats() {
     try {
       if (window.chatStore) {
-        const sessions = await window.chatStore.list();
-        if (agentSessionCountEl) agentSessionCountEl.textContent = `${sessions.length} 個會話`;
-        let totalMsgs = 0;
-        let totalInteractions = 0; // 用戶發送次數
-        
-        // 遍歷所有會話統計消息
-        for (const s of sessions) {
-          // 如果 preload 曝露了 getMessages 則統計，否則用預估/預設值
-          if (window.chatStore.getMessages) {
-            const msgs = await window.chatStore.getMessages(s.id);
-            totalMsgs += msgs.length;
-            totalInteractions += msgs.filter(m => m.role === "user").length;
-          }
-        }
-        
-        if (statMessagesEl) statMessagesEl.textContent = String(totalMsgs);
-        if (statInteractionsEl) statInteractionsEl.textContent = String(totalInteractions);
+        const stats = await window.chatStore.stats();
+        if (agentSessionCountEl) agentSessionCountEl.textContent = `${stats.sessionCount} 個會話`;
+        if (statMessagesEl) statMessagesEl.textContent = String(stats.messageCount);
+        if (statInteractionsEl) statInteractionsEl.textContent = String(stats.userMessageCount);
       }
     } catch (err) {
       console.warn("Failed to load chat message stats:", err);
     }
   }
 
-  updateChatStats();
-  setInterval(updateChatStats, 10000);
+  void updateChatStats();
+  startVisiblePolling(updateChatStats, 60_000);
+  window.chatStore?.onChanged?.(() => void updateChatStats());
 }
 
 initStatusSync();
@@ -735,7 +735,7 @@ async function updateConnectionStatus() {
 }
 
 void updateConnectionStatus();
-window.setInterval(() => void updateConnectionStatus(), 5_000);
+startVisiblePolling(updateConnectionStatus, 15_000);
 
 // ── 6. 桌寵停靠與召回管理 ──
 let isPetDocked = true; // 預設為停靠狀態

@@ -267,7 +267,7 @@ export async function getSpotifyPlaylists(limit = 25): Promise<SpotifyPlaylistSu
 
 export async function getSpotifyPlaylistTracks(
   playlist: SpotifyPlaylistSummary,
-  maxItems = 500,
+  maxItems = 5000,
 ): Promise<DiscordMusicTrack[]> {
   const collected: Array<{
     id: string;
@@ -277,7 +277,7 @@ export async function getSpotifyPlaylistTracks(
     imageUrl?: string;
     duration?: number;
   }> = [];
-  const safeMax = Math.max(1, Math.min(500, Math.floor(maxItems)));
+  const safeMax = Math.max(1, Math.min(5000, Math.floor(maxItems)));
   for (let offset = 0; offset < safeMax; offset += 100) {
     const limit = Math.min(100, safeMax - offset);
     const payload = await spotifyApi<{

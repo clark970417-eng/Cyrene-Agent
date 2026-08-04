@@ -320,6 +320,7 @@ export class ChannelDispatcher {
     replyText = normalizeChannelReplyText(replyText);
     const exactVoiceText = extractDiscordExactVoiceText(msg.text);
     if (exactVoiceText !== null) replyText = exactVoiceText;
+    if (!replyText.trim() && !sticker) return null;
 
     // 構造 OutgoingMessage parts
     const parts: OutgoingPart[] = [{ kind: "text", text: replyText }];
