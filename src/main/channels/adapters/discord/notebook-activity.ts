@@ -30,7 +30,7 @@ let writeQueue: Promise<void> = Promise.resolve();
 export function getSharedNotebookPath(): string {
   return process.env.CYRENE_SHARED_NOTEBOOK_PATH
     ? path.resolve(process.env.CYRENE_SHARED_NOTEBOOK_PATH)
-    : path.resolve(process.cwd(), "我們共同的筆記本.md");
+    : path.resolve(process.cwd(), "Shared Notebook.md");
 }
 
 export function onSharedNotebookChanged(listener: NotebookChangedListener): () => void {
@@ -141,7 +141,7 @@ async function appendDailyLine(
     notebook = await fs.readFile(notebookPath, "utf8");
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-    notebook = "# 🌸 昔漣與你的共同筆記本 🌸\n\n## 📅 成長足跡與協作日記\n";
+    notebook = "# 🌸 Cyrene & Partner's Shared Notebook 🌸\n\n## 📅 Growth Timeline & Collaboration Journal\n";
   }
   if (notebook.includes(`<!-- cyrene-discord:${id} -->`)) return false;
   const startMarker = `<!-- cyrene-discord-day:${key}:start -->`;

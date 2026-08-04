@@ -29,7 +29,7 @@
 ### 3. 筆記本、畫板與內容工具
 
 - 新增支援 Markdown 分頁、章節導覽與翻頁效果的雙頁筆記本。
-- 共同筆記本可自動收錄 Discord 一起聽過的歌曲與完成事項，並在內容變更後即時重新整理。
+- Shared Notebook can automatically collect songs played together on Discord and completed actions, then refresh immediately when the content changes.
 - 新增繪圖／圖片生成介面，支援提示詞整理、免費圖片來源與可配置的生成服務。
 - 新增專用學習模式，可依中英文問題切換語言，以 Markdown、LaTeX 與來源查證輔助學術解題。
 - 新增 AI 出題考試介面，可選科目、題數與推理強度，並提供計時、答題解析、成績與錯題回顧。

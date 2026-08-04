@@ -17,7 +17,7 @@ afterEach(async () => {
 async function notebookFile(initial = "# 共同筆記\n\n原本的內容\n"): Promise<string> {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "cyrene-discord-notes-"));
   tempDirs.push(dir);
-  const file = path.join(dir, "我們共同的筆記本.md");
+  const file = path.join(dir, "Shared Notebook.md");
   await fs.writeFile(file, initial, "utf8");
   return file;
 }

@@ -3162,7 +3162,7 @@ ipcMain.handle("sidebar:open-shared-notebook", async () => {
   return false;
 });
 
-// ── 共同筆記本增強 IPC ──────────────────────────────────────
+// ── Shared Notebook enhanced IPC ─────────────────────────────
 ipcMain.handle("sidebar:get-notebook-entries", async () => {
   try {
     const { entries } = await readNotebook();

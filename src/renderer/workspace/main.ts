@@ -126,7 +126,7 @@ tabs.forEach((tab) => {
       updateTitlebarModeText(targetTab);
     }
 
-    // 如果是共同筆記本、遊戲房或考試模式，隱藏右側資訊面板以騰出全寬空間，並將停靠在裡面的桌寵暫時隱藏（不讓其彈出到桌面）
+    // Hide the right info panel for Shared Notebook, game room, and exam mode to keep the main canvas wide.
     if (targetTab === "notebook" || targetTab === "game-room" || targetTab === "exam") {
       setInfoPanelVisible(false);
       syncPetDockVisibilityAfterLayout(false);
@@ -178,7 +178,7 @@ function updateTitlebarModeText(tab: string) {
   } else if (tab === "tasks") {
     titlebarModeEl.textContent = "備忘任務";
   } else if (tab === "notebook") {
-    titlebarModeEl.textContent = "共同筆記本";
+    titlebarModeEl.textContent = "Shared Notebook";
   } else if (tab === "exam") {
     titlebarModeEl.textContent = "考試模式";
   } else if (tab === "game-room") {

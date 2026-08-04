@@ -28,7 +28,7 @@ export function getSharedNotebookPath(): string {
   if (process.env.CYRENE_SHARED_NOTEBOOK_PATH) {
     return path.resolve(process.env.CYRENE_SHARED_NOTEBOOK_PATH);
   }
-  return path.resolve(process.cwd(), "我們共同的筆記本.md");
+  return path.resolve(process.cwd(), "Shared Notebook.md");
 }
 
 export function onNotebookChanged(listener: NotebookListener): () => void {
@@ -66,7 +66,7 @@ function generateId(source: string): string {
 }
 
 /**
- * Read and parse 我們共同的筆記本.md into structured entries.
+ * Read and parse Shared Notebook.md into structured entries.
  */
 export async function readNotebook(notebookPath = getSharedNotebookPath()): Promise<{ rawContent: string; entries: NotebookEntry[] }> {
   let rawContent = "";
@@ -74,7 +74,7 @@ export async function readNotebook(notebookPath = getSharedNotebookPath()): Prom
     rawContent = await fs.readFile(notebookPath, "utf8");
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-    rawContent = "# 🌸 昔漣與你的共同筆記本 🌸\n\n## 📅 成長足跡與協作日記\n";
+    rawContent = "# 🌸 Cyrene & Partner's Shared Notebook 🌸\n\n## 📅 Growth Timeline & Collaboration Journal\n";
   }
 
   const entries: NotebookEntry[] = [];
@@ -186,7 +186,7 @@ function parseLineToEntry(line: string, defaultDateKey: string, defaultDateLabel
 }
 
 /**
- * Append a new diary/note entry to 我們共同的筆記本.md.
+ * Append a new diary/note entry to Shared Notebook.md.
  */
 export async function addNotebookEntry(options: {
   category?: NotebookCategory;
@@ -215,7 +215,7 @@ export async function addNotebookEntry(options: {
         notebook = await fs.readFile(notebookPath, "utf8");
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-        notebook = "# 🌸 昔漣與你的共同筆記本 🌸\n\n## 📅 成長足跡與協作日記\n";
+        notebook = "# 🌸 Cyrene & Partner's Shared Notebook 🌸\n\n## 📅 Growth Timeline & Collaboration Journal\n";
       }
 
       if (!notebook.includes(`<!-- cyrene-discord:${id} -->`)) {
@@ -245,7 +245,7 @@ export async function addNotebookEntry(options: {
         // Sync to L2 memory in memory store
         try {
           await memoryStore.addL2Memory({
-            content: `【共同筆記本】${category} - ${options.title}: ${options.content}`,
+            content: `【Shared Notebook】${category} - ${options.title}: ${options.content}`,
             triggerText: options.content,
             sourceConversationId: "notebook",
             isPinned: false,
@@ -275,7 +275,7 @@ export async function addNotebookEntry(options: {
 }
 
 /**
- * Edit an existing notebook entry in 我們共同的筆記本.md by ID.
+ * Edit an existing notebook entry in Shared Notebook.md by ID.
  */
 export async function updateNotebookEntry(id: string, newContent: string, newTitle?: string, notebookPath = getSharedNotebookPath()): Promise<boolean> {
   return new Promise((resolve, reject) => {
@@ -306,7 +306,7 @@ export async function updateNotebookEntry(id: string, newContent: string, newTit
 }
 
 /**
- * Delete a notebook entry by ID from 我們共同的筆記本.md.
+ * Delete a notebook entry by ID from Shared Notebook.md.
  */
 export async function deleteNotebookEntry(id: string, notebookPath = getSharedNotebookPath()): Promise<boolean> {
   return new Promise((resolve, reject) => {

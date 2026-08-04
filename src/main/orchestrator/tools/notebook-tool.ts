@@ -4,9 +4,9 @@ import { addNotebookEntry, readNotebook, type NotebookCategory } from "../../not
 export function createNotebookWriteTool(): ToolDefinition {
   return {
     id: "notebook_write_entry",
-    name: "寫入共同筆記本",
+    name: "Write to Shared Notebook",
     description:
-      "在《我們共同的筆記本》中寫入一條新的日誌、讀書/學習筆記、聽歌感悟或與夥伴的感性回憶。\n\n" +
+      "在《Shared Notebook》中寫入一條新的日誌、讀書/學習筆記、聽歌感悟或與夥伴的感性回憶。\n\n" +
       "何時使用：\n" +
       "- 當夥伴與你分享重要心事、學習成果、考試成績或感動時刻\n" +
       "- 當夥伴要求「把這個記在我們的筆記本裡」或「記錄今天的聽歌心得」\n" +
@@ -64,8 +64,8 @@ export function createNotebookWriteTool(): ToolDefinition {
 export function createNotebookSearchTool(): ToolDefinition {
   return {
     id: "notebook_search",
-    name: "搜尋共同筆記本",
-    description: "在《我們共同的筆記本》中搜尋 past 紀錄或特定關鍵字的回憶/筆記。",
+    name: "Search Shared Notebook",
+    description: "在《Shared Notebook》中搜尋 past 紀錄或特定關鍵字的回憶/筆記。",
     enabled: true,
     inputSchema: {
       type: "object",
