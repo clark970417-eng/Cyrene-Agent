@@ -178,7 +178,7 @@ function updateTitlebarModeText(tab: string) {
   } else if (tab === "tasks") {
     titlebarModeEl.textContent = "備忘任務";
   } else if (tab === "notebook") {
-    titlebarModeEl.textContent = "Shared Notebook";
+    titlebarModeEl.textContent = "如我所書";
   } else if (tab === "exam") {
     titlebarModeEl.textContent = "考試模式";
   } else if (tab === "game-room") {
