@@ -21,7 +21,24 @@ type CompletionTarget = {
   label: string;
 };
 
-const GEMINI_STABLE_FALLBACK_MODEL = "gemini-3.5-flash-lite";
+const GEMINI_STABLE_FALLBACK_MODEL = "gemini-2.5-flash";
+
+export function cleanThinkingDrafts(text: string): string {
+  let cleaned = text
+    .replace(/(?:^|\n)\s*•?\s*Draft\s*\d+\s*\([^)]*internal\s*thoughts[^)]*\):?[^\n]*/gi, "")
+    .replace(/(?:^|\n)\s*<think>[\s\S]*?<\/think>/gi, "")
+    .replace(/(?:^|\n)\s*•?\s*Internal\s*thoughts:?[^\n]*/gi, "")
+    .replace(/^\s*\):(?:\*\*|\*|\n|\s)*/g, "")
+    .replace(/^(?:嗯[，,])?\s*用戶(?:最近|反覆|在|想要|要求)[^。\n]*[。\n]*/gi, "")
+    .replace(/^(?:翻看|查看|回看)之前的對話[^。\n]*[。\n]*/gi, "")
+    .replace(/^根據系統設定[^。\n]*[。\n]*/gi, "")
+    .replace(/\([\u4e00-\u9fa5\s，,！!？?♪·…—–-]{2,60}\)/g, "")
+    .replace(/[\u0400-\u04FF]+/g, "")
+    .replace(/\bshipped!°[✧✦]?/gi, "");
+
+  cleaned = cleaned.trim();
+  return cleaned || text;
+}
 
 function isGeminiAuthenticationError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
@@ -63,8 +80,9 @@ async function requestCompletion(
   const content = data.choices?.[0]?.message?.content;
   if (typeof content !== "string" || !content.trim()) throw new Error(`${target.label} 沒有返回文字`);
   console.log(`[LLM] provider=${target.label} requested=${target.model} selected=${data.model || "unknown"}`);
-  return normalizeCompanionAddress(content.trim());
+  return normalizeCompanionAddress(cleanThinkingDrafts(content.trim()));
 }
+
 
 /**
  * OpenRouter 使用 OpenAI 相容的 image_url content block。
@@ -116,6 +134,29 @@ export async function generateReply(
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 90_000);
   try {
+    // 圖片優先直連 Gemini：避免 OpenRouter Free 在不同請求間分配到純文字模型。
+    // 純文字聊天仍維持原本的 OpenRouter 路線，只有附圖才使用 Gemini 額度。
+    if (images.length && config.geminiApiKey) {
+      const models = [...new Set([config.geminiModel, GEMINI_STABLE_FALLBACK_MODEL])];
+      let lastVisionError: unknown = new Error("Gemini 視覺模型沒有可用版本");
+      for (const geminiModel of models) {
+        try {
+          console.log(`[Vision] 圖片直連 Gemini：model=${geminiModel} images=${images.length}`);
+          return await requestCompletion({
+            apiKey: config.geminiApiKey,
+            baseUrl: config.geminiBaseUrl,
+            model: geminiModel,
+            label: "Gemini vision",
+          }, buildRequestMessages(systemPrompt, history, images, proactiveMemory), config.maxOutputTokens, controller.signal);
+        } catch (error) {
+          lastVisionError = error;
+          console.warn(`[Vision] Gemini ${geminiModel} 圖片辨識失敗。`, error instanceof Error ? error.message : error);
+          if (isGeminiAuthenticationError(error)) throw error;
+        }
+      }
+      throw lastVisionError;
+    }
+
     const model = images.length ? config.llmVisionModel : config.llmModel;
     const messages = buildRequestMessages(systemPrompt, history, images, proactiveMemory);
     try {

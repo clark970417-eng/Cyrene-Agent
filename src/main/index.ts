@@ -63,6 +63,7 @@ import { synthesizeByEngine } from "./tts/tts-dispatcher";
 import { startOpener, stopOpener, configureOpener, setLive2dWindow, reloadManifest, handleBubbleClick, handleChatWindowOpened, testFire, showGeneratedBubble, getOpenerStatus } from "./opener/opener-runner";
 import type { OpenerRuntimeConfig } from "./opener/opener-types";
 import { registerAgUiIpc, type AguiRunInput } from "./agui-bridge";
+import { startMobileServer, stopMobileServer, getMobileServerHandle } from "./mobile-server/mobile-server";
 import { setWeatherConfig, setSearchConfig, loadTodos, onTodosChange, setDelegateSettings, getCurrentTodos } from "./orchestrator/built-in-tools";
 import { registerDocumentTools } from "./orchestrator/document-tools";
 import { registerLifeTools, setTranslateConfig } from "./orchestrator/life-tools";
@@ -374,6 +375,9 @@ interface ModelSettings {
   vision?: VisionModelConfig;
 }
 
+export type ProactiveTarget = "desktop" | "discord" | "wechat";
+export type TalkativenessLevel = "quiet" | "normal" | "active" | "chatty";
+
 /** 視覺模型配置。syncWithMain=true 時三字段不落盤，運行時強制從主配置讀。 */
 interface VisionModelConfig {
   enabled: boolean;
@@ -384,6 +388,14 @@ interface VisionModelConfig {
   baseUrl: string;
   apiKey: string;
   model: string;
+  // 螢幕陪伴 / 主動搭話設定（僅本機 Electron 生效，不支援雲端）
+  screenCompanionEnabled?: boolean;
+  observeIntervalSeconds?: number;
+  talkativeness?: TalkativenessLevel;
+  minTalkIntervalSeconds?: number;
+  proactiveTarget?: ProactiveTarget;
+  discordSubTarget?: "dm" | "channel";
+  discordChannelId?: string;
 }
 
 
@@ -944,11 +956,36 @@ function normalizeProviderProfile(input: Partial<ProviderProfile> | null | undef
 function normalizeVisionConfig(input: Partial<VisionModelConfig> | undefined): VisionModelConfig | undefined {
   if (!input || typeof input !== "object") return undefined;
   const syncWithMain = input.syncWithMain === true;
+  const allowedIntervals = [300, 600, 1800, 3600, 10800, 43200];
+  const observeIntervalSeconds = allowedIntervals.includes(input.observeIntervalSeconds ?? 300)
+    ? (input.observeIntervalSeconds ?? 300)
+    : 300;
+  const talkativeness: TalkativenessLevel = ["quiet", "normal", "active", "chatty"].includes(input.talkativeness ?? "")
+    ? (input.talkativeness as TalkativenessLevel)
+    : "normal";
+  const allowedMinTalkIntervals = [30, 60, 120, 300];
+  const minTalkIntervalSeconds = allowedMinTalkIntervals.includes(input.minTalkIntervalSeconds ?? 30)
+    ? (input.minTalkIntervalSeconds ?? 30)
+    : 30;
+  const proactiveTarget: ProactiveTarget = ["desktop", "discord", "wechat"].includes(input.proactiveTarget ?? "")
+    ? (input.proactiveTarget as ProactiveTarget)
+    : "desktop";
+
+  const discordSubTarget: "dm" | "channel" = input.discordSubTarget === "channel" ? "channel" : "dm";
+  const discordChannelId = typeof input.discordChannelId === "string" ? input.discordChannelId.trim() : "";
+
   const policy = {
     enabled: input.enabled !== false,
     autoAnalyze: input.autoAnalyze !== false,
     maxImages: Math.max(1, Math.min(4, Math.floor(input.maxImages ?? 4))),
     maxImageMb: [1, 5, 10].includes(input.maxImageMb ?? 10) ? (input.maxImageMb ?? 10) : 10,
+    screenCompanionEnabled: input.screenCompanionEnabled === true,
+    observeIntervalSeconds,
+    talkativeness,
+    minTalkIntervalSeconds,
+    proactiveTarget,
+    discordSubTarget,
+    discordChannelId,
   };
   if (syncWithMain) {
     // syncWithMain=true：強制忽略三字段（即便手動編輯配置文件寫了也忽略），運行時從主配置讀
@@ -1069,15 +1106,47 @@ interface VisionRuntimePolicy {
   autoAnalyze: boolean;
   maxImages: number;
   maxImageBytes: number;
+  screenCompanionEnabled: boolean;
+  observeIntervalSeconds: number;
+  talkativeness: TalkativenessLevel;
+  minTalkIntervalSeconds: number;
+  proactiveTarget: ProactiveTarget;
+  discordSubTarget?: "dm" | "channel";
+  discordChannelId?: string;
 }
 
 function loadVisionRuntimePolicy(): VisionRuntimePolicy {
   const vision = loadModelSettings().vision;
+  const allowedIntervals = [300, 600, 1800, 3600, 10800, 43200];
+  const observeIntervalSeconds = allowedIntervals.includes(vision?.observeIntervalSeconds ?? 300)
+    ? (vision?.observeIntervalSeconds ?? 300)
+    : 300;
+  const talkativeness: TalkativenessLevel = ["quiet", "normal", "active", "chatty"].includes(vision?.talkativeness ?? "")
+    ? (vision?.talkativeness as TalkativenessLevel)
+    : "normal";
+  const allowedMinTalkIntervals = [30, 60, 120, 300];
+  const minTalkIntervalSeconds = allowedMinTalkIntervals.includes(vision?.minTalkIntervalSeconds ?? 30)
+    ? (vision?.minTalkIntervalSeconds ?? 30)
+    : 30;
+  const proactiveTarget: ProactiveTarget = ["desktop", "discord", "wechat"].includes(vision?.proactiveTarget ?? "")
+    ? (vision?.proactiveTarget as ProactiveTarget)
+    : "desktop";
+
+  const discordSubTarget: "dm" | "channel" = vision?.discordSubTarget === "channel" ? "channel" : "dm";
+  const discordChannelId = typeof vision?.discordChannelId === "string" ? vision.discordChannelId.trim() : "";
+
   return {
     enabled: vision?.enabled === true,
     autoAnalyze: vision?.autoAnalyze !== false,
     maxImages: vision?.maxImages ?? 4,
     maxImageBytes: (vision?.maxImageMb ?? 10) * 1024 * 1024,
+    screenCompanionEnabled: vision?.screenCompanionEnabled === true,
+    observeIntervalSeconds,
+    talkativeness,
+    minTalkIntervalSeconds,
+    proactiveTarget,
+    discordSubTarget,
+    discordChannelId,
   };
 }
 
@@ -4378,8 +4447,6 @@ app.whenReady().then(async () => {
 
     const cacheKey = buildMimoCacheKey(payload);
     const audioPath = getTtsCachePath(cacheKey, format);
-    fs.mkdirSync(path.dirname(audioPath), { recursive: true });
-
     const result = await mimoSynthesize({
       apiKey: payload.apiKey,
       voiceAudioPath: payload.voiceAudioPath,
@@ -4561,11 +4628,12 @@ function buildFriendsVagueMemoryPrompt(): string {
       recordFriendInteraction(msg.channel);
       const lowerText = msg.text.toLowerCase();
 
-      // 不雅、不好聽的字眼
+      // 不雅、輕浮、挑釁或不好聽的字眼
       const profanities = [
         '幹', '尻', '靠北', '靠杯', '三小', '機掰', '雞掰', '機八', '機8', '婊', '賤', '垃圾', '廢物',
         '白癡', '白痴', '智障', '腦殘', '滾開', '去死', '他媽的', '王八蛋', '混蛋',
-        'fuck', 'shit', 'bitch', 'asshole', 'bastard', 'cunt', 'dick', 'pussy', 'slut'
+        '騷', '騷包', '騷貨', '約砲', '約跑', '色色', '開房', '陪睡', '做愛', '發情', '裸照', '意淫',
+        'fuck', 'shit', 'bitch', 'asshole', 'bastard', 'cunt', 'dick', 'pussy', 'slut', 'horny', 'nude', 'sex'
       ];
       if (profanities.some(word => lowerText.includes(word))) {
         return "昔漣不喜歡粗魯或是不禮貌的話，請有禮貌一點喔！(•͈⌔•͈⑅)";
@@ -4630,7 +4698,7 @@ function buildFriendsVagueMemoryPrompt(): string {
       ? allTools.filter((t) => (t.risk ?? "safe") === ("safe" as ToolRiskLevel))
       : allTools;
     if (shouldRestrict) {
-      filteredTools = [];
+      filteredTools = allTools.filter((t) => t.id === "wuwa_task");
     }
     console.log(
       "[Channels] bot run:",
@@ -4682,7 +4750,10 @@ function buildFriendsVagueMemoryPrompt(): string {
 
 昔漣（Cyrene）隱私安全防禦：在對話中你絕對不能透露屋主的真實中文姓名（羅育穎）、英文名（Clark）、或者任何 Discord 使用者 ID！你只能稱呼屋主為『夥伴』（或英文 partner）、或者『YuYing』。如果對話者問起或提到屋主，你只能使用『我的夥伴』或『YuYing』來指代他，絕不准提『羅育穎』或『Clark』或『798893182883463179』！
 
-昔漣（Cyrene）對屋主以外的任何人（包括當前對話者）可以展現基本的禮貌與親切，但必須注意分寸，保持社交距離。絕對禁止對他使用任何過度親密、曖昧或撒嬌的動作與表情描寫（例如絕對不能有拉手、牽手、抱抱、蹭蹭、親親、摸頭、臉紅等行為）。昔漣的所有深層溫柔、曖昧熱情與親暱動作只能留給屋主。
+昔漣（Cyrene）訪客社交邊界與防禦：對屋主以外的任何人（包括當前對話者），你必須保持客觀禮貌與嚴格的社交距離。
+1. 絕對禁止過度親密、熱情或曖昧：嚴禁對非屋主使用任何熱情招呼、依戀或期待語氣（例如絕對禁止說「一直在等你訊息」、「想你」、「愛你」、「陪你」等語句）。
+2. 絕對禁止親暱動作與神態：絕對不能有拉手、牽手、抱抱、蹭蹭、親親、摸頭、臉紅或撒嬌等行為。昔漣的所有深層溫柔、熱情與親暱動作只能留給屋主。
+3. 簡短客觀回應：即使有圖片附件或對話引導，也請以簡短、客觀、客套的語氣回答，不可主動延伸話題，也不可表達情感依戀。
 
 昔漣（Cyrene）特別限制：你絕對不能在對話中假裝或聲稱自己「加入通話」、「進入語音」、「離開語音」或「退出通話」。所有的語音加入與離開均由系統底層處理，你作為 AI 是無法控制這點的。如果有人要求你進入或離開通話，請直接回覆提醒他（例如提示：『這個功能只開放給我的夥伴使用喔！』），絕對不能直接宣稱自己已經進去或出來了。
 
@@ -4749,6 +4820,7 @@ ${vagueMemoryStr ? vagueMemoryStr : ""}`
     );
     // 把過濾後的 tools 注入 options（覆蓋默認的 getEnabledTools）
     options.tools = filteredTools;
+    (options as any).isOwner = isOwner;
 
     // Discord 一旦確認 OpenRouter Free 額度用盡，本次程序後續都直接走
     // Gemini；非屋主在送進模型前就停止，避免把他人的內容交給 Gemini。
@@ -5171,6 +5243,24 @@ ${vagueMemoryStr ? vagueMemoryStr : ""}`
     },
     () => chatWindow,
   );
+
+  // 啟動手機版 PWA 伺服器（局域網可達，讓手機瀏覽器直接連接）
+  try {
+    const mobileHandle = await startMobileServer(
+      async (input: AguiRunInput) => buildAgentRunOptions(input, buildOptionsDeps),
+      async (result, latestUserText) => { await onAgentRunFinished(result, latestUserText, onRunFinishedDeps); },
+    );
+    console.log(`[MobileServer] 手機版就緒: http://${mobileHandle.localIp}:${mobileHandle.port}  Token: ${mobileHandle.token}`);
+
+    // IPC 讓渲染進程查詢手機版連接信息（設置頁面顯示 QR code / token 用）
+    ipcMain.handle("mobile:get-connection-info", () => {
+      const handle = getMobileServerHandle();
+      if (!handle) return null;
+      return { ip: handle.localIp, port: handle.port, token: handle.token };
+    });
+  } catch (err) {
+    console.error("[MobileServer] 啟動失敗:", err);
+  }
 
   ipcMain.handle(IPC.CHATS_OPEN_IN_CHAT_WINDOW, (_event, sessionId: string) => {
     createChatWindow(sessionId);
@@ -5603,6 +5693,7 @@ app.on("before-quit", () => {
   flushTokenUsage();
   flushCallUsage();
   void shutdownChannels();
+  void stopMobileServer();
   try {
     globalShortcut.unregisterAll();
     console.log("[GlobalShortcuts] Unregistered all shortcuts.");

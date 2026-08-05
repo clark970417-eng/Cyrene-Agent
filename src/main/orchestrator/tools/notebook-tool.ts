@@ -4,16 +4,19 @@ import { addNotebookEntry, readNotebook, type NotebookCategory } from "../../not
 export function createNotebookWriteTool(): ToolDefinition {
   return {
     id: "notebook_write_entry",
-    name: "Write to Shared Notebook",
+    name: "寫入共享筆記本（如我所書）",
     description:
-      "在《Shared Notebook》中寫入一條新的日誌、讀書/學習筆記、聽歌感悟或與夥伴的感性回憶。\n\n" +
+      "在《如我所書》（共享筆記本）中寫入一條新的陪伴日誌、讀書/學習筆記、聽歌感悟或與夥伴的感性回憶。\n\n" +
+      "重要原則：\n" +
+      "- 筆記定位：如同真實的人用心寫下每天與喜歡的人一起經歷的事、聊過的心事或日常（Journal），方便未來隨時翻閱回味。\n" +
+      "- 內文風格：重在「過程、情感與共同體驗」，使用昔漣溫柔感性的語氣，記錄今天與夥伴發生的點滴、互動與感悟，並附上暖心的引言或語錄。嚴禁寫成冷冰冰的歷史紀錄或條目清單。\n\n" +
       "何時使用：\n" +
       "- 當夥伴與你分享重要心事、學習成果、考試成績或感動時刻\n" +
       "- 當夥伴要求「把這個記在我們的筆記本裡」或「記錄今天的聽歌心得」\n" +
       "- 當你想主動記下今天與夥伴陪伴的溫馨筆記\n\n" +
       "參數：\n" +
-      "- title (string, 必填): 筆記標題（如：一起讀物理與動力學）\n" +
-      "- content (string, 必填): 筆記詳細內文（溫暖感性的語言）\n" +
+      "- title (string, 必填): 筆記標題（如：隨音樂流淌的溫馨時光）\n" +
+      "- content (string, 必填): 筆記詳細內文（溫暖感性的敘事長文）\n" +
       "- category (string, 可選): 分類之一 ['🌸 陪伴', '🎵 聽歌', '📝 筆記', '💖 悄悄話']\n" +
       "- tags (array of string, 可選): 標籤列表（如 ['物理', '動力學', '加油']）",
     enabled: true,
@@ -64,8 +67,8 @@ export function createNotebookWriteTool(): ToolDefinition {
 export function createNotebookSearchTool(): ToolDefinition {
   return {
     id: "notebook_search",
-    name: "Search Shared Notebook",
-    description: "在《Shared Notebook》中搜尋 past 紀錄或特定關鍵字的回憶/筆記。",
+    name: "搜尋共享筆記本（如我所書）",
+    description: "在《如我所書》（共享筆記本）中搜尋 past 紀錄或特定關鍵字的回憶/筆記。",
     enabled: true,
     inputSchema: {
       type: "object",

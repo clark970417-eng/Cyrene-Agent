@@ -82,6 +82,16 @@ describe("DiscordAdapter text voice attachment routing", () => {
     expect(isDiscordTextVoiceRequestText("能只說句鳴潮牛逼！嗎")).toBe(true);
   });
 
+  it("recognizes expanded natural voice requests and capability questions", () => {
+    expect(isDiscordTextVoiceRequestText("你能傳語音嗎")).toBe(true);
+    expect(isDiscordTextVoiceRequestText("你會發語音嗎")).toBe(true);
+    expect(isDiscordTextVoiceRequestText("想聽你的聲音")).toBe(true);
+    expect(isDiscordTextVoiceRequestText("用語音回我")).toBe(true);
+    expect(isDiscordTextVoiceRequestText("用講的")).toBe(true);
+    expect(isDiscordTextVoiceRequestText("唸個笑話給我聽")).toBe(true);
+    expect(isDiscordTextVoiceRequestText("發個語音吧")).toBe(true);
+  });
+
   it("does not divert normal chat or music controls into TTS attachments", () => {
     expect(isDiscordTextVoiceRequestText("今天過得如何？")).toBe(false);
     expect(isDiscordTextVoiceRequestText("下一首")).toBe(false);

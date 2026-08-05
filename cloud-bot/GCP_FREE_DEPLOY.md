@@ -15,7 +15,7 @@
 - `DISCORD_ALLOWED_USER_IDS=798893182883463179`：雲端版只接受擁有者的訊息；未設定時程式會拒絕啟動
 - `HISTORY_MESSAGES=8`、`MAX_OUTPUT_TOKENS=500`：限制每次聊天帶入的短期記憶與最大回覆長度
 - `DATA_DIR` 必須位於 VM persistent disk；`discord-history.jsonl` 會 append-only 保存永久原文，`HISTORY_MESSAGES` 不會刪除舊記憶
-- `LLM_VISION_MODEL=openrouter/free`：附圖時由 Router 自動挑選支援圖片理解的免費模型；需要固定 Gemini 時可改成 OpenRouter 上對應的 Gemini 模型名稱
+- 設定 `GEMINI_API_KEY` 後，附圖會直接使用 `GEMINI_MODEL`；一般文字仍走 OpenRouter。未設定 Gemini Key 時才沿用 `LLM_VISION_MODEL=openrouter/free`
 
 Google Cloud 的預算警示不會自動停止計費。要保證不超額，仍須定期檢查 Billing 報表與 VM 設定。
 

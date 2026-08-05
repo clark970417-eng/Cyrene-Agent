@@ -1,12 +1,18 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildRequestMessages, describeImagesForMemory, generateReply, isOpenRouterFreeQuotaError } from "./llm.js";
+import { buildRequestMessages, cleanThinkingDrafts, describeImagesForMemory, generateReply, isOpenRouterFreeQuotaError } from "./llm.js";
 import type { CloudBotConfig } from "./config.js";
 import type { ChatEntry } from "./core.js";
 
 function entry(role: ChatEntry["role"], content: string, at: number): ChatEntry {
   return { sessionId: "session", role, content, at };
 }
+
+test("清理思考模型的內部草稿標記與未完結格式符號", () => {
+  const raw = `):**\n\n• Draft 1 (Internal thoughts): 這是白\n這是一張幾何數學題目的白板照片。`;
+  assert.equal(cleanThinkingDrafts(raw), "這是一張幾何數學題目的白板照片。");
+});
+
 
 test("文字對話維持純字串訊息", () => {
   const messages = buildRequestMessages("system", [entry("user", "你好", 1)]);
@@ -60,9 +66,37 @@ test("雲端會另外要求視覺模型產生可永久保存的客觀照片描�
 
   const description = await describeImagesForMemory(config, [{ url: "https://cdn.discordapp.com/cat.png" }], "這是誰？");
   assert.match(description, /戴藍帽的橘貓/);
-  assert.equal(requestBody?.model, config.llmVisionModel);
+  assert.equal(requestBody?.model, config.geminiModel);
   assert.match(requestBody?.messages?.[0]?.content, /照片長期記憶描述器/);
   assert.equal(requestBody?.messages?.[1]?.content?.[1]?.type, "image_url");
+});
+
+test("有 Gemini Key 時圖片直接走 Gemini，不先送 OpenRouter", async (context) => {
+  const originalFetch = globalThis.fetch;
+  const calls: Array<{ url: string; authorization: string | null; body: Record<string, any> }> = [];
+  globalThis.fetch = (async (input, init) => {
+    calls.push({
+      url: String(input),
+      authorization: new Headers(init?.headers).get("authorization"),
+      body: JSON.parse(String(init?.body)) as Record<string, any>,
+    });
+    return new Response(JSON.stringify({ choices: [{ message: { content: "圖片中是肯德基炸雞午餐。" } }] }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  }) as typeof fetch;
+  context.after(() => { globalThis.fetch = originalFetch; });
+
+  const reply = await generateReply(config, "system", [entry("user", "你看我的午餐！", 1)], [
+    { url: "https://cdn.discordapp.com/lunch.jpg", mime: "image/jpeg", name: "lunch.jpg" },
+  ]);
+
+  assert.equal(reply, "圖片中是肯德基炸雞午餐。");
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions");
+  assert.equal(calls[0].authorization, "Bearer gemini-key");
+  assert.equal(calls[0].body.model, "gemini-3.5-flash-lite");
+  assert.equal(calls[0].body.messages.at(-1)?.content?.[1]?.type, "image_url");
 });
 
 const config: CloudBotConfig = {
@@ -136,5 +170,6 @@ test("Gemini 設定模型不可用時改用已驗證的 Flash-Lite", async (cont
 
   const reply = await generateReply({ ...config, geminiModel: "gemini-3.5-flash" }, "system", [entry("user", "你好", 1)]);
   assert.equal(reply, "Flash-Lite 正常");
-  assert.deepEqual(calls.map((call) => call.model), ["openrouter/free", "gemini-3.5-flash", "gemini-3.5-flash-lite"]);
+  assert.deepEqual(calls.map((call) => call.model), ["openrouter/free", "gemini-3.5-flash", "gemini-2.5-flash"]);
 });
+

@@ -48,7 +48,11 @@ describe("Discord slash commands", () => {
     expect(embed.author?.name).toContain("昔漣寶寶");
     expect(embed.title).toContain("昔漣");
     expect(embed.fields?.map((field) => field.name)).toEqual(expect.arrayContaining([
-      "💬  語音與聊天 (Chat & Voice)", "🎧  音樂播放 (Music Playback)", "❤️  收藏與庫存 (Bili/YT Library)", "⚙️  佇列與播放控制 (Playback Control)", "🎮  娛樂與繪圖 (Play & Draw)"
+      "💬  文字聊天與發送語音 (Chat & Voice Message)",
+      "⚔️  遊戲代肝與自動每日 (Game Daily Automation)",
+      "🎵  音樂代播與聲優導播 (Music & DJ)",
+      "🌙  生活陪伴與助眠儀式 (Living & Sleep)",
+      "♟️  娛樂與遊戲對弈 (Games & Draw)",
     ]));
     expect(embed.thumbnail?.url).toBe("https://example.com/avatar.png");
   });

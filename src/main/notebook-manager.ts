@@ -74,7 +74,7 @@ export async function readNotebook(notebookPath = getSharedNotebookPath()): Prom
     rawContent = await fs.readFile(notebookPath, "utf8");
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-    rawContent = "# 🌸 Cyrene & Partner's Shared Notebook 🌸\n\n## 📅 Growth Timeline & Collaboration Journal\n";
+    rawContent = "# 🌸 昔漣與夥伴的共享筆記本 🌸\n\n## 📅 成長足跡與共同日誌\n";
   }
 
   const entries: NotebookEntry[] = [];
@@ -85,8 +85,8 @@ export async function readNotebook(notebookPath = getSharedNotebookPath()): Prom
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i].trim();
 
-    // Date heading e.g.: ### ✦ 2026年7月22日 · Discord 共同足跡
-    const dateMatch = line.match(/^###\s*✦?\s*(\d{4}年\d{1,2}月\d{1,2}日)/);
+    // Date heading e.g.: ### 📅 2026年7月22日 · 音樂與心靈的共鳴 🌸
+    const dateMatch = line.match(/^###\s*[✦📅]?\s*(\d{4}年\d{1,2}月\d{1,2}日)/);
     if (dateMatch) {
       currentDateLabel = dateMatch[1];
       // Convert to key 2026-07-22
@@ -106,6 +106,7 @@ export async function readNotebook(notebookPath = getSharedNotebookPath()): Prom
     }
   }
 
+  void syncNotebookToL2Memory().catch(() => {});
   return { rawContent, entries };
 }
 
@@ -215,7 +216,7 @@ export async function addNotebookEntry(options: {
         notebook = await fs.readFile(notebookPath, "utf8");
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-        notebook = "# 🌸 Cyrene & Partner's Shared Notebook 🌸\n\n## 📅 Growth Timeline & Collaboration Journal\n";
+        notebook = "# 🌸 昔漣與夥伴的共享筆記本 🌸\n\n## 📅 成長足跡與共同日誌\n";
       }
 
       if (!notebook.includes(`<!-- cyrene-discord:${id} -->`)) {
@@ -324,4 +325,59 @@ export async function deleteNotebookEntry(id: string, notebookPath = getSharedNo
       }
     }).catch(reject);
   });
+}
+
+/**
+ * Sync all daily memory entries from Shared Notebook.md into memoryStore L2 memory.
+ */
+export async function syncNotebookToL2Memory(): Promise<number> {
+  const notebookPath = getSharedNotebookPath();
+  let rawContent = "";
+  try {
+    rawContent = await fs.readFile(notebookPath, "utf8");
+  } catch {
+    return 0;
+  }
+
+  const sections = rawContent.split(/(?=###)/g);
+  let syncedCount = 0;
+
+  try {
+    const store = await memoryStore.load();
+    const existingL2Contents = new Set((store.l2 || []).map((m) => m.triggerText || m.content));
+
+    for (const sec of sections) {
+      const trimmed = sec.trim();
+      if (!trimmed.startsWith("###")) continue;
+
+      const lines = trimmed.split("\n");
+      const titleLine = lines[0].replace(/^###\s*/, "").replace(/^[✦📅]\s*/, "").trim();
+
+      if (existingL2Contents.has(titleLine)) continue;
+
+      const bodyText = lines
+        .slice(1)
+        .map((l) => l.replace(/<!--[^]*?-->/g, "").trim())
+        .filter(Boolean)
+        .join("\n");
+
+      if (!bodyText) continue;
+
+      const summaryContent = `【如我所書】${titleLine}\n${bodyText}`;
+
+      await memoryStore.addL2Memory({
+        content: summaryContent,
+        triggerText: titleLine,
+        sourceConversationId: "notebook",
+        isPinned: false,
+        isSummary: true,
+      });
+      existingL2Contents.add(titleLine);
+      syncedCount++;
+    }
+  } catch (e) {
+    console.warn("[NotebookManager] Bulk L2 memory sync failed:", e);
+  }
+
+  return syncedCount;
 }

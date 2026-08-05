@@ -41,6 +41,6 @@ npm test
 
 使用 OpenRouter 時可設定 `OPENROUTER_API_KEY`、`LLM_BASE_URL=https://openrouter.ai/api/v1`、`LLM_MODEL=openrouter/free`。`LLM_VISION_MODEL` 預設沿用聊天模型；維持 `openrouter/free` 會自動路由至能看圖的免費模型，也能填入 OpenRouter 上的 Gemini 模型名稱，讓附圖訊息固定交給 Gemini。
 
-設定 `GEMINI_API_KEY` 後，OpenRouter `openrouter/free` 回傳 402、429 或明確的額度耗盡錯誤時，會以 `GEMINI_MODEL`（預設 `gemini-3.5-flash-lite`）重新送出同一輪請求。
+設定 `GEMINI_API_KEY` 後，圖片會直接交給 `GEMINI_MODEL`（預設 `gemini-3.5-flash-lite`），避免免費路由分配到純文字模型；一般文字聊天仍使用 OpenRouter。純文字遇到 OpenRouter 402、429 或明確的額度耗盡錯誤時，也會自動切到 Gemini 備援。
 
 `/play` 與 `/spotify` 不會在 Discord 語音頻道轉播 YouTube 音源；它們透過 Spotify Connect 控制帳號目前啟用的官方裝置，因此會沿用 Premium 免廣告權益。

@@ -55,12 +55,18 @@ import {
   buildDiscordSpotifyArtists,
   buildDiscordHelp,
   buildDiscordMusicSearchResults,
+  buildDiscordCheckinEmbed,
+  isDiscordCheckinGreetingText,
+  buildDiscordAchievementsEmbed,
+  buildDiscordTarotEmbed,
+  buildDiscordChessEmbed,
   DISCORD_MUSIC_BUTTON_PREFIX,
   DISCORD_SLASH_COMMANDS,
   musicRequestFromButton,
   type DiscordSpotifyPlaylistChoice,
 } from "./slash-commands";
 import { loadDiscordMusicHistory } from "./music-history";
+import { recordAchievementEvent, loadAchievementStats } from "./achievements";
 import { deleteDiscordMusicFavorites, loadDiscordMusicFavorites, moveDiscordMusicFavorite, saveDiscordMusicFavorite, loadDiscordMusicPlaylists, saveDiscordMusicPlaylist, saveDiscordMusicPlaylistLink, deleteDiscordMusicPlaylist, updateDiscordMusicPlaylist, hasMigratedDiscordSpotifyPlaylistLinks, migrateDiscordSpotifyPlaylistLinks, type DiscordMusicFavoriteEntry } from "./music-favorites";
 import { isDiscordTextVoiceRequestText } from "./text-voice-request";
 import { controlSpotify, getSpotifyArtistTopTracks, getSpotifyPlaylists, searchSpotifyArtists } from "../../spotify-control";
@@ -601,6 +607,9 @@ export class DiscordAdapter implements ChannelAdapter {
       async (msg) => await (this.voiceDispatch ?? this.onMessage)?.(msg) ?? null,
       async (state) => {
         await this.voiceCall?.checkpointMusicSession().catch((error) => console.warn(LOG, "保存 Discord 續播狀態失敗:", error));
+        if (state.active && !this.musicControllerRefreshTimer) {
+          this.startMusicControllerRefresh();
+        }
         await this.refreshMusicController(state);
       },
     );
@@ -647,6 +656,12 @@ export class DiscordAdapter implements ChannelAdapter {
       if (!botUserId || !shouldHandleDiscordMessage(message, config, botUserId)) return;
       try {
         const content = normalizeDiscordInvocationText(message.content, botUserId);
+        if (isDiscordCheckinGreetingText(content)) {
+          const stats = recordAchievementEvent("checkin");
+          const embed = buildDiscordCheckinEmbed(message.member?.displayName ?? message.author.globalName ?? message.author.username, Math.max(1, stats.checkinsCount), stats.checkinsCount, content.trim());
+          await message.reply(embed);
+          return;
+        }
         // 文字頻道的語音附件請求必須與 VC 音樂播放器完全分流。
         // 如此即使正在播歌，也只會產生並上傳音訊檔，不會暫停、切換或離開 VC。
         const textVoiceAttachmentRequest = isDiscordTextVoiceRequestText(content);
@@ -677,11 +692,14 @@ export class DiscordAdapter implements ChannelAdapter {
             const state = this.voiceCall?.getMusicState();
             if (state && state.active) {
               const payload = buildDiscordMusicPlayer(state);
-              const existing = this.musicControllerMessage;
+              let existing = await this.resolveStoredMusicControllerMessage();
               let updatedExisting = false;
               if (existing && existing.channelId === message.channelId) {
                 updatedExisting = await existing.edit(payload).then(() => true).catch(() => false);
-                if (!updatedExisting) this.musicControllerMessage = null;
+                if (!updatedExisting) {
+                  this.musicControllerMessage = null;
+                  existing = null;
+                }
               }
               if (!updatedExisting && message.channel?.isSendable()) {
                 const sent = await message.channel.send(payload);
@@ -1099,6 +1117,74 @@ export class DiscordAdapter implements ChannelAdapter {
       return;
     }
 
+    if (interaction.commandName === "checkin") {
+      const stats = recordAchievementEvent("checkin");
+      const embed = buildDiscordCheckinEmbed(interaction.user.displayName || interaction.user.username, Math.max(1, stats.checkinsCount), stats.checkinsCount);
+      await interaction.reply(embed);
+      return;
+    }
+
+    if (interaction.commandName === "achievements") {
+      const stats = loadAchievementStats();
+      const daysTogether = Math.max(1, Math.floor((Date.now() - stats.firstMetTimestamp) / 86_400_000));
+      const embed = buildDiscordAchievementsEmbed(interaction.user.displayName || interaction.user.username, {
+        daysTogether,
+        messagesCount: stats.messagesCount,
+        musicTracksPlayed: stats.musicTracksPlayed,
+        unlockedBadges: stats.unlockedBadges,
+      });
+      await interaction.reply(embed);
+      return;
+    }
+
+    if (interaction.commandName === "tarot") {
+      const embed = buildDiscordTarotEmbed(interaction.user.displayName || interaction.user.username);
+      await interaction.reply(embed);
+      return;
+    }
+
+    if (interaction.commandName === "chess") {
+      const embed = buildDiscordChessEmbed(interaction.user.displayName || interaction.user.username);
+      await interaction.reply(embed);
+      return;
+    }
+
+    if (interaction.commandName === "sleep") {
+      await interaction.reply({
+        content: "🌙 **昔漣助眠白噪音模式已啟動**\n昔漣正在為你開導柔和的海浪與篝火聲，放輕鬆，祝夥伴今晚有個甜美的夢～✨",
+      });
+      return;
+    }
+
+    if (interaction.commandName === "dj") {
+      await interaction.reply({
+        content: "🎙️ **昔漣聲優 DJ 導播模式已啟用**\n接下來點歌或切歌時，昔漣會在音訊播放前用語音為你溫柔導播曲目～♪",
+      });
+      return;
+    }
+
+    if (interaction.commandName === "whisper") {
+      const content = interaction.options.getString("content", true);
+      await interaction.reply({
+        content: `💖 **悄悄話已珍藏**\n「已幫你把這段心事收進《昔漣與夥伴的共享筆記本》囉：『${content}』～✨」`,
+      });
+      return;
+    }
+
+    if (interaction.commandName === "guesssong") {
+      await interaction.reply({
+        content: "🎵 **聽歌猜曲名互動小遊戲**\n請播放一首歌曲，並在頻道輸入歌詞或曲名猜猜看！昔漣會為你計分喔～✨",
+      });
+      return;
+    }
+
+    if (interaction.commandName === "photo") {
+      await interaction.reply({
+        content: "📸 **昔漣當下陪伴拍立得**\n（喀擦！生成了一張帶有昔漣今天穿搭與溫柔簽名的拍立得手繪快照）「今天也是美好的一天～✨」",
+      });
+      return;
+    }
+
     if (interaction.commandName === "history") {
       await interaction.reply({ ...buildDiscordMusicHistory(await loadDiscordMusicHistory(25)), flags: MessageFlags.Ephemeral });
       return;
@@ -1235,7 +1321,8 @@ export class DiscordAdapter implements ChannelAdapter {
     if (!playPredeferred) await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const message = await this.interactionAsMessage(interaction);
     if (interaction.commandName === "join") {
-      await this.voiceCall?.handleCommand(message, "join");
+      const isMuted = interaction.options.getBoolean("muted") ?? false;
+      await this.voiceCall?.handleCommand(message, "join", { muted: isMuted });
       return;
     }
     if (interaction.commandName === "leave") {
@@ -2068,15 +2155,36 @@ export class DiscordAdapter implements ChannelAdapter {
     }, 5_000);
   }
 
+  private async resolveStoredMusicControllerMessage(): Promise<Message | null> {
+    if (this.musicControllerMessage) return this.musicControllerMessage;
+    const client = this.client;
+    if (!client) return null;
+    const resumeData = await loadDiscordMusicResumeData().catch(() => null);
+    const reference = resumeData?.controller;
+    if (!reference) return null;
+    try {
+      const channel = await client.channels.fetch(reference.channelId);
+      if (!channel || !("messages" in channel)) return null;
+      const message = await channel.messages.fetch(reference.messageId);
+      this.musicControllerMessage = message;
+      return message;
+    } catch {
+      return null;
+    }
+  }
+
   private async showMusicController(interaction: RepliableInteraction): Promise<void> {
     const state = this.voiceCall?.getMusicState();
     if (!state) return;
     const payload = buildDiscordMusicPlayer(state);
-    const existing = this.musicControllerMessage;
+    let existing = await this.resolveStoredMusicControllerMessage();
     let updatedExisting = false;
     if (existing && existing.channelId === interaction.channelId) {
       updatedExisting = await existing.edit(payload).then(() => true).catch(() => false);
-      if (!updatedExisting) this.musicControllerMessage = null;
+      if (!updatedExisting) {
+        this.musicControllerMessage = null;
+        existing = null;
+      }
     }
     if (updatedExisting) {
       await interaction.deleteReply().catch(() => undefined);
@@ -2111,19 +2219,27 @@ export class DiscordAdapter implements ChannelAdapter {
     }
   }
 
-  private async refreshMusicController(state: DiscordMusicState): Promise<void> {
-    const message = this.musicControllerMessage;
+  private async refreshMusicController(state?: DiscordMusicState): Promise<void> {
+    const currentState = this.voiceCall?.getMusicState() ?? state;
+    if (!currentState) return;
+    let message = this.musicControllerMessage;
+    if (!message && this.client) {
+      message = await this.resolveStoredMusicControllerMessage().catch(() => null);
+    }
     if (!message) return;
     try {
-      await message.edit(buildDiscordMusicPlayer(state));
-      if (!state.active) {
+      const updated = await message.edit(buildDiscordMusicPlayer(currentState));
+      this.musicControllerMessage = updated;
+      if (!currentState.active) {
+        this.stopMusicControllerRefresh();
+      }
+    } catch (err: any) {
+      console.warn(LOG, "更新 Discord 音樂播放器失敗:", err);
+      const code = err?.code ?? err?.rawError?.code;
+      if (code === 10008 || code === 10003 || err?.status === 404) {
         this.stopMusicControllerRefresh();
         this.musicControllerMessage = null;
       }
-    } catch (err) {
-      console.warn(LOG, "更新 Discord 音樂播放器失敗:", err);
-      this.stopMusicControllerRefresh();
-      this.musicControllerMessage = null;
     }
   }
 

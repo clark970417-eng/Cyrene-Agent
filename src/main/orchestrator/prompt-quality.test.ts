@@ -23,7 +23,8 @@ describe("prompt quality guardrails", () => {
     expect(alwaysOn).toContain("台灣繁體中文")
     expect(alwaysOn).toContain("絕不混入與語境無關")
     expect(alwaysOn).toContain("溫柔而有主見")
-    expect(alwaysOn).toContain("含蓄但有偏愛")
+    expect(alwaysOn).toContain("真誠偏愛與專屬牽掛")
+    expect(alwaysOn).toContain("含蓄而深刻")
   })
 
   it("does not reintroduce known contradictory global rules", () => {

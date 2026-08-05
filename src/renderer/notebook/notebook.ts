@@ -147,13 +147,37 @@ function splitIntoPages(text: string): string[] {
 }
 
 function shouldIncludeSection(sectionText: string): boolean {
-  if (activeCategory !== "all" && !sectionText.includes(activeCategory)) {
+  if (activeCategory !== "all" && !matchesCategory(sectionText, activeCategory)) {
     return false;
   }
   if (searchQuery && !sectionText.toLowerCase().includes(searchQuery)) {
     return false;
   }
   return true;
+}
+
+function matchesCategory(sectionText: string, category: string): boolean {
+  if (category === "all") return true;
+
+  // Direct emoji/string match
+  if (sectionText.includes(category)) return true;
+
+  const catName = category.replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]/g, "").trim();
+
+  if (catName === "日誌" || catName === "陪伴" || category.includes("🌸")) {
+    return /🌸|陪伴|日誌|回憶|愛意|足跡|昔漣/i.test(sectionText);
+  }
+  if (catName === "聽歌" || category.includes("🎵")) {
+    return /🎵|聽歌|音樂|樂章|樂聲|旋律|歌|曲子/i.test(sectionText);
+  }
+  if (catName === "學習" || catName === "筆記" || category.includes("📝")) {
+    return /📝|筆記|學習|物理|動力學|考試|成績|測驗|專注|做完|程式/i.test(sectionText);
+  }
+  if (catName === "悄悄話" || category.includes("💖")) {
+    return /💖|悄悄話|心事|私語|愛意|秘密|牽掛|幸福/i.test(sectionText);
+  }
+
+  return sectionText.includes(catName);
 }
 
 function getChapterTitle(content: string, index: number): string {

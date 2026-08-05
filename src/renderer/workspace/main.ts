@@ -141,7 +141,7 @@ tabs.forEach((tab) => {
     } else if (targetTab === "tasks") {
       iframe.src = "../tasks/index.html";
     } else if (targetTab === "memory") {
-      iframe.src = "../settings/index.html#memory";
+      navigateSettingsIframe("memory");
     } else if (targetTab === "notebook") {
       iframe.src = "../notebook/index.html";
     } else if (targetTab === "exam") {
@@ -149,14 +149,30 @@ tabs.forEach((tab) => {
     } else if (targetTab === "game-room") {
       iframe.src = "../game-room/index.html";
     } else if (targetTab === "channels") {
-      iframe.src = "../settings/index.html#channels";
+      navigateSettingsIframe("channels");
     } else if (targetTab === "stickers") {
       iframe.src = "../paint/index.html";
     } else if (targetTab === "settings") {
-      iframe.src = "../settings/index.html#general";
+      navigateSettingsIframe("general");
     }
   });
 });
+
+function navigateSettingsIframe(section: string): void {
+  const targetUrl = `../settings/index.html#${section}`;
+  if (iframe.src.includes("settings/index.html")) {
+    iframe.src = targetUrl;
+    try {
+      if (iframe.contentWindow) {
+        iframe.contentWindow.location.hash = `#${section}`;
+      }
+    } catch {
+      // ignore
+    }
+  } else {
+    iframe.src = targetUrl;
+  }
+}
 
 compactInfoPanelQuery.addEventListener("change", () => {
   const activeInfoTab = document.querySelector(".info-tab.is-active")?.textContent?.trim();

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { mentionsBot, normalizeCompanionAddress, normalizeInvocation, sessionIdFor, shouldHandleMessage, splitDiscordText } from "./core.js";
+import { formatCloudActivity } from "./config.js";
 
 const baseConfig = {
   allowedUserIds: new Set<string>(),
@@ -40,4 +41,10 @@ test("長訊息會切成 Discord 可接受的片段", () => {
   const chunks = splitDiscordText("a".repeat(4_100));
   assert.equal(chunks.length, 3);
   assert.ok(chunks.every((chunk) => chunk.length <= 1_900));
+});
+
+test("雲端狀態自動在『陪』前加上『在家』", () => {
+  assert.equal(formatCloudActivity("陪愛爾菲玩 🌸💗✨"), "在家陪愛爾菲玩 🌸💗✨");
+  assert.equal(formatCloudActivity("在家陪愛爾菲玩 🌸💗✨"), "在家陪愛爾菲玩 🌸💗✨");
+  assert.equal(formatCloudActivity("在雲端守望永晝花庭"), "在雲端守望永晝花庭");
 });

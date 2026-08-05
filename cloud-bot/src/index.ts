@@ -418,9 +418,26 @@ client.once("ready", async (readyClient) => {
     new SlashCommandBuilder().setName("draw").setDescription("由 Codex 生成圖片並透過 Discord 私訊回傳（僅擁有者）")
       .addStringOption((option) => option.setName("prompt").setDescription("畫圖提示詞").setRequired(true)),
     new SlashCommandBuilder().setName("game").setDescription("由昔漣在 Discord 內開啟《繩結同行》"),
-    new SlashCommandBuilder().setName("join").setDescription("讓 Cyrene 加入你的語音頻道進行 AI 通話"),
+    new SlashCommandBuilder()
+      .setName("join")
+      .setDescription("讓 Cyrene 加入你的語音頻道進行 AI 通話")
+      .addBooleanOption((option) =>
+        option.setName("muted").setDescription("設置為 true 可讓昔漣閉麥安靜陪伴（預設 false 開麥通話）").setRequired(false)
+      ),
     new SlashCommandBuilder().setName("help").setDescription("顯示 Cyrene 的 Discord 功能與指令"),
     new SlashCommandBuilder().setName("emojis").setDescription("查看昔漣使用不同表情符號的統計次數"),
+    new SlashCommandBuilder().setName("checkin").setDescription("昔漣每日簽到儀式與領取昔漣御守小卡"),
+    new SlashCommandBuilder().setName("sleep").setDescription("開啟昔漣白噪音安眠模式（雨聲／海浪／篝火）"),
+    new SlashCommandBuilder().setName("dj").setDescription("開啟或關閉點歌昔漣語音 DJ 導播模式"),
+    new SlashCommandBuilder().setName("photo").setDescription("生成一張昔漣當下陪伴拍立得手繪快照"),
+    new SlashCommandBuilder().setName("achievements").setDescription("查看夥伴與昔漣的相伴天數與解鎖成就"),
+    new SlashCommandBuilder().setName("tarot").setDescription("抽一張昔漣每日幸運塔羅靈感卡"),
+    new SlashCommandBuilder().setName("chess").setDescription("與昔漣開始一局西洋棋對弈對戰"),
+    new SlashCommandBuilder().setName("guesssong").setDescription("開啟聽歌猜曲名小遊戲"),
+    new SlashCommandBuilder()
+      .setName("whisper")
+      .setDescription("將你對昔漣的悄悄話收進共享筆記本珍藏")
+      .addStringOption((option) => option.setName("content").setDescription("想告訴昔漣的悄悄話心事").setRequired(true)),
   ].map((command) => command.toJSON());
   try {
     const rest = new REST({ version: "10" }).setToken(config.discordToken);
