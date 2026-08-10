@@ -80,6 +80,7 @@ import { enqueueOnDemandCodexImageWorker } from "./codex-image-worker";
 import { loadDiscordMusicResumeData, saveDiscordMusicControllerReference } from "./music-resume-store";
 import { queryCloudStandby, signalCloudStandby, type CloudStandbyStatus } from "./cloud-standby";
 import { DISCORD_OWNER_ID, shouldIgnoreDiscordMessageDuringGeminiFallback } from "./model-fallback";
+import { handleWavesUidInteraction, handleWavesUidMessage, isWavesUidCommand } from "./wavesuid";
 
 const LOG = "[DiscordAdapter]";
 
@@ -191,11 +192,13 @@ export function shouldHandleDiscordMessage(
   if (!isAllowed(config.allowedChannelIds, message.channelId)) return false;
   if (message.guildId && !isAllowed(config.allowedGuildIds, message.guildId)) return false;
   const invokedWithSlash = message.content.trimStart().startsWith("/");
+  const invokedWithWavesUid = isWavesUidCommand(message.content);
   if (
     message.guildId
     && config.requireMention !== false
     && !message.mentions.users.has(botUserId)
     && !invokedWithSlash
+    && !invokedWithWavesUid
   ) return false;
   return true;
 }
@@ -415,16 +418,28 @@ export class DiscordAdapter implements ChannelAdapter {
   private partnerScreenSharing = false;
   private processedMessageIds = new Set<string>();
 
-  constructor(private readonly voiceDispatch?: MessageHandler) {}
+  constructor(
+    private readonly voiceDispatch?: MessageHandler,
+    private readonly onStatusChange?: () => void
+  ) {}
+
+  private setStatus(status: ChannelStatus): void {
+    this.status = status;
+    try {
+      this.onStatusChange?.();
+    } catch (err) {
+      console.warn(LOG, "onStatusChange callback error:", err);
+    }
+  }
 
   async start(): Promise<void> {
     const config = loadChannelsSettings().discord;
     if (!config.enabled) {
-      this.status = { enabled: false, phase: "offline", message: "未啟用" };
+      this.setStatus({ enabled: false, phase: "offline", message: "未啟用" });
       return;
     }
     if (!config.botToken) {
-      this.status = { enabled: true, phase: "config_missing", message: "Bot Token 缺失" };
+      this.setStatus({ enabled: true, phase: "config_missing", message: "Bot Token 缺失" });
       return;
     }
     if (config.cloudPrimary !== false) {
@@ -456,7 +471,7 @@ export class DiscordAdapter implements ChannelAdapter {
     await this.stopCloudStandby(false);
     await this.stopClient();
     await this.stopCloudStandby(true);
-    this.status = { enabled: false, phase: "offline", message: "已停止" };
+    this.setStatus({ enabled: false, phase: "offline", message: "已停止" });
   }
 
   private async startCloudStandby(config: DiscordChannelConfig): Promise<void> {
@@ -479,7 +494,7 @@ export class DiscordAdapter implements ChannelAdapter {
           if (this.cloudStandbyFailures >= 2 && this.client) {
             console.warn(LOG, "無法確認雲端仍待命，本機先退出 Gateway，避免雙重回覆。");
             await this.stopClient();
-            this.status = { enabled: true, phase: "starting", message: "本機網路中斷，等待雲端自動接手" };
+            this.setStatus({ enabled: true, phase: "starting", message: "本機網路中斷，等待雲端自動接手" });
           }
         }
       })();
@@ -491,7 +506,7 @@ export class DiscordAdapter implements ChannelAdapter {
         this.cloudStandbyBusy = false;
       }
     };
-    this.status = { enabled: true, phase: "starting", message: "正在切換為本機優先模式" };
+    this.setStatus({ enabled: true, phase: "starting", message: "正在切換為本機優先模式" });
     await heartbeat();
     this.cloudStandbyTimer = setInterval(() => void heartbeat(), 20_000);
   }
@@ -589,7 +604,7 @@ export class DiscordAdapter implements ChannelAdapter {
   private async startClient(): Promise<void> {
     const config = loadChannelsSettings().discord;
     await this.stopClient();
-    this.status = { enabled: true, phase: "starting", message: "正在連接 Gateway" };
+    this.setStatus({ enabled: true, phase: "starting", message: "正在連接 Gateway" });
     const client = new Client({
       intents: [
         GatewayIntentBits.Guilds,
@@ -656,11 +671,14 @@ export class DiscordAdapter implements ChannelAdapter {
       if (!botUserId || !shouldHandleDiscordMessage(message, config, botUserId)) return;
       try {
         const content = normalizeDiscordInvocationText(message.content, botUserId);
-        if (isDiscordCheckinGreetingText(content)) {
-          const stats = recordAchievementEvent("checkin");
-          const embed = buildDiscordCheckinEmbed(message.member?.displayName ?? message.author.globalName ?? message.author.username, Math.max(1, stats.checkinsCount), stats.checkinsCount, content.trim());
-          await message.reply(embed);
+        if (isWavesUidCommand(content)) {
+          await handleWavesUidMessage(message, content, botUserId);
           return;
+        }
+        if (isDiscordCheckinGreetingText(content)) {
+          // 問候只在背景完成每日簽到，仍繼續走正常聊天流程。
+          // 完整簽到卡僅由 /checkin 顯示，避免「早安」被功能 UI 攔截。
+          recordAchievementEvent("checkin");
         }
         // 文字頻道的語音附件請求必須與 VC 音樂播放器完全分流。
         // 如此即使正在播歌，也只會產生並上傳音訊檔，不會暫停、切換或離開 VC。
@@ -818,13 +836,13 @@ export class DiscordAdapter implements ChannelAdapter {
     });
     client.on("error", (err) => {
       console.error(LOG, "client error:", err.message);
-      this.status = { enabled: true, phase: "error", message: err.message };
+      this.setStatus({ enabled: true, phase: "error", message: err.message });
     });
     client.on("shardReconnecting", () => {
-      this.status = { enabled: true, phase: "starting", message: "Gateway 重新連接中" };
+      this.setStatus({ enabled: true, phase: "starting", message: "Gateway 重新連接中" });
     });
     client.on("shardResume", () => {
-      this.status = { enabled: true, phase: "running", message: `已連接：${client.user?.tag ?? "Discord Bot"}` };
+      this.setStatus({ enabled: true, phase: "running", message: `已連接：${client.user?.tag ?? "Discord Bot"}` });
     });
 
     try {
@@ -845,11 +863,11 @@ export class DiscordAdapter implements ChannelAdapter {
       if (await this.voiceCall?.restoreSuspendedMusicSession()) {
         await this.restoreMusicControllerMessage(client);
       }
-      this.status = { enabled: true, phase: "running", message: `已連接：${client.user?.tag ?? "Discord Bot"}` };
+      this.setStatus({ enabled: true, phase: "running", message: `已連接：${client.user?.tag ?? "Discord Bot"}` });
       console.log(LOG, `Gateway 已連接 (${client.user?.tag ?? "unknown"})`);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      this.status = { enabled: true, phase: "error", message };
+      this.setStatus({ enabled: true, phase: "error", message });
       await this.stopClient();
       throw err;
     }
@@ -877,7 +895,7 @@ export class DiscordAdapter implements ChannelAdapter {
     if (config.cloudPrimary !== false) return { enabled: true, phase: "running", message: "雲端主 Bot 模式（本機 Gateway 已停用）" };
     if (config.cloudStandbyEnabled && !this.client?.isReady()) return this.status;
     if (this.client?.isReady() && this.status.phase !== "running") {
-      this.status = { enabled: true, phase: "running", message: `已連接：${this.client.user?.tag ?? "Discord Bot"}` };
+      this.setStatus({ enabled: true, phase: "running", message: `已連接：${this.client.user?.tag ?? "Discord Bot"}` });
     }
     return this.status;
   }
@@ -994,6 +1012,16 @@ export class DiscordAdapter implements ChannelAdapter {
       const content = "你不在 Cyrene 的 Discord 白名單中，或這個頻道／伺服器未被允許。";
       if (interaction.deferred) await interaction.editReply({ content });
       else await interaction.reply({ content, flags: MessageFlags.Ephemeral });
+      return;
+    }
+    if (interaction.commandName === "ww") {
+      const attachment = interaction.options.getAttachment("file");
+      await handleWavesUidInteraction(
+        interaction,
+        interaction.options.getString("command") ?? "幫助",
+        this.client?.user?.id ?? "",
+        attachment ? { name: attachment.name, url: attachment.url, contentType: attachment.contentType } : undefined,
+      );
       return;
     }
     if (interaction.commandName === "chat") {
@@ -1119,7 +1147,7 @@ export class DiscordAdapter implements ChannelAdapter {
 
     if (interaction.commandName === "checkin") {
       const stats = recordAchievementEvent("checkin");
-      const embed = buildDiscordCheckinEmbed(interaction.user.displayName || interaction.user.username, Math.max(1, stats.checkinsCount), stats.checkinsCount);
+      const embed = buildDiscordCheckinEmbed(interaction.user.displayName || interaction.user.username, Math.max(1, stats.checkinStreak), stats.checkinsCount);
       await interaction.reply(embed);
       return;
     }
@@ -1168,6 +1196,11 @@ export class DiscordAdapter implements ChannelAdapter {
       await interaction.reply({
         content: `💖 **悄悄話已珍藏**\n「已幫你把這段心事收進《昔漣與夥伴的共享筆記本》囉：『${content}』～✨」`,
       });
+      return;
+    }
+
+    if (interaction.commandName === "asmr") {
+      await this.handleSlashChat(interaction, "/asmr 昔漣，和我說睡前 ASMR 陪伴我休息");
       return;
     }
 
@@ -2156,7 +2189,14 @@ export class DiscordAdapter implements ChannelAdapter {
   }
 
   private async resolveStoredMusicControllerMessage(): Promise<Message | null> {
-    if (this.musicControllerMessage) return this.musicControllerMessage;
+    const MAX_CONTROLLER_AGE_MS = 60 * 60 * 1000; // 超過1小時不播歌或無操作，舊面板自動作廢，發送新面板至頻道最下方
+    if (this.musicControllerMessage) {
+      if (Date.now() - this.musicControllerMessage.createdTimestamp > MAX_CONTROLLER_AGE_MS) {
+        this.musicControllerMessage = null;
+        return null;
+      }
+      return this.musicControllerMessage;
+    }
     const client = this.client;
     if (!client) return null;
     const resumeData = await loadDiscordMusicResumeData().catch(() => null);
@@ -2166,6 +2206,10 @@ export class DiscordAdapter implements ChannelAdapter {
       const channel = await client.channels.fetch(reference.channelId);
       if (!channel || !("messages" in channel)) return null;
       const message = await channel.messages.fetch(reference.messageId);
+      if (Date.now() - message.createdTimestamp > MAX_CONTROLLER_AGE_MS) {
+        this.musicControllerMessage = null;
+        return null;
+      }
       this.musicControllerMessage = message;
       return message;
     } catch {
@@ -2212,6 +2256,10 @@ export class DiscordAdapter implements ChannelAdapter {
       const channel = await client.channels.fetch(reference.channelId);
       if (!channel || !("messages" in channel)) return;
       const message = await channel.messages.fetch(reference.messageId);
+      if (Date.now() - message.createdTimestamp > 60 * 60 * 1000) {
+        this.musicControllerMessage = null;
+        return;
+      }
       await message.edit(buildDiscordMusicPlayer(this.voiceCall!.getMusicState()));
       this.musicControllerMessage = message;
     } catch (error) {
@@ -2310,31 +2358,45 @@ export class DiscordAdapter implements ChannelAdapter {
   }
 
   private async handleSlashChat(interaction: ChatInputCommandInteraction, text: string): Promise<void> {
-    await interaction.deferReply();
-    const member = interaction.guild
-      ? await interaction.guild.members.fetch(interaction.user.id).catch(() => null)
-      : null;
-    const outgoing = await (this.voiceDispatch ?? this.onMessage)?.({
-      channel: "discord",
-      senderId: interaction.user.id,
-      senderName: member?.displayName ?? interaction.user.globalName ?? interaction.user.username,
-      chatId: interaction.channelId,
-      text,
-      at: new Date(),
-      _raw: { source: "discord-slash", interactionId: interaction.id, guildId: interaction.guildId },
-    }) ?? null;
-    const reply = outgoing?.parts
-      .filter((part): part is Extract<typeof part, { kind: "text" }> => part.kind === "text")
-      .map((part) => part.text)
-      .join("\n")
-      .trim();
-    if (!reply) {
-      await interaction.editReply("這次沒有取得回覆，請稍後再試一次。");
-      return;
+    await interaction.deferReply().catch(() => undefined);
+    try {
+      const member = interaction.guild
+        ? await interaction.guild.members.fetch(interaction.user.id).catch(() => null)
+        : null;
+      const outgoing = await (this.voiceDispatch ?? this.onMessage)?.({
+        channel: "discord",
+        senderId: interaction.user.id,
+        senderName: member?.displayName ?? interaction.user.globalName ?? interaction.user.username,
+        chatId: interaction.channelId,
+        text,
+        at: new Date(),
+        _raw: { source: "discord-slash", interactionId: interaction.id, guildId: interaction.guildId },
+      }) ?? null;
+
+      const reply = outgoing?.parts
+        .filter((part): part is Extract<typeof part, { kind: "text" }> => part.kind === "text")
+        .map((part) => part.text)
+        .join("\n")
+        .trim();
+
+      if (interaction.deferred) {
+        if (!reply) {
+          await interaction.deleteReply().catch(async () => {
+            await interaction.editReply("✨ 語音已發送至頻道，請播放收聽～").catch(() => undefined);
+          });
+        } else {
+          const chunks = splitText(reply);
+          await interaction.editReply(chunks[0]).catch(() => undefined);
+          for (const chunk of chunks.slice(1)) {
+            await interaction.followUp(chunk).catch(() => undefined);
+          }
+        }
+      }
+    } catch (err) {
+      if (interaction.deferred) {
+        await interaction.editReply(`請求處理失敗：${err instanceof Error ? err.message : String(err)}`).catch(() => undefined);
+      }
     }
-    const chunks = splitText(reply);
-    await interaction.editReply(chunks[0]);
-    for (const chunk of chunks.slice(1)) await interaction.followUp(chunk);
   }
 
   getProfile(): DiscordBotProfile {

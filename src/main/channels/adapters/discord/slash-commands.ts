@@ -640,6 +640,11 @@ const commands = [
     .addStringOption((option) => option.setName("message").setDescription("想對她說的話").setRequired(false))
     .addAttachmentOption((option) => option.setName("image").setDescription("PNG、JPEG、WebP 或 GIF 圖片").setRequired(false)),
   new SlashCommandBuilder()
+    .setName("ww")
+    .setDescription("使用 WutheringWavesUID 查詢鳴潮資料")
+    .addStringOption((option) => option.setName("command").setDescription("例如：幫助、登入、今汐面板").setRequired(false))
+    .addAttachmentOption((option) => option.setName("file").setDescription("匯入抽卡資料或提供辨識圖片").setRequired(false)),
+  new SlashCommandBuilder()
     .setName("draw")
     .setDescription("由 Codex 生成圖片並透過 Discord 私訊回傳（僅擁有者）")
     .addStringOption((option) => option.setName("prompt").setDescription("可只輸入關鍵詞，例如：我想看你穿黑絲").setMaxLength(1800).setRequired(true)),
@@ -676,6 +681,8 @@ const commands = [
   new SlashCommandBuilder().setName("tarot").setDescription("抽一張昔漣每日幸運塔羅靈感卡"),
   new SlashCommandBuilder().setName("chess").setDescription("與昔漣開始一局西洋棋對弈對戰"),
   new SlashCommandBuilder().setName("guesssong").setDescription("開啟聽歌猜曲名小遊戲"),
+  new SlashCommandBuilder().setName("asmr").setDescription("讓昔漣為你進行睡前極致耳語 ASMR 陪伴"),
+  new SlashCommandBuilder().setName("sing").setDescription("讓昔漣為你甜美哼唱動聽的歌曲旋律"),
   new SlashCommandBuilder()
     .setName("whisper")
     .setDescription("將你對昔漣的悄悄話收進共享筆記本珍藏")
@@ -686,4 +693,3 @@ export const DISCORD_SLASH_COMMANDS: RESTPostAPIChatInputApplicationCommandsJSON
   .map((command) => command.toJSON());
 
 export const DISCORD_SLASH_COMMAND_NAMES = DISCORD_SLASH_COMMANDS.map((command) => command.name);
-

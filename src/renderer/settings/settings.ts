@@ -3664,7 +3664,7 @@ async function loadChannelsPanel(): Promise<void> {
     renderChannelStatus(channelsWechatStatusEl, status?.wechat?.phase ?? "offline", status?.wechat?.message);
     renderChannelStatus(channelsFeishuStatusEl, status?.feishu?.phase ?? "offline", status?.feishu?.message);
     renderChannelStatus(channelsDiscordStatusEl, status?.discord?.phase ?? "offline", status?.discord?.message);
-    await Promise.all([refreshDiscordProfile(), refreshDiscordMusic(), refreshSpotify(), refreshBilibili()]);
+    await Promise.all([refreshDiscordProfile(), refreshDiscordMusic(), refreshSpotify(), refreshBilibili(), refreshXNotifications(), refreshAniListNotifications()]);
     // Phase 3.4：拉一次消息日誌
     void refreshChannelsLog();
 
@@ -4028,6 +4028,277 @@ async function loadChannelsPanel(): Promise<void> {
       await refreshDiscordProfile();
     } catch (err) {
       setDiscordFeedback("err", err instanceof Error ? err.message : String(err));
+    }
+  });
+
+  // ===== X (Twitter) 動態推播 =====
+  async function refreshXNotifications(): Promise<void> {
+    const enabledEl = document.getElementById("x-notifications-enabled") as HTMLInputElement | null;
+    const intervalEl = document.getElementById("x-notifications-interval") as HTMLInputElement | null;
+    const listEl = document.getElementById("x-notifications-account-list");
+    if (!listEl) return;
+
+    try {
+      const config = await (window.settings as any).xNotificationsGetConfig();
+      if (enabledEl) enabledEl.checked = !!config?.enabled;
+      if (intervalEl) intervalEl.value = String(config?.checkIntervalMinutes ?? 5);
+      const catNameEl = document.getElementById("x-notifications-category-name") as HTMLInputElement | null;
+      if (catNameEl) catNameEl.value = config?.announcementCategoryName || "announcements";
+
+      listEl.innerHTML = "";
+      const accounts = Array.isArray(config?.accounts) ? config.accounts : [];
+      if (accounts.length === 0) {
+        listEl.innerHTML = '<div style="color: var(--text-muted, #888); font-size: 13px;">尚無追蹤帳號，請使用下方輸入框新增。</div>';
+        return;
+      }
+
+      const categoryLabels: Record<string, string> = {
+        game: "🎮 遊戲",
+        anime: "📺 動漫",
+        news: "📰 新聞",
+        leak: "🤫 爆料",
+        general: "💬 一般",
+      };
+
+      accounts.forEach((acc: any) => {
+        const item = document.createElement("div");
+        item.className = "x-account-item";
+        item.style.cssText = "display: flex; align-items: center; justify-content: space-between; background: rgba(255,255,255,0.05); padding: 8px 12px; border-radius: 8px; font-size: 14px;";
+
+        const categoryLabel = categoryLabels[acc.category] || categoryLabels.general;
+
+        item.innerHTML = `
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <strong style="color: var(--text-primary, #fff);">@${acc.username}</strong>
+            ${acc.displayName ? `<span style="color: var(--text-secondary, #aaa); font-size: 12px;">(${acc.displayName})</span>` : ""}
+            <span style="background: rgba(255,255,255,0.1); padding: 2px 8px; border-radius: 12px; font-size: 11px;">${categoryLabel}</span>
+          </div>
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <button type="button" class="btn-secondary btn-x-toggle" data-username="${acc.username}" style="padding: 2px 10px; font-size: 12px;">${acc.enabled ? "已啟用" : "已停用"}</button>
+            <button type="button" class="btn-secondary btn-x-delete" data-username="${acc.username}" style="padding: 2px 8px; font-size: 12px; color: #ff6b6b;">🗑 刪除</button>
+          </div>
+        `;
+        listEl.appendChild(item);
+      });
+
+      listEl.querySelectorAll(".btn-x-toggle").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          const username = (btn as HTMLElement).dataset.username;
+          const targetAcc = accounts.find((a: any) => a.username === username);
+          if (targetAcc) {
+            targetAcc.enabled = !targetAcc.enabled;
+            await (window.settings as any).xNotificationsSaveConfig({ accounts });
+            await refreshXNotifications();
+          }
+        });
+      });
+
+      listEl.querySelectorAll(".btn-x-delete").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          const username = (btn as HTMLElement).dataset.username;
+          const newAccounts = accounts.filter((a: any) => a.username !== username);
+          await (window.settings as any).xNotificationsSaveConfig({ accounts: newAccounts });
+          await refreshXNotifications();
+        });
+      });
+    } catch (err) {
+      console.warn("[XNotifications] refreshXNotifications 失敗:", err);
+    }
+  }
+
+  const xEnabledEl = document.getElementById("x-notifications-enabled") as HTMLInputElement | null;
+  const xIntervalEl = document.getElementById("x-notifications-interval") as HTMLInputElement | null;
+  const xCategoryNameEl = document.getElementById("x-notifications-category-name") as HTMLInputElement | null;
+  const xUsernameInput = document.getElementById("x-account-input-username") as HTMLInputElement | null;
+  const xCategorySelect = document.getElementById("x-account-input-category") as HTMLSelectElement | null;
+  const xAddBtn = document.getElementById("x-account-add-btn");
+  const xCheckNowBtn = document.getElementById("x-notifications-check-now");
+  const xTestPostBtn = document.getElementById("x-notifications-test-post");
+  const xFeedbackEl = document.getElementById("x-notifications-feedback");
+
+  const setXFeedback = (kind: "info" | "ok" | "err", msg: string): void => {
+    if (!xFeedbackEl) return;
+    xFeedbackEl.textContent = msg;
+    xFeedbackEl.className = "channels-feedback";
+    xFeedbackEl.classList.add(kind === "ok" ? "channels-feedback--ok" : kind === "err" ? "channels-feedback--err" : "channels-feedback--info");
+  };
+
+  xEnabledEl?.addEventListener("change", async () => {
+    await (window.settings as any).xNotificationsSaveConfig({ enabled: xEnabledEl.checked });
+    setXFeedback("ok", xEnabledEl.checked ? "X 動態推播已開啟" : "X 動態推播已關閉");
+  });
+
+  xIntervalEl?.addEventListener("change", async () => {
+    const val = Math.max(1, Number(xIntervalEl.value) || 5);
+    await (window.settings as any).xNotificationsSaveConfig({ checkIntervalMinutes: val });
+    setXFeedback("ok", `檢查頻率已設為每 ${val} 分鐘`);
+  });
+
+  xCategoryNameEl?.addEventListener("change", async () => {
+    const val = xCategoryNameEl.value.trim() || "announcements";
+    await (window.settings as any).xNotificationsSaveConfig({ announcementCategoryName: val });
+    setXFeedback("ok", `Discord 公告 Category 已設為「${val}」`);
+  });
+
+  xAddBtn?.addEventListener("click", async () => {
+    const rawUsername = xUsernameInput?.value.trim() ?? "";
+    const username = rawUsername.replace(/^@/, "");
+    if (!username) {
+      setXFeedback("err", "請輸入 X 帳號名稱 (@Username)");
+      return;
+    }
+    const category = xCategorySelect?.value || "game";
+    const config = await (window.settings as any).xNotificationsGetConfig();
+    const accounts = Array.isArray(config?.accounts) ? config.accounts : [];
+    if (accounts.some((a: any) => a.username.toLowerCase() === username.toLowerCase())) {
+      setXFeedback("err", `@${username} 已在追蹤列表中`);
+      return;
+    }
+    accounts.push({
+      id: `acc_${Date.now()}`,
+      username,
+      displayName: username,
+      category,
+      enabled: true,
+    });
+    await (window.settings as any).xNotificationsSaveConfig({ accounts });
+    if (xUsernameInput) xUsernameInput.value = "";
+    setXFeedback("ok", `已新增追蹤 @${username}`);
+    await refreshXNotifications();
+  });
+
+  xCheckNowBtn?.addEventListener("click", async () => {
+    setXFeedback("info", "正在檢查最新 X 動態…");
+    try {
+      const res = await (window.settings as any).xNotificationsCheckNow();
+      setXFeedback("ok", `檢查完成！檢查了 ${res.checked} 個帳號，發送了 ${res.newTweets} 條新動態推播。`);
+      await refreshXNotifications();
+    } catch (err) {
+      setXFeedback("err", err instanceof Error ? err.message : String(err));
+    }
+  });
+
+  xTestPostBtn?.addEventListener("click", async () => {
+    const username = xUsernameInput?.value.trim().replace(/^@/, "") || "Wuthering_Waves";
+    const category = xCategorySelect?.value || "game";
+    setXFeedback("info", "正在發送測試推播至 Discord…");
+    try {
+      const res = await (window.settings as any).xNotificationsTestPost(username, category);
+      if (res.ok) setXFeedback("ok", res.message);
+      else setXFeedback("err", res.error);
+    } catch (err) {
+      setXFeedback("err", err instanceof Error ? err.message : String(err));
+    }
+  });
+
+  const xTestAllBtn = document.getElementById("x-notifications-test-all");
+  xTestAllBtn?.addEventListener("click", async () => {
+    setXFeedback("info", "正在逐一抓取所有追蹤帳號的最新推文並發送至 Discord，請稍候…");
+    xTestAllBtn.setAttribute("disabled", "");
+    try {
+      const res = await (window.settings as any).xNotificationsTestAll();
+      if (res.ok) setXFeedback("ok", res.message || `已成功推播 ${res.postedCount}/${res.total} 個帳號！`);
+      else setXFeedback("err", res.error || "發送失敗");
+    } catch (err) {
+      setXFeedback("err", err instanceof Error ? err.message : String(err));
+    } finally {
+      xTestAllBtn.removeAttribute("disabled");
+    }
+  });
+
+  // ===== AniList 新番開播推播 =====
+  async function refreshAniListNotifications(): Promise<void> {
+    const enabledEl = document.getElementById("anilist-notifications-enabled") as HTMLInputElement | null;
+    const usernameEl = document.getElementById("anilist-notifications-username") as HTMLInputElement | null;
+    const tokenEl = document.getElementById("anilist-notifications-token") as HTMLInputElement | null;
+    const filterModeEl = document.getElementById("anilist-notifications-filter-mode") as HTMLSelectElement | null;
+    const intervalEl = document.getElementById("anilist-notifications-interval") as HTMLInputElement | null;
+    const categoryEl = document.getElementById("anilist-notifications-category") as HTMLSelectElement | null;
+    if (!enabledEl) return;
+
+    try {
+      const config = await (window.settings as any).anilistNotificationsGetConfig();
+      if (enabledEl) enabledEl.checked = !!config?.enabled;
+      if (usernameEl) usernameEl.value = config?.username || "";
+      if (tokenEl) tokenEl.value = config?.accessToken || "";
+      if (filterModeEl) filterModeEl.value = config?.filterMode || "watchlist_only";
+      if (intervalEl) intervalEl.value = String(config?.checkIntervalMinutes ?? 10);
+      if (categoryEl) categoryEl.value = config?.targetCategory || "anime";
+    } catch (err) {
+      console.warn("[AniList] Failed to load config:", err);
+    }
+  }
+
+  const aniEnabledEl = document.getElementById("anilist-notifications-enabled") as HTMLInputElement | null;
+  const aniUsernameEl = document.getElementById("anilist-notifications-username") as HTMLInputElement | null;
+  const aniTokenEl = document.getElementById("anilist-notifications-token") as HTMLInputElement | null;
+  const aniFilterModeEl = document.getElementById("anilist-notifications-filter-mode") as HTMLSelectElement | null;
+  const aniIntervalEl = document.getElementById("anilist-notifications-interval") as HTMLInputElement | null;
+  const aniCategoryEl = document.getElementById("anilist-notifications-category") as HTMLSelectElement | null;
+  const aniCheckNowBtn = document.getElementById("anilist-notifications-check-now");
+  const aniTestPostBtn = document.getElementById("anilist-notifications-test-post");
+  const aniFeedbackEl = document.getElementById("anilist-notifications-feedback");
+
+  function setAniFeedback(kind: "info" | "ok" | "err", msg: string): void {
+    if (!aniFeedbackEl) return;
+    aniFeedbackEl.textContent = msg;
+    aniFeedbackEl.className = "channels-feedback";
+    aniFeedbackEl.classList.add(kind === "ok" ? "channels-feedback--ok" : kind === "err" ? "channels-feedback--err" : "channels-feedback--info");
+  }
+
+  const saveAniConfig = async () => {
+    try {
+      const username = aniUsernameEl?.value.trim() || undefined;
+      const token = aniTokenEl?.value.trim() || undefined;
+      await (window.settings as any).anilistNotificationsSaveConfig({
+        enabled: aniEnabledEl?.checked ?? true,
+        username,
+        accessToken: token,
+        filterMode: aniFilterModeEl?.value || "watchlist_only",
+        checkIntervalMinutes: Number(aniIntervalEl?.value) || 10,
+        targetCategory: aniCategoryEl?.value || "anime",
+      });
+
+      if (username || token) {
+        const verify = await (window.settings as any).anilistNotificationsVerifyAccount(username, token);
+        if (verify.ok) {
+          setAniFeedback("ok", `已成功連結 AniList 帳號：${verify.name}（有 ${verify.count ?? 0} 部動畫紀錄）。開播通知將優先過濾您的追番清單！`);
+        } else {
+          setAniFeedback("err", `驗證失敗：${verify.error || "請檢查用戶名稱或 Access Token"}`);
+        }
+      }
+    } catch (err) {
+      console.warn("[AniList] Save error:", err);
+    }
+  };
+
+  aniEnabledEl?.addEventListener("change", saveAniConfig);
+  aniUsernameEl?.addEventListener("change", saveAniConfig);
+  aniTokenEl?.addEventListener("change", saveAniConfig);
+  aniFilterModeEl?.addEventListener("change", saveAniConfig);
+  aniIntervalEl?.addEventListener("change", saveAniConfig);
+  aniCategoryEl?.addEventListener("change", saveAniConfig);
+
+  aniCheckNowBtn?.addEventListener("click", async () => {
+    setAniFeedback("info", "正在連接 AniList 查詢最新開播動畫…");
+    try {
+      const res = await (window.settings as any).anilistNotificationsCheckNow();
+      setAniFeedback("ok", `檢查完成！共查詢 ${res.checked} 檔新番，發送了 ${res.newNotified} 檔最新開播通知至 Discord。`);
+      await refreshAniListNotifications();
+    } catch (err) {
+      setAniFeedback("err", err instanceof Error ? err.message : String(err));
+    }
+  });
+
+  aniTestPostBtn?.addEventListener("click", async () => {
+    const category = aniCategoryEl?.value || "anime";
+    setAniFeedback("info", "正在發送測試新番開播卡片至 Discord…");
+    try {
+      const res = await (window.settings as any).anilistNotificationsTestPost(category);
+      if (res.ok) setAniFeedback("ok", res.message);
+      else setAniFeedback("err", res.error);
+    } catch (err) {
+      setAniFeedback("err", err instanceof Error ? err.message : String(err));
     }
   });
 
@@ -6511,11 +6782,11 @@ function updateVoiceCardUI(selected: "old" | "new") {
 
 cardOld?.addEventListener("click", () => {
   updateVoiceCardUI("old");
-  const oldPath = "/Users/clark/cy/resources/tts-default-ref.wav";
+  const oldPath = "/Users/clark/Downloads/昔涟測試語音_官方包.wav";
   ttsEl("tts-gptsovits-ref-audio").value = oldPath;
-  ttsEl("tts-gptsovits-prompt-text").value = "你好，我是昔漣。";
+  ttsEl("tts-gptsovits-prompt-text").value = "我是昔漣，今天也請多指教囉！";
   void saveTtsField("ttsGptsovitsRefAudioPath", oldPath);
-  void saveTtsField("ttsGptsovitsPromptText", "你好，我是昔漣。");
+  void saveTtsField("ttsGptsovitsPromptText", "我是昔漣，今天也請多指教囉！");
 });
 
 cardNew?.addEventListener("click", () => {
@@ -6530,7 +6801,14 @@ cardNew?.addEventListener("click", () => {
 // GPT-SoVITS 音色預設選擇
 document.getElementById("tts-gptsovits-preset-select")?.addEventListener("change", (e) => {
   const val = (e.target as HTMLSelectElement).value;
-  if (val === "cyrene_official") {
+  if (val === "cyrene_mp3") {
+    updateVoiceCardUI("old");
+    const audioPath = "/Users/clark/Downloads/Cyrene.mp3";
+    ttsEl("tts-gptsovits-ref-audio").value = audioPath;
+    ttsEl("tts-gptsovits-prompt-text").value = "你好，我是昔漣。";
+    void saveTtsField("ttsGptsovitsRefAudioPath", audioPath);
+    void saveTtsField("ttsGptsovitsPromptText", ttsEl("tts-gptsovits-prompt-text").value);
+  } else if (val === "cyrene_official") {
     updateVoiceCardUI("new");
     const audioPath = "/Users/clark/Downloads/[BraveDown.Com] [昔涟全互动语音  用于训练AI] [1785565362] .mp3_0000914560_0001019200/[BraveDown.Com] [昔涟全互动语音  用于训练AI] [1785565362] .mp3_0000914560_0001019200.wav";
     ttsEl("tts-gptsovits-ref-audio").value = audioPath;
@@ -6538,8 +6816,8 @@ document.getElementById("tts-gptsovits-preset-select")?.addEventListener("change
     void saveTtsField("ttsGptsovitsRefAudioPath", audioPath);
     void saveTtsField("ttsGptsovitsPromptText", ttsEl("tts-gptsovits-prompt-text").value);
   } else if (val === "cyrene_wav_pack") {
-    updateVoiceCardUI("new");
-    const audioPath = "/Users/clark/Downloads/昔漣測試語音_官方包.wav";
+    updateVoiceCardUI("old");
+    const audioPath = "/Users/clark/Downloads/昔涟測試語音_官方包.wav";
     ttsEl("tts-gptsovits-ref-audio").value = audioPath;
     ttsEl("tts-gptsovits-prompt-text").value = "我是昔漣，今天也請多指教囉！";
     void saveTtsField("ttsGptsovitsRefAudioPath", audioPath);

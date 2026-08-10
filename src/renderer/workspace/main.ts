@@ -127,7 +127,7 @@ tabs.forEach((tab) => {
     }
 
     // Hide the right info panel for Shared Notebook, game room, and exam mode to keep the main canvas wide.
-    if (targetTab === "notebook" || targetTab === "game-room" || targetTab === "exam") {
+    if (targetTab === "notebook" || targetTab === "game-room" || targetTab === "exam" || targetTab === "wavesuid") {
       setInfoPanelVisible(false);
       syncPetDockVisibilityAfterLayout(false);
     } else {
@@ -148,6 +148,8 @@ tabs.forEach((tab) => {
       iframe.src = "../exam/index.html";
     } else if (targetTab === "game-room") {
       iframe.src = "../game-room/index.html";
+    } else if (targetTab === "wavesuid") {
+      iframe.src = "../wavesuid/index.html";
     } else if (targetTab === "channels") {
       navigateSettingsIframe("channels");
     } else if (targetTab === "stickers") {
@@ -199,6 +201,8 @@ function updateTitlebarModeText(tab: string) {
     titlebarModeEl.textContent = "考試模式";
   } else if (tab === "game-room") {
     titlebarModeEl.textContent = "遊戲房";
+  } else if (tab === "wavesuid") {
+    titlebarModeEl.textContent = "鳴潮工具";
   } else if (tab === "settings" || tab === "memory") {
     titlebarModeEl.textContent = "系統設置";
   } else if (tab === "channels") {
@@ -760,7 +764,7 @@ function reportSlotBounds() {
   if (!window.sidebar?.reportSlotBounds) return;
   
   const currentTab = document.querySelector(".sidebar__tab.is-active")?.getAttribute("data-tab");
-  const usesFullWidth = currentTab === "notebook" || currentTab === "game-room" || currentTab === "exam";
+  const usesFullWidth = currentTab === "notebook" || currentTab === "game-room" || currentTab === "exam" || currentTab === "wavesuid";
 
   const activeInfoTab = document.querySelector(".info-tab.is-active")?.textContent?.trim();
   const isOverview = activeInfoTab === "概覽";

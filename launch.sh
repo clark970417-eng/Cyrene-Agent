@@ -35,6 +35,12 @@ if ! lsof -i :9880 > /dev/null 2>&1; then
     sleep 2
 fi
 
-# 2. 啟動桌寵
+# 2. 啟動服務
 cd /Users/clark/cy
-npm run dev > "/Users/clark/Library/Application Support/live2d-cyrene/logs/electron.log" 2>&1
+if [ "$1" = "--electron" ] || [ "$1" = "--gui" ] || [ "$ELECTRON_GUI" = "1" ]; then
+    npm run dev:electron > "/Users/clark/Library/Application Support/live2d-cyrene/logs/electron.log" 2>&1
+elif [ "$1" = "--no-electron" ] || [ "$1" = "--web" ] || [ "$NO_ELECTRON" = "1" ]; then
+    npm run dev:no-electron > "/Users/clark/Library/Application Support/live2d-cyrene/logs/vite.log" 2>&1
+else
+    npm run dev > "/Users/clark/Library/Application Support/live2d-cyrene/logs/electron.log" 2>&1
+fi

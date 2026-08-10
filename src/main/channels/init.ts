@@ -23,6 +23,10 @@ import { loadDiscordMusicHistory } from "./adapters/discord/music-history";
 import { loadDiscordMusicFavorites } from "./adapters/discord/music-favorites";
 import { controlSpotify, disconnectSpotify, getSpotifyStatus, startSpotifyAuthorization } from "./spotify-control";
 import { configureBilibiliBrowserCookies, getOperaGxProfilePath, testBilibiliBrowserCookies } from "./adapters/discord/music-source";
+import { xNotificationService } from "../services/x-notification-service";
+import { loadXNotificationConfig, saveXNotificationConfig, type XNotificationConfig } from "../services/x-notification-store";
+import { aniListNotificationService } from "../services/anilist-notification-service";
+import { loadAniListNotificationConfig, saveAniListNotificationConfig, type AniListNotificationConfig } from "../services/anilist-notification-store";
 
 const LOG = "[ChannelsInit]";
 
@@ -59,7 +63,10 @@ export async function initChannels(): Promise<void> {
   const feishuAdapter = new FeishuAdapter();
   channelManager.register(feishuAdapter);
 
-  const discordAdapter = new DiscordAdapter(async (msg) => await channelManager.dispatchOnly(msg));
+  const discordAdapter = new DiscordAdapter(
+    async (msg) => await channelManager.dispatchOnly(msg),
+    () => broadcastChannelsStatus()
+  );
   channelManager.register(discordAdapter);
 
   // 註冊微信 adapter（iLink 直連微信，不依賴 OpenClaw Gateway）
@@ -70,12 +77,18 @@ export async function initChannels(): Promise<void> {
   // 啟動所有已註冊 adapter
   await channelManager.startAll();
 
+  // 啟動 X (Twitter) & AniList 推送服務
+  xNotificationService.start();
+  aniListNotificationService.start();
+
   console.log(LOG, "channels 模塊就緒");
   broadcastChannelsStatus();
 }
 
 /** app.on('before-quit') 調 */
 export async function shutdownChannels(): Promise<void> {
+  xNotificationService.stop();
+  aniListNotificationService.stop();
   await channelManager.stopAll();
   await stopInboundServer();
   initialized = false;
@@ -238,12 +251,19 @@ function registerChannelsIpc(): void {
     if (!adapter) return { ok: false, error: "Discord adapter 未註冊" };
     try {
       await adapter.rebuild();
-      const status = adapter.getStatus();
+      let status = adapter.getStatus();
+      if (status.enabled && status.phase === "starting") {
+        for (let i = 0; i < 10; i++) {
+          await new Promise((r) => setTimeout(r, 400));
+          status = adapter.getStatus();
+          if (status.phase === "running") break;
+        }
+      }
       broadcastChannelsStatus();
       if (!status.enabled && status.phase === "offline") {
         return { ok: true, message: "Discord 已停止連線" };
       }
-      return status.phase === "running"
+      return (status.phase === "running" || status.phase === "starting")
         ? { ok: true, message: status.message ?? "Discord Gateway 已連接" }
         : { ok: false, error: status.message ?? "連接失敗" };
     } catch (err) {
@@ -386,6 +406,131 @@ function registerChannelsIpc(): void {
   ipcMain.handle(IPC.CHANNELS_LOG_CLEAR, () => {
     clearLog();
     return { ok: true };
+  });
+
+  // X (Twitter) Notifications
+  ipcMain.handle(IPC.X_NOTIFICATIONS_GET_CONFIG, () => loadXNotificationConfig());
+  ipcMain.handle(IPC.X_NOTIFICATIONS_SAVE_CONFIG, (_e, patch: unknown) => {
+    const current = loadXNotificationConfig();
+    const input = (patch && typeof patch === "object" ? patch : {}) as Partial<XNotificationConfig>;
+    const updated: XNotificationConfig = {
+      ...current,
+      ...input,
+    };
+    saveXNotificationConfig(updated);
+    xNotificationService.start();
+    return { ok: true, config: updated };
+  });
+  ipcMain.handle(IPC.X_NOTIFICATIONS_CHECK_NOW, async () => {
+    const res = await xNotificationService.checkAllAccounts();
+    return { ok: true, ...res };
+  });
+  ipcMain.handle(IPC.X_NOTIFICATIONS_TEST_POST, async (_e, input: unknown) => {
+    const data = (input && typeof input === "object" ? input : {}) as { username?: string; category?: string };
+    const username = (data.username || "Wuthering_Waves").replace(/^@/, "");
+    const category = (data.category || "game") as "news" | "anime" | "game" | "leak" | "general";
+    const sampleTweet = {
+      id: String(Date.now()),
+      url: `https://x.com/${username}`,
+      text: `這是一條來自 @${username} 的 X (Twitter) 測試通知！昔漣已成功連結 Discord 頻道。`,
+      authorName: username,
+      authorUsername: username,
+      mediaUrls: [],
+      pubDate: new Date().toISOString(),
+    };
+    const posted = await xNotificationService.broadcastTweetToDiscord(
+      { id: "test", username, category, enabled: true },
+      sampleTweet
+    );
+    return posted
+      ? { ok: true, message: `測試通知已發送至 Discord ${category} 頻道！` }
+      : { ok: false, error: "發送測試通知失敗，請確認昔漣 Discord Bot 已連線且具備發文權限。" };
+  });
+  ipcMain.handle(IPC.X_NOTIFICATIONS_TEST_ALL, async () => {
+    const config = loadXNotificationConfig();
+    const accounts = config.accounts || [];
+    let successCount = 0;
+
+    for (const acc of accounts) {
+      if (!acc.enabled) continue;
+      let tweets: Array<any> = [];
+      try {
+        tweets = await xNotificationService.fetchLatestTweets(acc.username);
+      } catch {}
+
+      const tweetToPost = tweets[0] || {
+        id: String(Date.now()),
+        url: `https://x.com/${acc.username}`,
+        text: `這是來自 @${acc.username} 的即時動態測試卡片！昔漣已成功綁定此帳號至 Discord ${acc.category} 頻道。`,
+        authorName: acc.displayName || acc.username,
+        authorUsername: acc.username,
+        mediaUrls: [],
+        pubDate: new Date().toISOString(),
+      };
+
+      const posted = await xNotificationService.broadcastTweetToDiscord(acc, tweetToPost);
+      if (posted) successCount++;
+      await new Promise((r) => setTimeout(r, 500));
+    }
+
+    return {
+      ok: true,
+      postedCount: successCount,
+      total: accounts.filter((a) => a.enabled).length,
+      message: `已成功發送 ${successCount} 個帳號的最新動態測試卡片至 Discord 頻道！`,
+    };
+  });
+
+  // AniList Airing Notifications
+  ipcMain.handle(IPC.ANILIST_NOTIFICATIONS_GET_CONFIG, () => loadAniListNotificationConfig());
+  ipcMain.handle(IPC.ANILIST_NOTIFICATIONS_SAVE_CONFIG, (_e, patch: unknown) => {
+    const current = loadAniListNotificationConfig();
+    const input = (patch && typeof patch === "object" ? patch : {}) as Partial<AniListNotificationConfig>;
+    const updated: AniListNotificationConfig = {
+      ...current,
+      ...input,
+    };
+    saveAniListNotificationConfig(updated);
+    aniListNotificationService.start();
+    return { ok: true, config: updated };
+  });
+  ipcMain.handle(IPC.ANILIST_NOTIFICATIONS_VERIFY_ACCOUNT, async (_e, input: unknown) => {
+    const data = (input && typeof input === "object" ? input : {}) as { username?: string; token?: string };
+    const res = await aniListNotificationService.verifyUserAccount(data.username, data.token);
+    return res;
+  });
+  ipcMain.handle(IPC.ANILIST_NOTIFICATIONS_CHECK_NOW, async () => {
+    const res = await aniListNotificationService.checkNotifications();
+    return { ok: true, ...res };
+  });
+  ipcMain.handle(IPC.ANILIST_NOTIFICATIONS_TEST_POST, async (_e, input: unknown) => {
+    const data = (input && typeof input === "object" ? input : {}) as { category?: string };
+    const category = (data.category || "anime") as "anime" | "news" | "general";
+    const sampleNotif = {
+      id: 999999,
+      type: "AIRING" as const,
+      episode: 7,
+      contexts: ["Episode ", " of ", " aired."],
+      createdAt: Math.floor(Date.now() / 1000),
+      media: {
+        id: 21,
+        title: {
+          userPreferred: "Mushoku Tensei: Jobless Reincarnation Season 3",
+          english: "Mushoku Tensei: Jobless Reincarnation Season 3",
+          native: "無職転生Ⅲ ～異世界行ったら本気だす～",
+        },
+        coverImage: {
+          extraLarge: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx21-YCDoj1EkAxFn.jpg",
+        },
+        siteUrl: "https://anilist.co/anime/21",
+        episodes: 13,
+        genres: ["Fantasy", "Drama", "Adventure"],
+      },
+    };
+    const posted = await aniListNotificationService.broadcastNotificationToDiscord(sampleNotif, category);
+    return posted
+      ? { ok: true, message: `AniList 測試通知已發送至 Discord ${category} 頻道！` }
+      : { ok: false, error: "發送測試通知失敗，請確認昔漣 Discord Bot 已連線且具備發文權限。" };
   });
 }
 

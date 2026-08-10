@@ -169,6 +169,20 @@ const tasksApi = {
 contextBridge.exposeInMainWorld("sidebar", sidebarApi);
 contextBridge.exposeInMainWorld("tasks", tasksApi);
 
+const wavesUidApi = {
+  status: () => ipcRenderer.invoke(IPC.WAVES_UID_STATUS),
+  run: (command: string, attachments?: Array<{ name: string; url: string; contentType?: string }>) =>
+    ipcRenderer.invoke(IPC.WAVES_UID_RUN, { command, attachments: attachments ?? [] }),
+  pickFile: () => ipcRenderer.invoke(IPC.WAVES_UID_PICK_FILE),
+  captureDiscord: () => ipcRenderer.invoke(IPC.WAVES_UID_CAPTURE_DISCORD),
+  login: () => ipcRenderer.invoke(IPC.WAVES_UID_LOGIN),
+  loginStatus: () => ipcRenderer.invoke(IPC.WAVES_UID_LOGIN_STATUS),
+  dataStatus: () => ipcRenderer.invoke(IPC.WAVES_UID_DATA_STATUS),
+  deleteData: (uid: string) => ipcRenderer.invoke(IPC.WAVES_UID_DELETE_DATA, uid),
+};
+
+contextBridge.exposeInMainWorld("wavesUid", wavesUidApi);
+
 const gameRoomApi = {
   getStats: () => ipcRenderer.invoke(IPC.GAME_ROOM_GET_STATS),
   recordResult: (payload: { game: string; outcome: "user" | "cyrene" | "draw"; matches?: number }) =>
@@ -307,6 +321,18 @@ const settingsApi = {
   // Phase 3.4：消息日誌
   channelsLogGet: (limit?: number) => ipcRenderer.invoke(IPC.CHANNELS_LOG_GET, limit ?? 100),
   channelsLogClear: () => ipcRenderer.invoke(IPC.CHANNELS_LOG_CLEAR),
+  // X Notifications
+  xNotificationsGetConfig: () => ipcRenderer.invoke(IPC.X_NOTIFICATIONS_GET_CONFIG),
+  xNotificationsSaveConfig: (config: unknown) => ipcRenderer.invoke(IPC.X_NOTIFICATIONS_SAVE_CONFIG, config),
+  xNotificationsCheckNow: () => ipcRenderer.invoke(IPC.X_NOTIFICATIONS_CHECK_NOW),
+  xNotificationsTestPost: (username: string, category: string) => ipcRenderer.invoke(IPC.X_NOTIFICATIONS_TEST_POST, { username, category }),
+  xNotificationsTestAll: () => ipcRenderer.invoke(IPC.X_NOTIFICATIONS_TEST_ALL),
+  // AniList Notifications
+  anilistNotificationsGetConfig: () => ipcRenderer.invoke(IPC.ANILIST_NOTIFICATIONS_GET_CONFIG),
+  anilistNotificationsSaveConfig: (config: unknown) => ipcRenderer.invoke(IPC.ANILIST_NOTIFICATIONS_SAVE_CONFIG, config),
+  anilistNotificationsVerifyAccount: (username?: string, token?: string) => ipcRenderer.invoke(IPC.ANILIST_NOTIFICATIONS_VERIFY_ACCOUNT, { username, token }),
+  anilistNotificationsCheckNow: () => ipcRenderer.invoke(IPC.ANILIST_NOTIFICATIONS_CHECK_NOW),
+  anilistNotificationsTestPost: (category?: string) => ipcRenderer.invoke(IPC.ANILIST_NOTIFICATIONS_TEST_POST, { category }),
   onChannelsInstallProgress: (callback: (p: { channel: string; phase: string; pct: number }) => void) => {
     const listener = (_e: unknown, progress: { channel: string; phase: string; pct: number }) => callback(progress);
     ipcRenderer.on(IPC.CHANNELS_INSTALL_PROGRESS, listener);

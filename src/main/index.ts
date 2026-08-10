@@ -1,8 +1,9 @@
-import { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, screen, shell, dialog, protocol, net, desktopCapturer, globalShortcut } from "electron";
+import { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, screen, shell, dialog, protocol, net, desktopCapturer, globalShortcut, systemPreferences } from "electron";
 import * as path from "path";
 import * as fs from "fs";
 import * as os from "os";
 import { createHash } from "crypto";
+import { execFile } from "child_process";
 import * as zlib from "zlib";
 import { pathToFileURL } from "url";
 import { IPC } from "../shared/ipc-channels";
@@ -78,6 +79,7 @@ import { initChannels, shutdownChannels } from "./channels/init";
 import { buildAutomaticImageContext, buildDurablePhotoMemory } from "./channels/auto-image-vision";
 import { setDispatcherBuildAndRunAgent, setDispatcherSynthesizeTts, setDispatcherBroadcastChat, setDispatcherLoadRecentHistory } from "./channels/dispatcher";
 import { setDiscordVoiceServices } from "./channels/adapters/discord/voice-call";
+import { requestWavesUid } from "./channels/adapters/discord/wavesuid";
 import {
   activateDiscordGeminiFallback,
   canTryAlternateGeminiModel,
@@ -114,6 +116,11 @@ let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let chatWindow: BrowserWindow | null = null;
 let sidebarWindow: BrowserWindow | null = null;
+let wavesUidLoginWindow: BrowserWindow | null = null;
+let wavesUidLoginState: { phase: "idle" | "waiting" | "connected" | "failed"; message: string; uid?: string } = {
+  phase: "idle",
+  message: "尚未連結國際服帳號",
+};
 let sidebarRestoreBounds: { x: number; y: number; width: number; height: number } | null = null;
 let isSidebarExpanded = false;
 
@@ -2038,6 +2045,18 @@ function resolveSlashActivation<T extends { role: string; content: string }>(mes
   if (lastUserIdx < 0) return "";
   const lastUser = messages[lastUserIdx];
   if (typeof lastUser.content !== "string") return "";
+
+  const trimmed = lastUser.content.trim();
+  // 1. 內置特種指令模式支援：/asmr (極致耳語 Mode) 與 /sing (唱歌 Mode)
+  if (/^[\/\!]asmr(?:\s+|$)/i.test(trimmed)) {
+    console.log("[Cyrene] 特殊指令激活: /asmr (極致耳語 ASMR 模式)");
+    return `\n\n---\n\n【特別模式指令：/asmr 極致耳語陪伴 Mode】\n請昔漣緊貼在夥伴耳邊，用極致輕柔、緩和、溫柔入骨的睡前耳語（Whisper / ASMR）說話。句子簡短安詳，充滿撫慰與陪伴感，讓夥伴放鬆並感受到極致的安全感與溫暖。`;
+  }
+  if (/^[\/\!]sing(?:\s+|$)/i.test(trimmed)) {
+    console.log("[Cyrene] 特殊指令激活: /sing (唱歌吟唱模式)");
+    return `\n\n---\n\n【特別模式指令：/sing 唱歌吟唱 Mode】\n請昔漣化身為溫柔深情的歌者。請用充滿旋律感、韻律與輕柔語氣的歌詞形式回應夥伴，適當加入音樂符號 (如 ♪~)，輕聲演唱出動聽、溫暖、撫慰人心的旋律與歌詞。`;
+  }
+
   const knownIds = skillRegistry.getAll().map(s => s.id);
   const parsed = parseSlashCommand(lastUser.content, knownIds);
   if (!parsed.hit || !parsed.skillId) return "";
@@ -2907,7 +2926,9 @@ function createTray(): void {
     {
       label: "顯示/隱藏桌寵",
       click: () => {
-        if (mainWindow) {
+        if (!mainWindow) {
+          createWindow();
+        } else {
           mainWindow.isVisible() ? mainWindow.hide() : mainWindow.show();
         }
       },
@@ -3350,6 +3371,270 @@ ipcMain.on(IPC.SETTINGS_CLOSE, () => {
 
 ipcMain.handle(IPC.SETTINGS_GET_CONFIG, () => {
   return loadModelSettings();
+});
+
+function wavesUidMediaType(name: string): string {
+  if (/\.png$/i.test(name)) return "image/png";
+  if (/\.jpe?g$/i.test(name)) return "image/jpeg";
+  if (/\.gif$/i.test(name)) return "image/gif";
+  if (/\.webp$/i.test(name)) return "image/webp";
+  if (/\.json$/i.test(name)) return "application/json";
+  return "application/octet-stream";
+}
+
+ipcMain.handle(IPC.WAVES_UID_STATUS, async () => {
+  const localOcrBinary = path.join(os.homedir(), ".local", "share", "cyrene-wavesuid", "bin", "cyrene-vision-ocr");
+  try {
+    const response = await fetch("http://127.0.0.1:8765/app", { signal: AbortSignal.timeout(2_500) });
+    return { online: response.ok || response.status === 307, localOcr: fs.existsSync(localOcrBinary) };
+  } catch {
+    return { online: false, localOcr: fs.existsSync(localOcrBinary) };
+  }
+});
+
+function wavesUidPlayersPath(): string {
+  return process.env.CYRENE_WAVESUID_PLAYERS_DIR?.trim()
+    || path.join(os.homedir(), ".local", "share", "cyrene-wavesuid", "gsuid_core", "data", "WutheringWavesUID", "players");
+}
+
+function wavesUidDatabasePath(): string {
+  return path.join(os.homedir(), ".local", "share", "cyrene-wavesuid", "gsuid_core", "data", "GsData.db");
+}
+
+async function getLinkedWavesUid(userId: string): Promise<string | undefined> {
+  const database = wavesUidDatabasePath();
+  if (!fs.existsSync(database)) return undefined;
+  const safeUserId = String(userId).replace(/[^0-9]/g, "");
+  if (!safeUserId) return undefined;
+  const query = `SELECT uid FROM wavesuser WHERE bot_id = 'discord' AND user_id = '${safeUserId}' AND cookie != '' ORDER BY id DESC LIMIT 1;`;
+  return new Promise((resolve) => {
+    execFile("sqlite3", ["-noheader", database, query], { timeout: 2_500 }, (error, stdout) => {
+      if (error) return resolve(undefined);
+      const uid = stdout.trim();
+      resolve(/^\d{9}$/.test(uid) ? uid : undefined);
+    });
+  });
+}
+
+ipcMain.handle(IPC.WAVES_UID_DATA_STATUS, () => {
+  const playersPath = wavesUidPlayersPath();
+  if (!fs.existsSync(playersPath)) return { uids: [] as string[] };
+  const uids = fs.readdirSync(playersPath, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory()
+      && /^\d{9}$/.test(entry.name)
+      && fs.existsSync(path.join(playersPath, entry.name, "userData.json")))
+    .map((entry) => entry.name)
+    .sort();
+  return { uids };
+});
+
+ipcMain.handle(IPC.WAVES_UID_DELETE_DATA, (_event, uid: string) => {
+  const normalizedUid = String(uid ?? "").trim();
+  if (!/^\d{9}$/.test(normalizedUid)) return { ok: false, error: "UID 格式不正確" };
+  const playersPath = wavesUidPlayersPath();
+  const target = path.join(playersPath, normalizedUid);
+  if (path.dirname(target) !== playersPath) return { ok: false, error: "資料路徑不安全" };
+  if (fs.existsSync(target)) fs.rmSync(target, { recursive: true, force: false });
+  return { ok: true };
+});
+
+ipcMain.handle(IPC.WAVES_UID_RUN, async (_event, payload: {
+  command?: string;
+  attachments?: Array<{ name: string; url: string; contentType?: string }>;
+}) => {
+  const command = payload?.command?.trim().slice(0, 500) || "幫助";
+  const settings = loadChannelsSettings().discord;
+  try {
+    const reply = await requestWavesUid(command, {
+      // 與 Discord 共用同一份本機鳴潮帳號綁定。
+      botSelfId: "discord",
+      messageId: `electron-${Date.now()}`,
+      userId: settings.codexImageOwnerId || DISCORD_OWNER_ID,
+      userName: "夥伴",
+      isDirect: true,
+      attachments: (payload?.attachments ?? []).slice(0, 4),
+    });
+    const media: Array<{ name: string; url?: string; dataUrl?: string }> = [];
+    reply.attachments.forEach((attachment, index) => {
+      const name = attachment.name || `wavesuid-${index + 1}.bin`;
+      const source = attachment.attachment;
+      if (typeof source === "string") {
+        media.push({ name, url: source });
+        return;
+      }
+      if (Buffer.isBuffer(source) || source instanceof Uint8Array) {
+        const buffer = Buffer.from(source);
+        media.push({ name, dataUrl: `data:${wavesUidMediaType(name)};base64,${buffer.toString("base64")}` });
+      }
+    });
+    return { ok: true, text: reply.text, media };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error), text: "", media: [] };
+  }
+});
+
+ipcMain.handle(IPC.WAVES_UID_PICK_FILE, async () => {
+  const options: Electron.OpenDialogOptions = {
+    title: "選擇鳴潮資料或圖片",
+    properties: ["openFile"],
+    filters: [
+      { name: "鳴潮資料與圖片", extensions: ["json", "txt", "png", "jpg", "jpeg", "webp", "gif"] },
+      { name: "所有檔案", extensions: ["*"] },
+    ],
+  };
+  const result = settingsWindow
+    ? await dialog.showOpenDialog(settingsWindow, options)
+    : await dialog.showOpenDialog(options);
+  const filePath = result.filePaths[0];
+  if (result.canceled || !filePath) return null;
+  const stat = fs.statSync(filePath);
+  if (stat.size > 24 * 1024 * 1024) throw new Error("檔案不可超過 24 MB");
+  const name = path.basename(filePath);
+  return {
+    name,
+    contentType: wavesUidMediaType(name),
+    url: `base64://${fs.readFileSync(filePath).toString("base64")}`,
+  };
+});
+
+function runFileProcess(file: string, args: string[]): Promise<void> {
+  return new Promise((resolve, reject) => {
+    execFile(file, args, { timeout: 30_000 }, (error, _stdout, stderr) => {
+      if (error) reject(new Error(stderr.trim() || error.message));
+      else resolve();
+    });
+  });
+}
+
+function getWavesUidElectronContext() {
+  const settings = loadChannelsSettings().discord;
+  const userId = settings.codexImageOwnerId || DISCORD_OWNER_ID;
+  return {
+    userId,
+    context: {
+      // 登入是由 Discord 帳號發起，因此需沿用 Discord 的綁定命名空間。
+      botSelfId: "discord",
+      messageId: `electron-login-${Date.now()}`,
+      userId,
+      userName: "夥伴",
+      isDirect: true,
+    },
+  };
+}
+
+async function waitForWavesUidLoginPage(url: string): Promise<boolean> {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    try {
+      const response = await fetch(url, { signal: AbortSignal.timeout(1_500) });
+      const html = await response.text();
+      if (response.ok && /國際服登入|international\/login/u.test(html)) return true;
+    } catch { /* GsCore may still be preparing the one-time page. */ }
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  return false;
+}
+
+ipcMain.handle(IPC.WAVES_UID_LOGIN_STATUS, async () => {
+  const { userId } = getWavesUidElectronContext();
+  const uid = await getLinkedWavesUid(userId);
+  if (uid) return { phase: "connected" as const, message: "國際服帳號已連結，可直接查詢體力。", uid };
+  return { ...wavesUidLoginState };
+});
+
+ipcMain.handle(IPC.WAVES_UID_LOGIN, async () => {
+  if (wavesUidLoginWindow && !wavesUidLoginWindow.isDestroyed()) {
+    wavesUidLoginWindow.focus();
+    return { ok: true, phase: "waiting" };
+  }
+  const { userId, context } = getWavesUidElectronContext();
+  const auth = createHash("sha256").update(userId).digest("hex").slice(0, 8);
+  const loginUrl = `http://127.0.0.1:8765/waves/i/${auth}`;
+  wavesUidLoginState = { phase: "waiting", message: "正在準備本機國際服登入頁…" };
+
+  // 此請求會在登入頁完成後才回傳；不可 await，否則 Electron 會卡住十分鐘。
+  void requestWavesUid("登入", context, undefined, 620_000).then((reply) => {
+    const success = /(?:登入|登录)成功/u.test(reply.text);
+    const uid = /(?:特徵碼|特征码|uid)[^\d]*(\d{9})/iu.exec(reply.text)?.[1];
+    wavesUidLoginState = success
+      ? { phase: "connected", message: "國際服帳號已連結，可直接查詢體力。", uid }
+      : { phase: "failed", message: reply.text.trim() || "登入沒有完成，請重新連結。" };
+  }).catch((error) => {
+    wavesUidLoginState = { phase: "failed", message: error instanceof Error ? error.message : "登入服務無法啟動" };
+  });
+
+  if (!await waitForWavesUidLoginPage(loginUrl)) {
+    wavesUidLoginState = { phase: "failed", message: "本機登入頁準備逾時，請確認 GsCore 在線後重試。" };
+    return { ok: false, error: wavesUidLoginState.message };
+  }
+
+  wavesUidLoginWindow = new BrowserWindow({
+    parent: settingsWindow ?? undefined,
+    width: 520,
+    height: 720,
+    minWidth: 460,
+    minHeight: 620,
+    title: "昔漣 · 鳴潮國際服登入",
+    autoHideMenuBar: true,
+    backgroundColor: "#07141b",
+    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true },
+  });
+  wavesUidLoginWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (url.startsWith("https://") || url.startsWith("http://")) void shell.openExternal(url);
+    return { action: "deny" };
+  });
+  wavesUidLoginWindow.on("closed", () => { wavesUidLoginWindow = null; });
+  await wavesUidLoginWindow.loadURL(loginUrl);
+  return { ok: true, phase: "waiting" };
+});
+
+ipcMain.handle(IPC.WAVES_UID_CAPTURE_DISCORD, async () => {
+  if (process.platform === "darwin") {
+    const permission = systemPreferences.getMediaAccessStatus("screen");
+    if (permission === "denied" || permission === "restricted") {
+      return { ok: false, error: "macOS 尚未允許昔漣擷取畫面。請到「系統設定 → 隱私權與安全性 → 螢幕與系統錄音」允許昔漣／Electron。" };
+    }
+  }
+  const cropBinary = path.join(os.homedir(), ".local", "share", "cyrene-wavesuid", "bin", "cyrene-vision-card-crop");
+  if (!fs.existsSync(cropBinary)) return { ok: false, error: "尚未安裝本機角色卡裁切器，請重新執行全本機 OCR 安裝。" };
+
+  const sources = await desktopCapturer.getSources({
+    types: ["window"],
+    thumbnailSize: { width: 3200, height: 2000 },
+    fetchWindowIcons: false,
+  });
+  const source = sources
+    .filter((item) => /discord/i.test(item.name) && !item.thumbnail.isEmpty())
+    .sort((left, right) => {
+      const a = left.thumbnail.getSize();
+      const b = right.thumbnail.getSize();
+      return b.width * b.height - a.width * a.height;
+    })[0];
+  if (!source) return { ok: false, error: "找不到 Discord 視窗。請先開啟 Discord，並把官方 /create 角色卡點開成大圖。" };
+
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "cyrene-wuwa-capture-"));
+  const inputPath = path.join(tempDir, "discord.png");
+  const outputPath = path.join(tempDir, "card.png");
+  try {
+    fs.writeFileSync(inputPath, source.thumbnail.toPNG(), { mode: 0o600 });
+    await runFileProcess(cropBinary, [inputPath, outputPath]);
+    const card = fs.readFileSync(outputPath);
+    if (!card.length) throw new Error("裁切後的角色卡是空白圖片");
+    return {
+      ok: true,
+      file: {
+        name: `wuwa-discord-${Date.now()}.png`,
+        contentType: "image/png",
+        url: `base64://${card.toString("base64")}`,
+      },
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      error: `沒有在 Discord 視窗找到清晰的橫向角色卡。請先點開官方 /create 圖片再重試。${error instanceof Error ? `（${error.message}）` : ""}`,
+    };
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
 });
 
 ipcMain.handle(IPC.SETTINGS_GET_GENERAL, () => {
@@ -5286,8 +5571,18 @@ ${vagueMemoryStr ? vagueMemoryStr : ""}`
   });
 
   const generalSettings = loadGeneralSettings();
-  createWindow();
-  createSidebarWindow();
+  const isHeadless =
+    process.env.HEADLESS === "1" ||
+    process.env.NO_ELECTRON === "1" ||
+    process.env.NO_WINDOW === "1" ||
+    process.env.SHOW_GUI === "0";
+
+  if (!isHeadless) {
+    createWindow();
+    createSidebarWindow();
+  } else {
+    console.log("[Cyrene] 正在以無界面 (Headless) 模式啟動，未自動開啟 Electron 視窗");
+  }
   createTray();
   // 權限模塊初始化：必須在 createWindow 之後但任意工具調用之前
   initPermissionFromDisk();

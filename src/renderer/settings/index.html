@@ -1364,6 +1364,101 @@
             </div>
           </div>
 
+          <!-- X (Twitter) Notifications -->
+          <div class="channels-card channels-card--x-notifications" id="x-notifications-card">
+            <div class="channels-card__header">
+              <h2>X (Twitter) 動態推播</h2>
+              <span class="switch"><input id="x-notifications-enabled" type="checkbox" checked /><span class="switch__track"><span class="switch__thumb"></span></span></span>
+            </div>
+            <div class="channels-card__body">
+              <p class="channels-card__hint">
+                自動監控追蹤的 X (Twitter) 帳號，有新推文時自動發送圖文卡片至對應的 Discord 頻道（例如 <code>🎮 | game</code>、<code>📺 | anime</code>、<code>📰 | news</code>）。
+              </p>
+              <div class="form-row">
+                <label class="form-label" for="x-notifications-interval">檢查頻率（分鐘）</label>
+                <input type="number" id="x-notifications-interval" class="form-input" min="1" max="60" value="5" />
+              </div>
+
+              <div class="form-row">
+                <label class="form-label" for="x-notifications-category-name">Discord 公告 Category 名稱</label>
+                <input type="text" id="x-notifications-category-name" class="form-input" placeholder="announcements" value="announcements" />
+                <p style="margin: 4px 0 0; font-size: 11px; opacity: 0.55;">昔漣會優先在此 Category 底下的頻道尋找發文目標（例如 ANNOUNCEMENTS 裡的 #news, #anime, #game, #leaks）</p>
+              </div>
+
+              <div class="form-row">
+                <label class="form-label">追蹤的 X 帳號列表</label>
+                <div id="x-notifications-account-list" style="display: flex; flex-direction: column; gap: 8px; margin-top: 6px;"></div>
+              </div>
+
+              <div class="form-row" style="margin-top: 12px;">
+                <label class="form-label">新增追蹤帳號 (@Username)</label>
+                <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                  <input type="text" id="x-account-input-username" class="form-input" style="flex: 1; min-width: 160px;" placeholder="例如：Wuthering_Waves" />
+                  <select id="x-account-input-category" class="form-input" style="width: 140px;">
+                    <option value="game">🎮 遊戲 (game)</option>
+                    <option value="anime">📺 動漫 (anime)</option>
+                    <option value="news">📰 新聞 (news)</option>
+                    <option value="leak">🤫 爆料 (leak)</option>
+                    <option value="general">💬 一般 (general)</option>
+                  </select>
+                  <button type="button" class="btn-secondary" id="x-account-add-btn">新增追蹤</button>
+                </div>
+              </div>
+
+              <div class="channels-card__actions" style="margin-top: 15px; display: flex; gap: 10px; flex-wrap: wrap;">
+                <button type="button" class="btn-secondary" id="x-notifications-check-now">立即檢查動態</button>
+                <button type="button" class="btn-secondary" id="x-notifications-test-post">發送單一測試推播</button>
+              </div>
+              <div class="channels-feedback" id="x-notifications-feedback"></div>
+            </div>
+          </div>
+
+          <!-- AniList Airing Anime Notifications -->
+          <div class="channels-card channels-card--anilist-notifications" id="anilist-notifications-card">
+            <div class="channels-card__header">
+              <h2>AniList 新番開播推播</h2>
+              <span class="switch"><input id="anilist-notifications-enabled" type="checkbox" checked /><span class="switch__track"><span class="switch__thumb"></span></span></span>
+            </div>
+            <div class="channels-card__body">
+              <p class="channels-card__hint">
+                自動連接 AniList API，當最新一季的新番或動畫劇集開播時，自動發送精美的圖文海報與開播通知至 Discord 頻道（例如 <code>📺 | anime</code>）。
+              </p>
+              <div class="form-row">
+                <label class="form-label" for="anilist-notifications-username">AniList 使用者名稱 (Username)</label>
+                <input type="text" id="anilist-notifications-username" class="form-input" placeholder="例如：clark" />
+              </div>
+              <div class="form-row">
+                <label class="form-label" for="anilist-notifications-token">AniList Access Token (選填，個人 Token)</label>
+                <input type="password" id="anilist-notifications-token" class="form-input" placeholder="從 anilist.co 獲取的 Token (選填)" />
+              </div>
+              <div class="form-row">
+                <label class="form-label" for="anilist-notifications-filter-mode">推播過濾模式</label>
+                <select id="anilist-notifications-filter-mode" class="form-input" style="max-width: 280px;">
+                  <option value="watchlist_only">⭐ 僅推播我追番清單中 (CURRENT) 的新番</option>
+                  <option value="all_airing">🌐 推播所有當季熱門新番 (All Airing)</option>
+                </select>
+              </div>
+              <div class="form-row">
+                <label class="form-label" for="anilist-notifications-interval">檢查頻率（分鐘）</label>
+                <input type="number" id="anilist-notifications-interval" class="form-input" min="1" max="60" value="10" />
+              </div>
+              <div class="form-row">
+                <label class="form-label" for="anilist-notifications-category">推播目標 Discord 頻道</label>
+                <select id="anilist-notifications-category" class="form-input" style="max-width: 220px;">
+                  <option value="anime">📺 動漫 (anime)</option>
+                  <option value="news">📰 新聞 (news)</option>
+                  <option value="general">💬 一般 (general)</option>
+                </select>
+              </div>
+
+              <div class="channels-card__actions" style="margin-top: 15px; display: flex; gap: 10px; flex-wrap: wrap;">
+                <button type="button" class="btn-secondary" id="anilist-notifications-check-now">立即檢查新番動態</button>
+                <button type="button" class="btn-secondary" id="anilist-notifications-test-post">發送測試開播卡片至 Discord</button>
+              </div>
+              <div class="channels-feedback" id="anilist-notifications-feedback"></div>
+            </div>
+          </div>
+
           <div class="channels-card channels-card--global">
             <div class="channels-card__header">
               <h2>全局</h2>
@@ -2065,48 +2160,22 @@
               </div>
             </div>
 
-            <div class="tts-section" style="margin-bottom: 24px;">
-              <h2 class="tts-section__title">🎙️ 昔漣合成音檔案版本切換</h2>
-              <div class="tts-voice-choice-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 12px;">
-                <div class="tts-voice-card" id="voice-card-old" style="border: 2px solid rgba(255,255,255,0.15); border-radius: 14px; padding: 16px; cursor: pointer; transition: all 0.2s ease;">
-                  <div style="font-weight: 700; font-size: 1.05rem; margin-bottom: 6px;">📻 原本舊版合成音檔</div>
-                  <div style="font-size: 0.85rem; opacity: 0.8; line-height: 1.4;">使用原本預設的昔漣基礎參考音檔</div>
-                </div>
-                <div class="tts-voice-card is-active" id="voice-card-new" style="border: 2px solid #ff94c2; background: rgba(255,148,194,0.1); border-radius: 14px; padding: 16px; cursor: pointer; transition: all 0.2s ease;">
-                  <div style="font-weight: 700; font-size: 1.05rem; margin-bottom: 6px; color: #ff94c2;">✨ 最新下載官方全互動語音包</div>
-                  <div style="font-size: 0.85rem; opacity: 0.8; line-height: 1.4;">使用 Downloads 資料夾中最新的官方全互動語音包</div>
-                </div>
-              </div>
-            </div>
-
             <div class="tts-config" id="tts-config-gptsovits" hidden>
               <h2 class="tts-section__title">🗣️ GPT-SoVITS 配置</h2>
-              <div class="tts-field">
-                <label>語音 / 合成音檔預設選單</label>
-                <select id="tts-gptsovits-preset-select">
-                  <option value="custom">📂 自訂選取本地音頻 / 權重檔案</option>
-                  <option value="cyrene_official">🌸 昔漣 Downloads 官方互動語音包 ([BraveDown] 昔漣全互動語音)</option>
-                  <option value="cyrene_wav_pack">🎵 昔漣測試語音包 (昔漣測試語音_官方包.wav)</option>
-                  <option value="cyrene_sweet">🌸 昔漣預設甜美音色 (Cyrene Sweet)</option>
-                  <option value="cyrene_gentle">🎵 溫柔日系陪伴音色 (Gentle Companion)</option>
-                  <option value="cyrene_lively">✨ 活力靈動音色 (Lively Cyrene)</option>
-                </select>
-              </div>
               <div class="tts-field">
                 <label>API 地址 (baseUrl)</label>
                 <input type="text" id="tts-gptsovits-url" placeholder="http://localhost:9880" value="http://localhost:9880" />
               </div>
               <div class="tts-field">
-                <label>合成音 / 參考音頻路徑 (.wav / .mp3 / .pth / .ckpt)</label>
+                <label>參考音頻路徑</label>
                 <div style="display: flex; gap: 8px; width: 100%;">
-                  <input type="text" id="tts-gptsovits-ref-audio" placeholder="點擊右側選擇音頻或模型權重檔" readonly style="flex: 1;" />
-                  <button type="button" class="ghost-btn tts-pick-btn" id="tts-gptsovits-ref-pick" style="white-space: nowrap;">📂 選擇合成音檔案</button>
+                  <input type="text" id="tts-gptsovits-ref-audio" placeholder="點擊右側選擇音頻文件" readonly style="flex: 1;" />
+                  <button type="button" class="ghost-btn tts-pick-btn" id="tts-gptsovits-ref-pick" style="white-space: nowrap;">📂 選擇音頻</button>
                 </div>
               </div>
               <div class="tts-field">
-                <label>參考音頻對應的文本 (Prompt Text)</label>
+                <label>參考音頻對應的文本</label>
                 <input type="text" id="tts-gptsovits-prompt-text" placeholder="例：你好，我是昔漣" />
-              </div>
               <div class="tts-field">
                 <label>輸出格式</label>
                 <select id="tts-gptsovits-format">

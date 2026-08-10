@@ -45,6 +45,7 @@ describe("DiscordAdapter message security", () => {
     expect(shouldHandleDiscordMessage(fakeMessage({ guildId: "guild-1" }), defaults, "bot-1")).toBe(false);
     expect(shouldHandleDiscordMessage(fakeMessage({ guildId: "guild-1", mentioned: true }), defaults, "bot-1")).toBe(true);
     expect(shouldHandleDiscordMessage(fakeMessage({ guildId: "guild-1", content: "/你好" }), defaults, "bot-1")).toBe(true);
+    expect(shouldHandleDiscordMessage(fakeMessage({ guildId: "guild-1", content: "ww幫助" }), defaults, "bot-1")).toBe(true);
   });
 
   it("ignores bots and enforces all configured allowlists", () => {
@@ -90,6 +91,10 @@ describe("DiscordAdapter text voice attachment routing", () => {
     expect(isDiscordTextVoiceRequestText("用講的")).toBe(true);
     expect(isDiscordTextVoiceRequestText("唸個笑話給我聽")).toBe(true);
     expect(isDiscordTextVoiceRequestText("發個語音吧")).toBe(true);
+    expect(isDiscordTextVoiceRequestText("和我說睡前 ASMR 陪伴我休息")).toBe(true);
+    expect(isDiscordTextVoiceRequestText("唱首歌給我聽吧")).toBe(true);
+    expect(isDiscordTextVoiceRequestText("/asmr")).toBe(true);
+    expect(isDiscordTextVoiceRequestText("/sing")).toBe(true);
   });
 
   it("does not divert normal chat or music controls into TTS attachments", () => {

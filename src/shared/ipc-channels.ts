@@ -54,6 +54,14 @@ export const IPC = {
   SETTINGS_SAVE_CONFIG: "settings:save-config",
   SETTINGS_TEST_CONNECTION: "settings:test-connection",
   SETTINGS_TEST_VISION: "settings:test-vision",
+  WAVES_UID_STATUS: "wavesuid:status",
+  WAVES_UID_RUN: "wavesuid:run",
+  WAVES_UID_PICK_FILE: "wavesuid:pick-file",
+  WAVES_UID_CAPTURE_DISCORD: "wavesuid:capture-discord",
+  WAVES_UID_LOGIN: "wavesuid:login",
+  WAVES_UID_LOGIN_STATUS: "wavesuid:login-status",
+  WAVES_UID_DATA_STATUS: "wavesuid:data-status",
+  WAVES_UID_DELETE_DATA: "wavesuid:delete-data",
   SETTINGS_GET_GENERAL: "settings:get-general",
   SETTINGS_SAVE_GENERAL: "settings:save-general",
   UI_THEME_GET: "ui-theme:get",
@@ -299,4 +307,16 @@ export const IPC = {
   // Phase 3.4：消息日誌
   CHANNELS_LOG_GET: "channels:log:get",
   CHANNELS_LOG_CLEAR: "channels:log:clear",
+  // X (Twitter) Notifications
+  X_NOTIFICATIONS_GET_CONFIG: "x-notifications:get-config",
+  X_NOTIFICATIONS_SAVE_CONFIG: "x-notifications:save-config",
+  X_NOTIFICATIONS_CHECK_NOW: "x-notifications:check-now",
+  X_NOTIFICATIONS_TEST_POST: "x-notifications:test-post",
+  X_NOTIFICATIONS_TEST_ALL: "x-notifications:test-all",
+  // AniList Airing Notifications
+  ANILIST_NOTIFICATIONS_GET_CONFIG: "anilist-notifications:get-config",
+  ANILIST_NOTIFICATIONS_SAVE_CONFIG: "anilist-notifications:save-config",
+  ANILIST_NOTIFICATIONS_VERIFY_ACCOUNT: "anilist-notifications:verify-account",
+  ANILIST_NOTIFICATIONS_CHECK_NOW: "anilist-notifications:check-now",
+  ANILIST_NOTIFICATIONS_TEST_POST: "anilist-notifications:test-post",
 } as const;

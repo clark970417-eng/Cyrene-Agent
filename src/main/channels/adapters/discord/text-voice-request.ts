@@ -86,8 +86,8 @@ export function extractDiscordVoiceRequestTopic(text: string): string | null {
     return sayMatch[1].trim();
   }
 
-  // 6. 包含「語音」、「聲音」、「用講的」、「發語音」、「傳語音」等任何語音關鍵字
-  if (/(?:語音|聲音|用講的|聽聲音|語音話)/u.test(cleaned)) {
+  // 6. 包含「語音」、「聲音」、「用講的」、「ASMR」、「唱歌」、「/sing」、「/asmr」等任何語音/音訊關鍵字
+  if (/(?:語音|聲音|用講的|聽聲音|語音話|asmr|耳語|輕聲|睡前|唱|唱歌|吟唱|\/sing|\/asmr|!sing|!asmr)/iu.test(cleaned)) {
     return cleaned.replace(/(?:傳|發|錄|用語音|說|講|唸|請|幫我|能|可以|嗎|吧|麼|嘛|？|\?)/gu, "").trim() || "自由發揮一段自然親切的語音對話";
   }
 

@@ -7,6 +7,8 @@ export interface DiscordAchievementStats {
   messagesCount: number;
   musicTracksPlayed: number;
   checkinsCount: number;
+  checkinStreak: number;
+  lastCheckinDate: string;
   unlockedBadges: string[];
 }
 
@@ -15,6 +17,8 @@ const DEFAULT_STATS: DiscordAchievementStats = {
   messagesCount: 1,
   musicTracksPlayed: 0,
   checkinsCount: 0,
+  checkinStreak: 0,
+  lastCheckinDate: "",
   unlockedBadges: ["🌸 初次相遇"],
 };
 
@@ -27,11 +31,21 @@ export function loadAchievementStats(filePath = getAchievementsFilePath()): Disc
     if (!fs.existsSync(filePath)) return { ...DEFAULT_STATS, firstMetTimestamp: Date.now() };
     const raw = fs.readFileSync(filePath, "utf8");
     const data = JSON.parse(raw) as Partial<DiscordAchievementStats>;
+    const checkinsCount = typeof data.checkinsCount === "number" ? data.checkinsCount : 0;
+    const legacyCheckinDate = checkinsCount > 0
+      ? taipeiDateKey(fs.statSync(filePath).mtimeMs)
+      : "";
     return {
       firstMetTimestamp: typeof data.firstMetTimestamp === "number" ? data.firstMetTimestamp : Date.now(),
       messagesCount: typeof data.messagesCount === "number" ? data.messagesCount : 1,
       musicTracksPlayed: typeof data.musicTracksPlayed === "number" ? data.musicTracksPlayed : 0,
-      checkinsCount: typeof data.checkinsCount === "number" ? data.checkinsCount : 0,
+      checkinsCount,
+      checkinStreak: typeof data.checkinStreak === "number"
+        ? data.checkinStreak
+        : (checkinsCount > 0 ? 1 : 0),
+      lastCheckinDate: typeof data.lastCheckinDate === "string"
+        ? data.lastCheckinDate
+        : legacyCheckinDate,
       unlockedBadges: Array.isArray(data.unlockedBadges) ? data.unlockedBadges : ["🌸 初次相遇"],
     };
   } catch {
@@ -52,11 +66,22 @@ export function saveAchievementStats(stats: DiscordAchievementStats, filePath = 
 export function recordAchievementEvent(
   type: "message" | "music" | "checkin",
   filePath = getAchievementsFilePath(),
+  now = Date.now(),
 ): DiscordAchievementStats {
   const stats = loadAchievementStats(filePath);
   if (type === "message") stats.messagesCount += 1;
   if (type === "music") stats.musicTracksPlayed += 1;
-  if (type === "checkin") stats.checkinsCount += 1;
+  if (type === "checkin") {
+    const dateKey = taipeiDateKey(now);
+    if (stats.lastCheckinDate !== dateKey) {
+      const previousDateKey = taipeiDateKey(now - 86_400_000);
+      stats.checkinStreak = stats.lastCheckinDate === previousDateKey
+        ? Math.max(1, stats.checkinStreak + 1)
+        : 1;
+      stats.checkinsCount += 1;
+      stats.lastCheckinDate = dateKey;
+    }
+  }
 
   // 檢查解鎖成就
   const badges = new Set(stats.unlockedBadges);
@@ -74,4 +99,15 @@ export function recordAchievementEvent(
   stats.unlockedBadges = [...badges];
   saveAchievementStats(stats, filePath);
   return stats;
+}
+
+function taipeiDateKey(timestamp: number): string {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Taipei",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date(timestamp));
+  const value = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${value.year}-${value.month}-${value.day}`;
 }

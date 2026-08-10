@@ -168,7 +168,7 @@ function queryTerms(query: string): string[] {
       terms.add(token);
     }
   }
-  return [...terms].filter((term) => !/^(還記|記得|之前|以前|上次|我說|什麼|那個)$/.test(term));
+  return [...terms].filter((term) => !/^(還記|記得|之前|以前|上次|我說|什麼|那個|圖片|照片|相片|這張|這圖|幫看|看看|這張圖|看這圖|看圖片|這張|這圖)$/.test(term));
 }
 
 function relevantExcerpt(content: string, query: string, maxLength = 2400): string {

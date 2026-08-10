@@ -1,6 +1,7 @@
 import {
   ActivityType,
   Client,
+  EmbedBuilder,
   GatewayIntentBits,
   Partials,
   REST,
@@ -20,6 +21,8 @@ import { FavoriteStore } from "./favorites.js";
 import { CloudMusicPlayer, extractPlayableUrl } from "./music-player.js";
 import { MusicUsageStore } from "./music-usage.js";
 import { playOnSpotify } from "./spotify-connect.js";
+import { CloudCheckinStore, isCloudCheckinGreeting } from "./checkin.js";
+import { handleWavesUidInteraction, handleWavesUidMessage, isWavesUidCommand } from "./wavesuid.js";
 
 const config = loadConfig();
 const memory = new MemoryStore(config.dataDir, config.historyMessages);
@@ -27,6 +30,7 @@ const eventClaims = new EventClaimStore(config.dataDir);
 const favorites = new FavoriteStore(`${config.dataDir}/music-favorites.json`);
 const music = new CloudMusicPlayer(config.dataDir);
 const musicUsage = new MusicUsageStore(`${config.dataDir}/cloud-music-usage.json`, config.musicMonthlyMinutes);
+const checkins = new CloudCheckinStore(`${config.dataDir}/checkin.json`);
 eventClaims.prune();
 const systemPrompt = await loadSystemPrompt(config);
 const startedAt = Date.now();
@@ -101,7 +105,8 @@ async function runConversation(
       console.warn("[Memory] 雲端照片描述建立失敗；主回覆仍會直接接收原圖。", error);
     }
   }
-  const proactiveMemory = memory.buildRecallContext(input, sessionId, 8);
+  // 附帶新圖片時避免混入舊照片歷史召回，讓模型專注辨識當前的圖片
+  const proactiveMemory = images.length ? "" : memory.buildRecallContext(input, sessionId, 8);
   const reply = await generateReply(config, systemPrompt, memory.get(sessionId), images, proactiveMemory);
   // 專用描述請求若暫時失敗，至少以成功的當輪視覺回覆建立降級照片記憶。
   if (images.length && !savedImageMemory) {
@@ -184,13 +189,14 @@ client.on("messageCreate", (message) => {
   const knownCommand = command === "status" || command === "forget";
   const disabledCommand = /^(?:spotify|bilibili|history|shuffle|repeat|join)$/i.test(command);
   const explicitTextCommand = /^!(status|forget)$/i.test(message.content.trim());
+  const wavesUidCommand = isWavesUidCommand(input);
   console.log(`[Discord] 收到訊息：guild=${message.guildId ?? "dm"} channel=${message.channelId} mentioned=${mentioned} command=${knownCommand ? command : "chat"}`);
   const canHandle = shouldHandleMessage({
     userId: message.author.id,
     guildId: message.guildId,
     channelId: message.channelId,
     isDm: !message.guildId,
-    mentioned: mentioned || explicitTextCommand,
+    mentioned: mentioned || explicitTextCommand || wavesUidCommand,
   }, config);
   if (!canHandle) {
     console.log("[Discord] 已忽略訊息：未通過提及或白名單設定");
@@ -207,10 +213,18 @@ client.on("messageCreate", (message) => {
         const botResponded = recentMessages.some(
           (msg) => msg.author.id === client.user?.id && msg.id !== message.id && msg.createdTimestamp > message.createdTimestamp
         );
-        if (botResponded) {
+      if (botResponded) {
           console.log(`[Cyrene Cloud] 本機已回應訊息 ${message.id}，略過雲端回應`);
           return;
         }
+      }
+
+      // 問候只在背景簽到，之後仍走一般 AI 對話。
+      if (isCloudCheckinGreeting(input)) checkins.record();
+
+      if (wavesUidCommand) {
+        await handleWavesUidMessage(message, input, client.user?.id ?? "");
+        return;
       }
 
       if (command === "status") {
@@ -257,13 +271,18 @@ async function handleSlash(interaction: ChatInputCommandInteraction): Promise<vo
     }
     const sessionId = sessionIdFor(interaction.user.id, interaction.channelId);
 
+    if (interaction.commandName === "ww") {
+      await handleWavesUidInteraction(interaction, interaction.options.getString("command") ?? "幫助", client.user?.id ?? "");
+      return;
+    }
+
     const unsupportedCommands = ["draw", "game", "join", "help", "emojis"];
     if (unsupportedCommands.includes(interaction.commandName)) {
       await fastInteractionReply(interaction, `昔漣目前在本機處於離線狀態，此功能（/${interaction.commandName}）需要本機啟動後才能使用喔！`);
       return;
     }
 
-    const cloudCommands = ["chat", "forget", "status", "play", "list", "leave"];
+    const cloudCommands = ["chat", "forget", "status", "play", "list", "leave", "checkin"];
     if (!cloudCommands.includes(interaction.commandName)) {
       await fastInteractionReply(interaction, "本指令目前未在雲端版提供。");
       return;
@@ -275,6 +294,27 @@ async function handleSlash(interaction: ChatInputCommandInteraction): Promise<vo
     }
     if (interaction.commandName === "status") {
       await fastInteractionReply(interaction, `雲端已連線，已守望 ${Math.floor((Date.now() - startedAt) / 60_000)} 分鐘；永久記憶 ${memory.archiveCount()} 則。\n${musicLimitMessage()}`);
+      return;
+    }
+    if (interaction.commandName === "checkin") {
+      const stats = checkins.record();
+      const charms = [
+        "🌸【平安御守】願夥伴今天事事順心，心情如春花般燦爛♪",
+        "✨【幸運御守】今天會有意想不到的小美好降臨在夥伴身上喔～",
+        "💖【甜夢御守】今晚能睡個無憂無慮的好覺，昔漣會守護著你～",
+        "🌿【舒心御守】累了就隨時停下來，有昔漣一直陪著你呢。",
+      ];
+      const embed = new EmbedBuilder()
+        .setColor(0xff94c2)
+        .setAuthor({ name: "昔漣 · 每日簽到儀式 🌸" })
+        .setTitle(`簽到成功！${interaction.user.displayName || interaction.user.username}～✨`)
+        .setDescription(`🎴 **昔漣今日御守**\n${charms[Math.floor(Math.random() * charms.length)]}`)
+        .addFields(
+          { name: "🔥 連續簽到", value: `${stats.streak} 天`, inline: true },
+          { name: "✨ 累計簽到", value: `${stats.total} 次`, inline: true },
+        )
+        .setFooter({ text: "昔漣陪伴手記 · 日常生活同在" });
+      await interaction.reply({ embeds: [embed] });
       return;
     }
     if (interaction.commandName === "play") {
@@ -405,6 +445,9 @@ client.once("ready", async (readyClient) => {
       .addAttachmentOption((option) => option.setName("image").setDescription("PNG、JPEG、WebP 或 GIF 圖片").setRequired(false)),
     new SlashCommandBuilder().setName("forget").setDescription("清除目前頻道的雲端短期對話"),
     new SlashCommandBuilder().setName("status").setDescription("查看雲端連線狀態"),
+    new SlashCommandBuilder().setName("ww").setDescription("使用 WutheringWavesUID 查詢鳴潮資料")
+      .addStringOption((option) => option.setName("command").setDescription("例如：幫助、登入、今汐面板").setRequired(false))
+      .addAttachmentOption((option) => option.setName("file").setDescription("匯入抽卡資料或提供辨識圖片").setRequired(false)),
     new SlashCommandBuilder().setName("play").setDescription("在你的官方 Spotify 裝置搜尋並播放歌曲")
       .addStringOption((option) => option.setName("url").setDescription("可省略，預設播放 Spotify 的 anime 歌單；或輸入歌曲名稱/Spotify連結").setRequired(false)),
     new SlashCommandBuilder().setName("list").setDescription("播放收藏清單（YT/Bili）或 Spotify 歌單")

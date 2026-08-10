@@ -35,6 +35,7 @@ test("可辨識 Discord 的一般與暱稱提及格式", () => {
 test("雲端回覆把英文別名統一成夥伴", () => {
   assert.equal(normalizeCompanionAddress("partner，這是狗狗。"), "夥伴，這是狗狗。");
   assert.equal(normalizeCompanionAddress("YuYing，晚安。"), "夥伴，晚安。");
+  assert.equal(normalizeCompanionAddress("这个视频支持屏幕显示。"), "這個影片支援螢幕顯示。");
 });
 
 test("長訊息會切成 Discord 可接受的片段", () => {

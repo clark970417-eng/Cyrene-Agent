@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type { CloudBotConfig } from "./config.js";
+import { toTraditionalTaiwan } from "./traditional.js";
 
 export type ChatRole = "user" | "assistant";
 export type ChatEntryKind = "message" | "image_memory";
@@ -40,7 +41,7 @@ export function mentionsBot(content: string, botUserId: string): boolean {
 
 /** 雲端回覆也強制使用唯一稱呼，避免 Router 輸出人格提示裡的英文別名。 */
 export function normalizeCompanionAddress(text: string): string {
-  return text
+  return toTraditionalTaiwan(text)
     .replace(/\bpartner(?:'s|’s)\s+friend\b/gi, "夥伴的朋友")
     .replace(/\bmy\s+partner\b/gi, "我的夥伴")
     .replace(/\byu[\s_-]*ying\b/gi, "夥伴")
