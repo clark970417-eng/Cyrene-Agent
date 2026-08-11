@@ -184,7 +184,7 @@ Do not commit API keys, bot tokens, passwords, or backups containing private con
 - Upstream project: [Playa-0v0/Cyrene-Agent](https://github.com/Playa-0v0/Cyrene-Agent)
 - Original author: Playa-0v0
 - License: [MIT License](./LICENSE)
-- This extended version is maintained by [clark970417-eng](https://github.com/clark970417-eng).
+- This extended version is maintained by [Clark (clark970417-eng)](https://github.com/clark970417-eng).
 
 The MIT License allows use, modification, and distribution, but the original copyright notice and license terms must be preserved. This README identifies the upstream source and distinguishes the original foundation from the additional work in this version.
 
