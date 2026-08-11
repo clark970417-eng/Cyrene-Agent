@@ -16,6 +16,8 @@ const cyreneApi = {
   quit: () => ipcRenderer.send(IPC.APP_QUIT),
   setInteractive: (interactive: boolean) =>
     ipcRenderer.invoke(IPC.WINDOW_SET_INTERACTIVE, interactive),
+  setTextInputActive: (active: boolean) =>
+    ipcRenderer.send(IPC.WINDOW_SET_TEXT_INPUT_ACTIVE, active),
   moveBy: (dx: number, dy: number) =>
     ipcRenderer.send(IPC.WINDOW_MOVE, dx, dy),
   moveTo: (x: number, y: number) =>
@@ -33,6 +35,15 @@ const cyreneApi = {
     const listener = (_e: unknown, visible: boolean) => callback(visible);
     ipcRenderer.on(IPC.PET_VISIBILITY_CHANGED, listener);
     return () => ipcRenderer.off(IPC.PET_VISIBILITY_CHANGED, listener);
+  },
+};
+
+const petChatApi = {
+  getInputVisibility: () => ipcRenderer.invoke(IPC.PET_CHAT_INPUT_VISIBILITY),
+  onInputVisibility: (callback: (visible: boolean) => void) => {
+    const listener = (_event: unknown, visible: boolean) => callback(visible);
+    ipcRenderer.on(IPC.PET_CHAT_INPUT_VISIBILITY, listener);
+    return () => ipcRenderer.off(IPC.PET_CHAT_INPUT_VISIBILITY, listener);
   },
 };
 
@@ -89,6 +100,7 @@ const chatApi = {
 };
 
 contextBridge.exposeInMainWorld("cyrene", cyreneApi);
+contextBridge.exposeInMainWorld("petChat", petChatApi);
 contextBridge.exposeInMainWorld("chat", chatApi);
 
 // AG-UI 事件流：发起一次 agent run，通过 onEvent 回调收 AG-UI 标准事件，

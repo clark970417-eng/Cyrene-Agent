@@ -12,7 +12,7 @@ import { reactChatWindow } from "./window-state";
 export interface WindowManagerOptions {
   getCurrentAppIconPath: () => string;
   isDev: boolean;
-  loadMainWindowSettingsSlice: () => MainWindowSettingsSlice;
+  loadMainWindowSettingsSlice: () => MainWindowSettingsSlice & { petZoom?: number; petAlwaysOnTop?: boolean };
   persistMainWindowPosition: (position: { x: number; y: number }) => void;
 }
 
@@ -26,6 +26,7 @@ export interface WindowManager {
   createCallWindow(): void;
   setPetDockVisible(visible: boolean): void;
   updatePetDock(bounds: { x: number; y: number; width: number; height: number; isDocked: boolean }): void;
+  isPetDocked(): boolean;
 
   showMainWindow(): void;
   hideMainWindow(): void;
@@ -33,6 +34,7 @@ export interface WindowManager {
   minimizeMainWindow(): void;
   setMainWindowAlwaysOnTop(alwaysOnTop: boolean): void;
   setMainWindowInteractive(interactive: boolean): void;
+  setMainWindowTextInputActive(active: boolean): void;
   setMainWindowDragging(isDragging: boolean): void;
   moveMainWindowRelative(dx: number, dy: number): void;
   moveMainWindowTo(x: number, y: number): void;
@@ -54,6 +56,8 @@ export interface WindowManager {
 export function createWindowManager(options: WindowManagerOptions): WindowManager {
   let mainWindow: BrowserWindow | null = null;
   let petDockVisible = true;
+  let petTextInputActive = false;
+  let petDragging = false;
   let petDockBounds: { x: number; y: number; width: number; height: number; isDocked: boolean } | null = null;
   const readyHandlers: Array<(win: BrowserWindow) => void> = [];
   const closedHandlers: Array<() => void> = [];
@@ -94,7 +98,31 @@ export function createWindowManager(options: WindowManagerOptions): WindowManage
       height,
     });
     pet.webContents.send(IPC.PET_ZOOM, zoom);
+    pet.webContents.send(IPC.PET_CHAT_INPUT_VISIBILITY, false);
     pet.showInactive();
+  }
+
+  function applyDetachedPetAppearance(): void {
+    const pet = getUsableMainWindow();
+    if (!pet) return;
+    const settings = options.loadMainWindowSettingsSlice();
+    const zoom = Math.max(0.5, Math.min(2, settings.petZoom ?? 1));
+    const width = Math.round(PET_WINDOW_BASE_WIDTH * zoom);
+    const height = Math.round(PET_WINDOW_BASE_HEIGHT * zoom);
+    pet.setParentWindow(null);
+    pet.setSize(width, height);
+    pet.setAlwaysOnTop(!petTextInputActive && settings.petAlwaysOnTop !== false, "screen-saver");
+    pet.webContents.send(IPC.PET_ZOOM, zoom);
+    pet.webContents.send(IPC.PET_CHAT_INPUT_VISIBILITY, true);
+  }
+
+  function undockPetForDrag(): void {
+    if (!petDockBounds?.isDocked) return;
+    petDockBounds = { ...petDockBounds, isDocked: false };
+    const pet = getUsableMainWindow();
+    pet?.setParentWindow(null);
+    pet?.webContents.send(IPC.PET_CHAT_INPUT_VISIBILITY, false);
+    reactChatWindow?.webContents.send("workspace:pet-dock-changed", false);
   }
 
   function setMainWindow(window: BrowserWindow): void {
@@ -152,12 +180,14 @@ export function createWindowManager(options: WindowManagerOptions): WindowManage
     updatePetDock(bounds): void {
       petDockBounds = bounds;
       if (!bounds.isDocked) {
-        const pet = getUsableMainWindow();
-        pet?.setParentWindow(null);
+        if (!petDragging) applyDetachedPetAppearance();
         reactChatWindow?.webContents.send("workspace:pet-dock-changed", false);
         return;
       }
       applyPetDock();
+    },
+    isPetDocked(): boolean {
+      return petDockBounds?.isDocked ?? true;
     },
 
     showMainWindow(): void {
@@ -184,10 +214,23 @@ export function createWindowManager(options: WindowManagerOptions): WindowManage
       if (!win) return;
       win.setIgnoreMouseEvents(!interactive, { forward: true });
     },
+    setMainWindowTextInputActive(active: boolean): void {
+      petTextInputActive = active;
+      if (petDockBounds?.isDocked) return;
+      const win = getUsableMainWindow();
+      if (!win) return;
+      const settings = options.loadMainWindowSettingsSlice();
+      win.setAlwaysOnTop(!active && settings.petAlwaysOnTop !== false, active ? "normal" : "screen-saver");
+    },
     setMainWindowDragging(isDragging: boolean): void {
       const win = getUsableMainWindow();
       if (!win) return;
-      if (!isDragging) petWindowMoveController.finishDragging();
+      petDragging = isDragging;
+      if (isDragging) undockPetForDrag();
+      if (!isDragging) {
+        petWindowMoveController.finishDragging();
+        applyDetachedPetAppearance();
+      }
       try {
         win.setOpacity(isDragging ? 0.99 : 1.0);
       } catch (error) {

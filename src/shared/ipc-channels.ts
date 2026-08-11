@@ -14,12 +14,14 @@ export const IPC = {
   WINDOW_CLOSE: "window:close",
   WINDOW_DRAG_START: "window:drag-start",
   WINDOW_SET_INTERACTIVE: "window:set-interactive",
+  WINDOW_SET_TEXT_INPUT_ACTIVE: "window:set-text-input-active",
   WINDOW_MOVE: "window:move",
   WINDOW_MOVE_TO: "window:move-to",
   WINDOW_SET_DRAGGING: "window:set-dragging",
   WINDOW_CAPTURE_FRAME: "window:capture-frame",
   WINDOW_GET_CURSOR_POSITION: "window:get-cursor-position",
   PET_VISIBILITY_CHANGED: "pet:visibility-changed",
+  PET_CHAT_INPUT_VISIBILITY: "pet-chat:input-visibility",
   APP_QUIT: "app:quit",
 
   // chat window

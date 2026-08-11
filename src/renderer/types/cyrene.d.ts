@@ -7,6 +7,7 @@ declare global {
       hide: () => void;
       quit: () => void;
       setInteractive: (interactive: boolean) => Promise<void>;
+      setTextInputActive: (active: boolean) => void;
       moveBy: (dx: number, dy: number) => void;
       moveTo: (x: number, y: number) => void;
       setDragging: (isDragging: boolean) => void;

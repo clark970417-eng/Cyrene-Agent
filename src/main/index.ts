@@ -193,6 +193,19 @@ let schedulerSubsystem: SchedulerSubsystem | null = null;
 let channelsSubsystem: ChannelsSubsystem | null = null;
 let screenshotService: ScreenshotService | null = null;
 let windowManager: WindowManager | null = null;
+const isPrimaryAppInstance = app.requestSingleInstanceLock();
+if (!isPrimaryAppInstance) app.quit();
+
+app.on("second-instance", () => {
+  const workspace = reactChatWindow;
+  if (workspace && !workspace.isDestroyed()) {
+    if (workspace.isMinimized()) workspace.restore();
+    workspace.show();
+    workspace.focus();
+    return;
+  }
+  windowManager?.createReactChatWindow();
+});
 const live2dWindowLifecycle = createWindowLifecycleTracker<BrowserWindow>("live2d-main", {
   onClosed: () => { /* no-op：原 setLive2dWindow 已随 opener 子系统一起移除 */ },
 });
@@ -295,7 +308,7 @@ if (loadGeneralSettings().disableGpuElectron) {
   app.commandLine.appendSwitch("enable-unsafe-swiftshader");
 }
 
-app.whenReady().then(async () => {
+if (isPrimaryAppInstance) app.whenReady().then(async () => {
   registerCustomFeaturesIpc();
   registerWavesUidIpc();
   registerPaintIpc();

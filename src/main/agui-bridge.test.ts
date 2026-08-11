@@ -162,6 +162,41 @@ describe("agui-bridge sticker event ordering", () => {
     }));
   });
 
+  it("keeps pet quick-chat events out of an unrelated React conversation", async () => {
+    vi.resetModules();
+    mocks.handlers.clear();
+    mocks.getSession.mockReturnValue({ id: "pet-chat", mode: "chat" });
+    const { registerAgUiIpc } = await import("./agui-bridge");
+    const senderEvents: unknown[] = [];
+    const reactEvents: unknown[] = [];
+    const sender = {
+      isDestroyed: () => false,
+      send: (_channel: string, event: unknown) => senderEvents.push(event),
+    };
+    const reactWebContents = {
+      isDestroyed: () => false,
+      send: (_channel: string, event: unknown) => { reactEvents.push(event); },
+    };
+    registerAgUiIpc(
+      async () => ({
+        options: {
+          settings: { provider: "test", baseUrl: "", model: "", apiKey: "", contextWindowTokens: 256000 },
+          messages: [], timeoutMs: 1000, toolSystemContent: "TOOL", soulSystemBaseContent: "SOUL",
+        },
+        latestUserText: "你好",
+      }),
+      async () => {},
+      () => ({ webContents: reactWebContents as any, isDestroyed: () => false }),
+    );
+
+    const handler = mocks.handlers.get(IPC.AGUI_RUN);
+    if (!handler) throw new Error("AGUI_RUN handler was not registered");
+    await handler({ sender }, { source: "pet", messages: [{ role: "user", content: "你好" }], sessionId: "pet-chat" });
+    await expect.poll(() => senderEvents.length > 0).toBe(true);
+
+    expect(reactEvents).toEqual([]);
+  });
+
   it("turns leading <think> text into reasoning events before forwarding the assistant start", async () => {
     vi.resetModules();
     mocks.handlers.clear();

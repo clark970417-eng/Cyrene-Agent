@@ -24,6 +24,12 @@ export function registerWindowSystemIpc(deps: WindowSystemIpcDependencies): void
     deps.windowManager?.setMainWindowInteractive(interactive);
   });
 
+  ipcMain.on(IPC.WINDOW_SET_TEXT_INPUT_ACTIVE, (_event, active: boolean) => {
+    deps.windowManager?.setMainWindowTextInputActive(Boolean(active));
+  });
+
+  ipcMain.handle(IPC.PET_CHAT_INPUT_VISIBILITY, () => !(deps.windowManager?.isPetDocked() ?? true));
+
   ipcMain.on(IPC.WINDOW_MOVE, (_event, dx: number, dy: number) => {
     deps.windowManager?.moveMainWindowRelative(dx, dy);
   });

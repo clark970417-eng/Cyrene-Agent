@@ -126,6 +126,8 @@ export function normalizeCodeRendererEvent(event: unknown, runId?: string): unkn
 /** 渲染进程发起 run 时传的输入。 */
 export interface AguiRunInput {
   messages: unknown[];   // 原始 {role, content}[]，主进程会 normalize
+  /** 桌寵快速輸入只把串流回傳給桌寵，避免污染同時進行的 React 對話。 */
+  source?: "pet";
   /** Renderer 已落库的稳定 turn ID；用于 Chat 社交原子的证据锚点。 */
   userTurnId?: string;
   /** 本轮 assistant 占位消息的稳定 turn ID。 */
@@ -214,7 +216,7 @@ export function registerAgUiIpc(
       const targets: WebContents[] = [];
       if (!sender.isDestroyed()) targets.push(sender);
       const chatWin = getChatWindowFn();
-      if (chatWin && !chatWin.isDestroyed() && chatWin.webContents !== sender) {
+      if (input.source !== "pet" && chatWin && !chatWin.isDestroyed() && chatWin.webContents !== sender) {
         targets.push(chatWin.webContents);
       }
       for (const t of targets) {
