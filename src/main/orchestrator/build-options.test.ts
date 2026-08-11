@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest"
 import {
   buildAgentRunOptions,
   buildChannelSystem,
+  buildDesktopLocaleSystem,
   onAgentRunFinished,
   type BuildOptionsDeps,
   type OnRunFinishedDeps,
@@ -50,6 +51,32 @@ describe("build-options", () => {
     const system = result.options.messages[0].content
     expect(system).not.toContain("你正在通過微信回覆用戶")
     expect(system).not.toContain("你正在通過飛書回覆用戶")
+    expect(system).toContain("【桌面端地區預設】")
+    expect(system).toContain("Asia/Taipei")
+    expect(system).toContain("不要擅自假設台北")
+  })
+
+  it("keeps Taiwan locale defaults desktop-only", () => {
+    const desktop = buildDesktopLocaleSystem()
+    expect(desktop).toContain("台灣政府")
+    expect(desktop).toContain("新台幣")
+    expect(desktop).toContain("攝氏")
+    expect(buildDesktopLocaleSystem("discord")).toBe("")
+    expect(buildDesktopLocaleSystem("wechat")).toBe("")
+    expect(buildDesktopLocaleSystem("feishu")).toBe("")
+  })
+
+  it("does not inject desktop locale rules into external channel prompts", async () => {
+    for (const channel of ["discord", "wechat", "feishu"] as const) {
+      const result = await buildAgentRunOptions({
+        messages: [{ role: "user", content: "今天有什麼消息" }],
+        style: "01_default.md",
+        channel,
+      }, createBuildDeps())
+
+      expect(result.options.messages[0].content).not.toContain("【桌面端地區預設】")
+      expect(result.options.messages[0].content).not.toContain("不要擅自假設台北")
+    }
   })
 
   it("keeps the exact latest user text for memory and proactively injects recalled history", async () => {

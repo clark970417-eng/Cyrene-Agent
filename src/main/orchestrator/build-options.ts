@@ -140,6 +140,21 @@ export function buildChannelSystem(channel?: RelationshipChannel): string {
 }
 
 /**
+ * 桌面端的地區預設。外部渠道刻意不注入，避免改變 Discord／微信／飛書行為。
+ */
+export function buildDesktopLocaleSystem(channel?: RelationshipChannel): string {
+  if (channel) return "";
+  return [
+    "【桌面端地區預設】",
+    "未指定國家或地區時，將『本地、國內、附近、今天、現在、假日、政府、法規、價格』理解為台灣語境。",
+    "時間以 Asia/Taipei 為準；中文使用台灣繁體與台灣常用詞；金額優先使用新台幣（NT$／TWD），溫度使用攝氏，距離與重量使用公制。",
+    "查詢即時本地資訊時，優先採用台灣政府、公共機構、原始業者或其他可信的台灣來源；不要把中國大陸資料當成台灣資料。",
+    "需要縣市精度的天氣、交通、附近店家或活動時，優先使用使用者設定的預設城市；若只有『台灣』或沒有城市，先詢問縣市，不要擅自假設台北。",
+    "使用者明確指定其他國家、地區、幣別或單位時，以該次要求為準，不強制套用台灣預設。",
+  ].join("\n");
+}
+
+/**
  * 構造 CyreneAgent.runWithEvents 所需的 options + 提取 latestUserText。
  * 與 index.ts 原 AG-UI bridge 的 buildOptions 行為完全一致。
  */
@@ -219,6 +234,7 @@ export async function buildAgentRunOptions(
   const skillCatalog = deps.buildSkillCatalog(deps.skillRegistry.getEnabled());
   const skillActivation = deps.resolveSlashActivation(slimMessages);
   const channelSystem = buildChannelSystem(input.channel);
+  const desktopLocaleSystem = buildDesktopLocaleSystem(input.channel);
 
   let toneInjection = "";
   if (deps.sceneEmbeddingIndex) {
@@ -258,6 +274,7 @@ export async function buildAgentRunOptions(
 
   const systemContent =
     (environmentContext ? environmentContext + "\n\n" : "") +
+    (desktopLocaleSystem ? desktopLocaleSystem + "\n\n" : "") +
     (channelSystem ? channelSystem + "\n\n" : "") +
     deps.buildSystemPrompt(input.style || "01_default.md") +
     (skillCatalog ? "\n\n---\n\n" + skillCatalog : "") +

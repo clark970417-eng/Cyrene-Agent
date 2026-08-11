@@ -1,7 +1,7 @@
 {
-  "name": "live2d-cyrene",
+  "name": "cyrene-agent",
   "version": "0.1.0",
-  "description": "Live2D desktop pet — Cyrene",
+  "description": "Electron and TypeScript desktop AI companion system with memory, voice, tools, Discord, mobile control, and automation features.",
   "main": "dist/main/main/index.js",
   "scripts": {
     "build:main": "tsc -p tsconfig.main.json",

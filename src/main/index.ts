@@ -57,6 +57,7 @@ import { registerChatsIpc } from "./chats/chats-ipc";
 import { recordUsage, getUsage, getUsageByModel, flush as flushTokenUsage } from "./token-usage-store";
 import { getCallUsage, flushCallUsage } from "./call-usage-store";
 import { uploadFile as ttsUploadFile, cloneVoice as ttsCloneVoice, synthesize as ttsSynthesize } from "./tts/minimax-engine";
+import { MINIMAX_VOCAL_ENHANCER_VERSION } from "./tts/minimax-vocal-enhancer";
 import { synthesize as gptsovitsSynthesize } from "./tts/gptsovits-engine";
 import { synthesize as customCloudSynthesize } from "./tts/custom-cloud-engine";
 import { synthesize as mimoSynthesize } from "./tts/mimo-engine";
@@ -219,6 +220,7 @@ function buildTtsCacheKey(payload: {
 }): string {
   const source = JSON.stringify({
     version: 1,
+    vocalEnhancerVersion: MINIMAX_VOCAL_ENHANCER_VERSION,
     engine: "minimax",
     model: payload.model ?? "speech-2.8-hd",
     voiceId: payload.voiceId,
@@ -796,7 +798,7 @@ const DEFAULT_USER_PROFILE: UserProfile = {
   nickname: "",
   callPreference: "",
   birthday: "",
-  timezone: "Asia/Shanghai",
+  timezone: "Asia/Taipei",
   avatarPath: "",
   defaultCity: "",
 };

@@ -11,6 +11,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { WebSocket } from "ws";
+import { prepareMiniMaxSpeechText, type MiniMaxVocalEnhanceOptions } from "./minimax-vocal-enhancer";
 
 const BASE_URL = "https://api.minimax.io";
 const WS_URL = "wss://api.minimax.io/ws/v1/t2a_v2";
@@ -162,6 +163,8 @@ export interface SynthesizeOptions {
   debugLog?: (entry: Record<string, unknown>) => void; // 本地診斷日誌（不上傳）
   /** 流式回調：每收到一段 audio chunk 就調一次（傳 base64）。不傳 = 完整合成模式。 */
   onChunk?: (chunkBase64: string) => void;
+  /** MiniMax speech-2.8 語音自然化；未指定時預設啟用。 */
+  vocalEnhance?: MiniMaxVocalEnhanceOptions;
 }
 
 /**
@@ -171,6 +174,8 @@ export interface SynthesizeOptions {
  */
 export async function synthesize(opts: SynthesizeOptions): Promise<Buffer> {
   return new Promise((resolve, reject) => {
+    const model = opts.model ?? "speech-2.8-hd";
+    const enhancedText = prepareMiniMaxSpeechText(opts.text, model, opts.vocalEnhance);
     const audioChunks: Buffer[] = [];
     const requestId = `tts-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const startedAt = Date.now();
@@ -185,8 +190,9 @@ export async function synthesize(opts: SynthesizeOptions): Promise<Buffer> {
     log({
       phase: "request.begin",
       endpoint: WS_URL,
-      textChars: Array.from(opts.text).length,
-      textUtf8Bytes: Buffer.byteLength(opts.text, "utf8"),
+      textChars: Array.from(enhancedText).length,
+      textUtf8Bytes: Buffer.byteLength(enhancedText, "utf8"),
+      vocalEnhanceApplied: enhancedText !== opts.text,
       request: {
         task_start: {
           event: "task_start",
@@ -207,7 +213,7 @@ export async function synthesize(opts: SynthesizeOptions): Promise<Buffer> {
         },
         task_continue: {
           event: "task_continue",
-          text: opts.text,
+          text: enhancedText,
         },
       },
     });
@@ -267,8 +273,8 @@ export async function synthesize(opts: SynthesizeOptions): Promise<Buffer> {
         // task 啟動成功 → 發 task_continue(發文本)
         if (msg.event === "task_started") {
           log({ phase: "response.event", event: msg.event, base_resp: msg.base_resp ?? null });
-          ws.send(JSON.stringify({ event: "task_continue", text: opts.text }));
-          log({ phase: "request.sent", event: "task_continue", textChars: Array.from(opts.text).length });
+          ws.send(JSON.stringify({ event: "task_continue", text: enhancedText }));
+          log({ phase: "request.sent", event: "task_continue", textChars: Array.from(enhancedText).length });
           return;
         }
 

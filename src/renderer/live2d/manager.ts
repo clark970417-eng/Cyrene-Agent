@@ -104,7 +104,9 @@ export class Live2DManager {
       // under the cursor to decide transparent vs. opaque). Without this the
       // WebGL framebuffer is cleared after each frame and readPixels is UB.
       preserveDrawingBuffer: true,
-      resolution: window.devicePixelRatio || 1,
+      // 2x 已足夠維持桌寵清晰度；限制高 DPI drawing buffer 可顯著降低
+      // 4K／縮放螢幕上的 GPU 與記憶體負擔，不改變畫面尺寸或 UI。
+      resolution: Math.min(window.devicePixelRatio || 1, 2),
       autoDensity: true,
     });
     try {
@@ -249,15 +251,28 @@ export class Live2DManager {
     this.app.ticker.start();
   }
 
-    dispose(): void {
+  dispose(): void {
     this.disposed = true;
     if (this.model) {
       this.model.destroy();
       this.model = null;
     }
     if (this.app) {
-      this.app.destroy(false, { children: true, texture: true });
+      this.app.destroy(false, { children: true, texture: true, baseTexture: true });
       this.app = null;
+    }
+    // pixi-live2d-display 會把模型貼圖留在 PIXI 全域快取；重載桌寵時若不
+    // 清除，GPU 記憶體會逐次累積。dispose 只在整個 manager 結束時呼叫，
+    // 因此在這裡清理不會影響其他作用中的畫面。
+    const caches = (PIXI as unknown as {
+      utils?: {
+        TextureCache?: Record<string, unknown>;
+        BaseTextureCache?: Record<string, unknown>;
+      };
+    }).utils;
+    for (const cache of [caches?.TextureCache, caches?.BaseTextureCache]) {
+      if (!cache) continue;
+      for (const key of Object.keys(cache)) delete cache[key];
     }
   }
 }
