@@ -22,6 +22,17 @@ describe("unified conversation navigation", () => {
     expect(workspaceCss).toContain(".sidebar__sessions-empty");
   });
 
+  it("keeps the new-conversation action subordinate to the conversation list", () => {
+    expect(workspaceCss).toMatch(/\.sidebar__sessions-create-icon\s*\{[^}]*width:\s*32px;[^}]*height:\s*32px/s);
+    expect(workspaceCss).toMatch(/\.sidebar__sessions-create-label\s*\{[^}]*font-size:\s*12px/s);
+  });
+
+  it("merges the embedded React controls into a single top row", () => {
+    expect(workspaceCss).toMatch(/body\[data-content="react"\] \.titlebar\s*\{[^}]*position:\s*absolute/s);
+    expect(workspaceCss).toMatch(/body\[data-content="react"\] \.titlebar__left,[\s\S]*?display:\s*none/);
+    expect(workspaceCss).toMatch(/body\[data-content="react"\] \.titlebar__actions\s*\{[^}]*pointer-events:\s*auto/s);
+  });
+
   it("removes the duplicate React rail only when embedded in the workspace", () => {
     expect(reactCss).toMatch(/\.cy-page\.is-embedded\s*\{[^}]*padding-left:\s*10px/s);
     expect(reactCss).toMatch(/\.cy-page\.is-embedded \.cy-page-newtask[\s\S]*?display:\s*none/);

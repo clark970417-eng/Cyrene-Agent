@@ -132,9 +132,29 @@ html, body {
   display: none;
 }
 
-body[data-content="react"] .titlebar__dropdowns {
-  visibility: hidden;
+/* React 聊天本身已有角色狀態與模式切換。嵌入時讓它直接成為唯一頂列，
+   工作台只疊放視窗控制鍵，避免上下兩條工具列重複佔高。 */
+body[data-content="react"] .main-content {
+  position: relative;
+}
+
+body[data-content="react"] .titlebar {
+  position: absolute;
+  inset: 0 0 auto;
+  z-index: 20;
+  border-bottom: 0;
+  background: transparent;
   pointer-events: none;
+}
+
+body[data-content="react"] .titlebar__left,
+body[data-content="react"] .titlebar__dropdowns {
+  display: none;
+}
+
+body[data-content="react"] .titlebar__actions {
+  margin-left: auto;
+  pointer-events: auto;
 }
 
 .sidebar__status-pill {
@@ -925,23 +945,23 @@ body[data-content="react"] .titlebar__dropdowns {
 
 /* 最近對話區塊 */
 .sidebar__sessions {
-  margin-top: 16px;
+  margin-top: 12px;
   flex: 1;
   display: flex;
   flex-direction: column;
   min-height: 0;
   border-top: 1px solid var(--border-color);
-  padding-top: 14px;
+  padding-top: 11px;
 }
 
 .sidebar__sessions-create {
   display: flex;
   width: 100%;
   align-items: center;
-  gap: 12px;
-  padding: 4px;
+  gap: 9px;
+  padding: 2px 3px;
   border: 0;
-  border-radius: 12px;
+  border-radius: 9px;
   color: var(--text-primary);
   background: transparent;
   cursor: pointer;
@@ -961,16 +981,16 @@ body[data-content="react"] .titlebar__dropdowns {
 
 .sidebar__sessions-create-icon {
   display: grid;
-  width: 44px;
-  height: 44px;
-  flex: 0 0 44px;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
   align-items: center;
   justify-content: center;
-  border-radius: 12px;
+  border-radius: 9px;
   color: #ffffff;
   background: #ff6f9f;
-  box-shadow: 0 8px 18px rgba(255, 111, 159, 0.18);
-  font-size: 29px;
+  box-shadow: 0 5px 12px rgba(255, 111, 159, 0.16);
+  font-size: 22px;
   font-weight: 300;
   line-height: 1;
   transition: transform 160ms ease, box-shadow 160ms ease;
@@ -978,19 +998,19 @@ body[data-content="react"] .titlebar__dropdowns {
 
 .sidebar__sessions-create:hover .sidebar__sessions-create-icon {
   transform: translateY(-1px);
-  box-shadow: 0 10px 22px rgba(255, 111, 159, 0.26);
+  box-shadow: 0 7px 16px rgba(255, 111, 159, 0.24);
 }
 
 .sidebar__sessions-create-label {
   min-width: 0;
-  font-size: 13px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
   white-space: nowrap;
 }
 
 .sidebar__sessions-heading {
-  margin: 14px 8px 7px;
+  margin: 11px 6px 6px;
   color: var(--text-muted);
   font-size: 11px;
   font-weight: 700;

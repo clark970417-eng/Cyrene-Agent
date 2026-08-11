@@ -42,6 +42,14 @@ body { overflow: hidden; }
 }
 .call__close:hover { background: var(--rb-border-soft); color: var(--rb-text-default); }
 
+/* The unified workspace supplies the only window titlebar when embedded. */
+html[data-embedded="true"] .call {
+  border: 0;
+  border-radius: 0;
+}
+html[data-embedded="true"] .call__titlebar { display: none; }
+html[data-embedded="true"] .call__body { padding-top: 18px; }
+
 /* 状态文字 */
 .call__status {
   color: var(--rb-text-default); font-size: 14px; letter-spacing: 1px;

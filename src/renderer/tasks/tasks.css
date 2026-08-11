@@ -142,6 +142,16 @@ body {
   user-select: none;
 }
 
+/* Keep this titlebar only when Tasks is opened as its own window. */
+html[data-embedded="true"] .tasks {
+  border: 0;
+  border-radius: 0;
+}
+
+html[data-embedded="true"] .tasks__titlebar {
+  display: none;
+}
+
 .tasks__body::-webkit-scrollbar { width: 4px; }
 .tasks__body::-webkit-scrollbar-track { background: transparent; }
 .tasks__body::-webkit-scrollbar-thumb {

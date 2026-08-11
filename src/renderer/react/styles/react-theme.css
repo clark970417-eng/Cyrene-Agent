@@ -50,6 +50,17 @@ html[data-ui-theme="cyrene-night"] {
   --cy-control-shadow: 0 12px 30px rgb(3 1 8 / 32%);
 }
 
+/* 黑色線稿在夜色背景會消失；只於深色主題轉為柔白，淺色保留原圖。 */
+html[data-ui-theme="cyrene-night"] .cy-status-avatar {
+  filter: brightness(0) invert(1);
+  opacity: 0.92;
+}
+
+html[data-ui-theme="pearl-white"] .cy-status-avatar {
+  filter: none;
+  opacity: 1;
+}
+
 html[data-ui-theme] :is(.cy-page, .cy-workspace) {
   color: var(--cy-text);
 }

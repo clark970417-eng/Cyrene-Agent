@@ -56,6 +56,10 @@ function applyFont(value: unknown): void {
 
 applyTheme("cyrene-night");
 
+// Pages share the same renderer in standalone windows and inside the unified
+// workspace. Expose that distinction so CSS can remove duplicate window chrome.
+document.documentElement.dataset.embedded = window.self !== window.top ? "true" : "false";
+
 void window.cyreneTheme?.get()
   .then(applyTheme)
   .catch(() => applyTheme("cyrene-night"));

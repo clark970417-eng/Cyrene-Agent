@@ -60,4 +60,9 @@ describe("React semantic colour hierarchy", () => {
     expect(css).toContain(".cy-workspace");
     expect(css).toContain("@media (prefers-contrast: more)");
   });
+
+  it("keeps the Cyrene line icon visible without changing the light theme asset", () => {
+    expect(css).toMatch(/html\[data-ui-theme="cyrene-night"\] \.cy-status-avatar\s*\{[^}]*filter:\s*brightness\(0\) invert\(1\)/s);
+    expect(css).toMatch(/html\[data-ui-theme="pearl-white"\] \.cy-status-avatar\s*\{[^}]*filter:\s*none/s);
+  });
 });

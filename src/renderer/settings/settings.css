@@ -250,6 +250,20 @@ body {
   border-radius: 3px;
 }
 
+/* The workspace already owns the titlebar and window controls. */
+html[data-embedded="true"] .settings-shell {
+  border: 0;
+  border-radius: 0;
+}
+
+html[data-embedded="true"] .settings-titlebar {
+  display: none;
+}
+
+html[data-embedded="true"] .settings-content {
+  padding-top: 16px;
+}
+
 .settings-panel {
   border-radius: 24px;
   padding: 20px;

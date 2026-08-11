@@ -17,6 +17,7 @@
   object-fit: contain;
   flex-shrink: 0;
   margin-top: 2px;
+  transition: filter 160ms ease, opacity 160ms ease;
 }
 
 .cy-status-name {

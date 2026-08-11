@@ -59,6 +59,15 @@ body {
   padding: 4px 6px 8px;
 }
 
+/* Avoid a second set of window controls when hosted by the workspace. */
+html[data-embedded="true"] .sticker-shell {
+  padding-top: 10px;
+  border: 0;
+  border-radius: 0;
+}
+html[data-embedded="true"] .sticker-titlebar { display: none; }
+html[data-embedded="true"] .sticker-grid { height: 100%; }
+
 .sticker-grid::-webkit-scrollbar { width: 6px; }
 .sticker-grid::-webkit-scrollbar-track { background: transparent; }
 .sticker-grid::-webkit-scrollbar-thumb { background: var(--rb-border-strong); border-radius: 4px; }
