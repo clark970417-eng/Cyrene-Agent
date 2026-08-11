@@ -265,6 +265,7 @@ export const IPC = {
 
   // token usage statistics
   TOKEN_USAGE_GET: "token-usage:get",
+  CALL_USAGE_GET: "call-usage:get",
 
   // TTS 语音合成
   TTS_UPLOAD: "tts:upload",          // 上传音频文件 → file_id

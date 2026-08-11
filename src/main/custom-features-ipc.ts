@@ -55,6 +55,8 @@ function broadcastNotebookChanged(): void {
 }
 
 export function registerCustomFeaturesIpc(): () => void {
+  // Migrate a checkout-scoped legacy diary before any notebook view is opened.
+  getSharedNotebookPath();
   const handlers = [
     "sidebar:read-shared-notebook", "sidebar:open-shared-notebook", "sidebar:get-notebook-entries",
     "sidebar:add-notebook-entry", "sidebar:update-notebook-entry", "sidebar:delete-notebook-entry",

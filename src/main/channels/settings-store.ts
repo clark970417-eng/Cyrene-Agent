@@ -267,7 +267,9 @@ function normalize(input: Partial<ChannelsSettings> | null | undefined): Channel
     : [];
 
   return {
+    ...(input ?? {}),
     wechat: {
+      ...(w ?? {}),
       enabled: safeBool(w?.enabled, false),
       manualCliPath: typeof w?.manualCliPath === "string" ? w.manualCliPath : undefined,
       publicWebhookUrl: typeof w?.publicWebhookUrl === "string" ? w.publicWebhookUrl : undefined,
@@ -280,6 +282,7 @@ function normalize(input: Partial<ChannelsSettings> | null | undefined): Channel
         : [],
     },
     feishu: {
+      ...(f ?? {}),
       enabled: safeBool(f?.enabled, false),
       manualCliPath: typeof f?.manualCliPath === "string" ? f?.manualCliPath : undefined,
       publicWebhookUrl: typeof f?.publicWebhookUrl === "string" ? f?.publicWebhookUrl : undefined,
@@ -289,6 +292,7 @@ function normalize(input: Partial<ChannelsSettings> | null | undefined): Channel
       appSecret: typeof f?.appSecret === "string" ? f?.appSecret : undefined,
     },
     discord: {
+      ...(d ?? {}),
       enabled: safeBool(d?.enabled, false),
       botToken: typeof d?.botToken === "string" ? d.botToken : undefined,
       allowedGuildIds: safeIds(d?.allowedGuildIds),
@@ -311,6 +315,7 @@ function normalize(input: Partial<ChannelsSettings> | null | undefined): Channel
       ...(typeof d?.activityText === "string" ? { activityText: d.activityText.slice(0, 128) } : {}),
     },
     spotify: {
+      ...(s ?? {}),
       enabled: safeBool(s?.enabled, false),
       clientId: typeof s?.clientId === "string" ? s.clientId.trim() : undefined,
       clientSecret: typeof s?.clientSecret === "string" ? s.clientSecret : undefined,
@@ -318,6 +323,7 @@ function normalize(input: Partial<ChannelsSettings> | null | undefined): Channel
       accountName: typeof s?.accountName === "string" ? s.accountName.slice(0, 160) : undefined,
     },
     bilibili: {
+      ...(b ?? {}),
       enabled: safeBool(b?.enabled, false),
       browser: "opera-gx",
     },

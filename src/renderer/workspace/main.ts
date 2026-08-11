@@ -561,21 +561,14 @@ async function initStatusSync() {
       let maxDayName = "週日";
       let totalSum = 0;
 
-      // 圖表表示「本週（日～六）」而不是「最近七天」。只用 weekday
-      // 配對會把上週六的資料錯畫到本週尚未到來的週六。
-      const weekStart = new Date(today);
-      weekStart.setHours(0, 0, 0, 0);
-      weekStart.setDate(today.getDate() - today.getDay());
-      const weekDayTotals = weekdays.map((dayName, dayIndex) => {
-        const date = new Date(weekStart);
-        date.setDate(weekStart.getDate() + dayIndex);
-        const dateKey = `${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
-        const isFuture = date.getTime() > today.getTime();
-        const data = isFuture ? undefined : tokenData.find((entry) => entry.date === dateKey);
-        return { dayName, total: data ? data.input + data.output : 0 };
+      // 使用滾動近 7 日，跨週時仍可看見完整歷史，不會把上週資料藏掉。
+      const weekDayTotals = tokenData.map((entry) => {
+        const [month, day] = entry.date.split("-").map(Number);
+        const date = new Date(today.getFullYear(), month - 1, day);
+        return { dayName: weekdays[date.getDay()], total: entry.input + entry.output };
       });
 
-      weekDayTotals.slice(0, today.getDay() + 1).forEach(({ dayName, total: sum }) => {
+      weekDayTotals.forEach(({ dayName, total: sum }) => {
         totalSum += sum;
         if (sum > maxTokens) {
           maxTokens = sum;
@@ -583,7 +576,7 @@ async function initStatusSync() {
         }
       });
 
-      const elapsedDays = today.getDay() + 1;
+      const elapsedDays = Math.max(1, weekDayTotals.length);
       const avgTokens = Math.round(totalSum / elapsedDays);
       const avgK = (avgTokens / 1000).toFixed(1);
       const maxK = (maxTokens / 1000).toFixed(1);
@@ -595,14 +588,16 @@ async function initStatusSync() {
 
       const tokenChartPeakDescEl = document.getElementById("token-chart-peak-desc");
       if (tokenChartPeakDescEl) {
-        tokenChartPeakDescEl.textContent = `📊 本周 Token 消耗趨勢 | 峰值 ${maxK}K (${maxDayName})`;
+        tokenChartPeakDescEl.textContent = `📊 近 7 日 Token 消耗 | 峰值 ${maxK}K (${maxDayName})`;
       }
 
       const barItems = document.querySelectorAll(".chart-bar-item");
       barItems.forEach((item) => {
+        const dayIndex = Number((item as HTMLElement).dataset.day);
+        const labelEl = item.querySelector(".chart-bar-label");
+        if (labelEl) labelEl.textContent = weekDayTotals[dayIndex]?.dayName ?? "";
         const fillEl = item.querySelector(".chart-bar-fill") as HTMLElement;
         if (fillEl) {
-          const dayIndex = Number((item as HTMLElement).dataset.day);
           const dayTotal = weekDayTotals[dayIndex]?.total ?? 0;
           const heightPercent = maxTokens > 0 ? Math.min(100, (dayTotal / maxTokens) * 100) : 0;
           fillEl.style.height = `${heightPercent}%`;
@@ -648,32 +643,24 @@ async function initStatusSync() {
       const liveIndicator = document.getElementById("call-live-indicator");
       if (liveIndicator) liveIndicator.hidden = !current.active;
 
-      const weekStart = new Date(today);
-      weekStart.setHours(0, 0, 0, 0);
-      weekStart.setDate(today.getDate() - today.getDay());
-      const week = weekdays.map((weekday, index) => {
-        const date = new Date(weekStart);
-        date.setDate(weekStart.getDate() + index);
-        const key = `${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
-        const entry = date.getTime() > today.getTime() ? undefined : data.find((item) => item.date === key);
-        return { weekday, totalMs: entry?.totalMs ?? 0 };
-      });
-      const elapsed = week.slice(0, today.getDay() + 1);
-      const weekTotal = elapsed.reduce((sum, item) => sum + item.totalMs, 0);
-      const peak = elapsed.reduce((best, item) => item.totalMs > best.totalMs ? item : best, { weekday: "週日", totalMs: 0 });
-      const average = weekTotal / Math.max(1, elapsed.length);
+      const week = data.map((entry) => ({ weekday: entry.weekday, totalMs: entry.totalMs }));
+      const weekTotal = week.reduce((sum, item) => sum + item.totalMs, 0);
+      const peak = week.reduce((best, item) => item.totalMs > best.totalMs ? item : best, { weekday: "週日", totalMs: 0 });
+      const average = weekTotal / Math.max(1, week.length);
 
       const avgEl = document.getElementById("call-avg-val");
       const peakEl = document.getElementById("call-chart-peak-desc");
       if (avgEl) avgEl.textContent = `日均 ${formatCallDuration(average, true)}`;
       if (peakEl) {
         peakEl.textContent = peak.totalMs > 0
-          ? `🎙️ 本週累計 ${formatCallDuration(weekTotal, true)} · 最長 ${formatCallDuration(peak.totalMs, true)} (${peak.weekday})`
-          : "🎙️ 本週尚無通話紀錄";
+          ? `🎙️ 近 7 日累計 ${formatCallDuration(weekTotal, true)} · 最長 ${formatCallDuration(peak.totalMs, true)} (${peak.weekday})`
+          : "🎙️ 近 7 日尚無通話紀錄";
       }
 
       document.querySelectorAll(".call-chart-bar-item").forEach((item) => {
         const dayIndex = Number((item as HTMLElement).dataset.day);
+        const labelEl = item.querySelector("span");
+        if (labelEl) labelEl.textContent = week[dayIndex]?.weekday ?? "";
         const fill = item.querySelector(".call-chart-bar-fill") as HTMLElement | null;
         if (!fill) return;
         const duration = week[dayIndex]?.totalMs ?? 0;

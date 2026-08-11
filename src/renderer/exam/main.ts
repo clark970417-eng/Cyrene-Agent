@@ -395,7 +395,7 @@ saveNotebookBtn.addEventListener("click", async () => {
   const percent = Math.round((correctCount / currentQuiz.length) * 100);
   const timeStr = resultTotalTime.textContent || "00:00";
 
-  const savePrompt = `請將我剛才的考試成績記錄在如我所書（共享筆記本）中（/Users/clark/cy/Shared Notebook.md）。
+  const savePrompt = `請將我剛才的考試成績記錄在「如我所書」的共享筆記本中。
 這是我的考試資料：
 - 科目：${currentSubject}
 - 題數：${currentQuiz.length} 題

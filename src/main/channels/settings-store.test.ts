@@ -97,4 +97,14 @@ describe("channels/settings-store", () => {
     saveChannelsSettings({ toolSandbox: "off" });
     expect(loadChannelsSettings().toolSandbox).toBe("off");
   });
+
+  it("preserves settings written by older or custom channel builds", () => {
+    const saved = saveChannelsSettings({
+      legacyMobileBridge: { enabled: true, deviceName: "iPhone" },
+      wechat: { enabled: true, legacySessionMode: "linked" },
+    } as never) as unknown as Record<string, any>;
+
+    expect(saved.legacyMobileBridge).toEqual({ enabled: true, deviceName: "iPhone" });
+    expect(saved.wechat.legacySessionMode).toBe("linked");
+  });
 });

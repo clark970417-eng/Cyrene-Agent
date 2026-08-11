@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import type { ToolCallResult } from "../../../orchestrator/types";
+import { getSharedNotebookPath } from "../../../notebook-manager";
 
 export interface DiscordMusicNotebookEntry {
   title: string;
@@ -26,12 +27,6 @@ type NotebookChangedListener = (notebookPath: string) => void;
 
 const listeners = new Set<NotebookChangedListener>();
 let writeQueue: Promise<void> = Promise.resolve();
-
-export function getSharedNotebookPath(): string {
-  return process.env.CYRENE_SHARED_NOTEBOOK_PATH
-    ? path.resolve(process.env.CYRENE_SHARED_NOTEBOOK_PATH)
-    : path.resolve(process.cwd(), "Shared Notebook.md");
-}
 
 export function onSharedNotebookChanged(listener: NotebookChangedListener): () => void {
   listeners.add(listener);

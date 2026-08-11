@@ -31,4 +31,7 @@ fi
 
 cd "${CYRENE_PROJECT_ROOT}" || exit 1
 printf '[%s] Starting Cyrene from %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "${CYRENE_PROJECT_ROOT}" >> "${CYRENE_LOG_FILE}"
-nohup /usr/local/bin/npm run dev >> "${CYRENE_LOG_FILE}" 2>&1 &
+# The Dock launcher uses the compiled renderer instead of a Vite development
+# server. This prevents an orphaned localhost:5173 process from serving an old
+# UI after Electron has been restarted.
+nohup /bin/zsh -c '/usr/local/bin/npm run build && exec /usr/local/bin/npm start' >> "${CYRENE_LOG_FILE}" 2>&1 &

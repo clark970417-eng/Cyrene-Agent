@@ -672,6 +672,12 @@ const tokenUsageApi = {
 };
 contextBridge.exposeInMainWorld("tokenUsage", tokenUsageApi);
 
+// 通話時間查詢（日程面板用）
+const callUsageApi = {
+  get: (days: number) => ipcRenderer.invoke(IPC.CALL_USAGE_GET, days),
+};
+contextBridge.exposeInMainWorld("callUsage", callUsageApi);
+
 // TTS 语音合成（设置中心 TTS 面板 + 聊天窗口朗读用）
 const ttsApi = {
   startSession: (payload: StartTtsRequest): Promise<TtsStartResult> =>

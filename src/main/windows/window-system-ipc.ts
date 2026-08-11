@@ -1,6 +1,7 @@
 import { BrowserWindow, ipcMain } from "electron";
 import { IPC } from "../../shared/ipc-channels";
 import { getUsage } from "../token-usage-store";
+import { getCallUsage } from "../call-usage-store";
 import {
   sidebarWindow,
   tasksWindow,
@@ -15,7 +16,7 @@ export interface WindowSystemIpcDependencies {
 /**
  * 注册窗口控制与系统入口相关的 IPC handler。
  *
- * 注意：TOKEN_USAGE_GET 本质属于用量统计领域，当前仅因改动最小而临时
+ * 注意：TOKEN_USAGE_GET / CALL_USAGE_GET 本质属于用量统计领域，当前仅因改动最小而临时
  * 挂靠在此；后续拆分统计模块时应二次归位。
  */
 export function registerWindowSystemIpc(deps: WindowSystemIpcDependencies): void {
@@ -98,6 +99,9 @@ export function registerWindowSystemIpc(deps: WindowSystemIpcDependencies): void
   // Token 用量查询 IPC（临时挂靠，后续归到统计模块）
   ipcMain.handle(IPC.TOKEN_USAGE_GET, (_event, days: number) => {
     return getUsage(Math.max(1, Math.min(90, Number(days) || 7)));
+  });
+  ipcMain.handle(IPC.CALL_USAGE_GET, (_event, days: number) => {
+    return getCallUsage(Math.max(1, Math.min(90, Number(days) || 7)));
   });
 
   ipcMain.on(IPC.LIVE2D_SPEECH_PREPARE, () => {

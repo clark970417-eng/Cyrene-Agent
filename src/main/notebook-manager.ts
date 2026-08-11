@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { promises as fs } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, promises as fs } from "node:fs";
 import path from "node:path";
 import { app } from "electron";
 import { memoryStore } from "./memory/memory-store";
@@ -28,7 +28,26 @@ export function getSharedNotebookPath(): string {
   if (process.env.CYRENE_SHARED_NOTEBOOK_PATH) {
     return path.resolve(process.env.CYRENE_SHARED_NOTEBOOK_PATH);
   }
-  return path.resolve(process.cwd(), "Shared Notebook.md");
+  const targetPath = path.join(app.getPath("userData"), "Shared Notebook.md");
+  migrateLegacySharedNotebook(targetPath, [
+    path.resolve(process.cwd(), "Shared Notebook.md"),
+    path.resolve(app.getAppPath(), "Shared Notebook.md"),
+    path.resolve(app.getAppPath(), "..", "cy", "Shared Notebook.md"),
+  ]);
+  return targetPath;
+}
+
+/**
+ * Move the shared diary out of a checkout-specific path without overwriting a
+ * newer userData copy. This keeps one notebook across upgrades and branches.
+ */
+export function migrateLegacySharedNotebook(targetPath: string, candidates: string[]): string | null {
+  if (existsSync(targetPath)) return null;
+  const sourcePath = candidates.find((candidate) => path.resolve(candidate) !== path.resolve(targetPath) && existsSync(candidate));
+  if (!sourcePath) return null;
+  mkdirSync(path.dirname(targetPath), { recursive: true });
+  copyFileSync(sourcePath, targetPath);
+  return sourcePath;
 }
 
 export function onNotebookChanged(listener: NotebookListener): () => void {
