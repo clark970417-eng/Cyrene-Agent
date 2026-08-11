@@ -153,39 +153,17 @@ body {
   border-radius: 2px;
 }
 
-/* ── 今日日程窗口專屬樣式 ────────────────────────────────────
-   柱狀圖/用量進度條的基礎外觀在 ../ui/chart.css 共享。
-   這裡只覆蓋 tasks 窗口特有的：電流感進度條、今日柱標記、空態。
+/* ── 今日日程窗口专属样式 ────────────────────────────────────
+   柱状图/用量进度条的基础外观在 ../ui/chart.css 共享。
+   这里只覆盖 tasks 窗口特有的：电流感进度条、今日柱标记、空态。
    ──────────────────────────────────────────────────────────── */
 
-/* 用量進度條：拉滿 + 電流流動動畫（tasks 窗口無預算概念，進度條恆為 100%） */
-.usage-bar {
-  position: relative;
-  height: 8px;
-}
+/* 用量进度条：拉满 + 电流流动动画（tasks 窗口无预算概念，进度条恒为 100%） */
 
-.usage-bar__fill {
-  width: 100% !important;
-  background: linear-gradient(90deg, var(--rb-pink-300), var(--rb-pink-500), var(--rb-violet-500), var(--rb-pink-300)) !important;
-  background-size: 300% 100% !important;
-  animation: currentFlow 3s linear infinite;
-  box-shadow: var(--rb-glow-pink), var(--rb-glow-violet);
-}
-
-@keyframes currentFlow {
-  0%   { background-position: 0% 0;   box-shadow: var(--rb-glow-pink), var(--rb-glow-violet); }
-  50%  { background-position: 150% 0;  box-shadow: 0 0 17px rgba(236, 72, 153, 0.80), 0 0 10px rgba(168, 85, 247, 0.60); }
-  100% { background-position: 300% 0;  box-shadow: var(--rb-glow-pink), var(--rb-glow-violet); }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .usage-bar__fill { animation: none; }
-}
-
-/* 未來柱：佔位但無填充，僅顯示星期標籤 */
+/* 未来柱：占位但无填充，仅显示星期标签 */
 .chart-bar--future::before { display: none; }
 
-/* 任務空態 */
+/* 任务空态 */
 .task-empty {
   padding: 14px 10px;
   text-align: center;
@@ -246,9 +224,8 @@ body {
   border: 1px solid var(--rb-border-soft);
 }
 
-/* 用量區塊容器佈局（tasks 窗口特有）；柱狀圖/進度條內部樣式見 ../ui/chart.css */
+/* 用量区块容器布局（tasks 窗口特有） */
 .schedule-usage {
-  display: grid;
   gap: 10px;
   padding: 11px 12px;
   margin-bottom: 16px;

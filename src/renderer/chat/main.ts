@@ -1,14 +1,41 @@
 import "../ui/base.css";
 import "./chat.css";
 import "../ui/theme";
+import { initMarkdownRenderer, initCodeBlockController, renderMarkdown, createStreamingMarkdownSession, getMd } from "./markdown/init";
+import type { StreamingMarkdownSession } from "./markdown/init";
 import {
-  CHAT_DEFAULT_IDENTITY_LABEL,
   formatChatRelativeTime,
   type ChatSessionMetaUI,
 } from "../../shared/chat-ui";
+import { normalizeDefaultChatMode, type DefaultChatMode } from "../../shared/preferences";
+import { normalizeStyleId, type StyleId } from "../../shared/style-sampling";
+import type { ScreenshotInsertPayload } from "../../shared/ipc-channels";
+import { userAnnotationNotice } from "../../shared/chat-context";
 import { canUseMinimaxStreamingEarly, extractEarlyTtsSegment } from "../../shared/tts-early-playback";
 import { getStickerSrcForId } from "./sticker-src";
+import { formatAttachmentTagDetail, getAttachmentIcon } from "./attachment-labels";
 import { resolveAsset } from "../../shared/renderer-base";
+import {
+  getAssistantReplyBubbleTexts,
+  MAX_ASSISTANT_REPLY_BUBBLES,
+  shouldBreakStreamingBubbleAfterChar,
+  shouldSegmentAssistantReply,
+} from "./message-segmentation";
+import { buildDocumentContextLines, processDocumentsWithWait, type RetrievedDocumentChunk } from "./document-processing";
+import { decideReloadCurrentSession } from "./session-reload-policy";
+import {
+  canCancelDocumentIndexStatus,
+  getDocumentIndexStatusLabel,
+  type DocumentIndexCardStatus,
+  type DocumentIndexProgress,
+} from "./types";
+import { normalizeMusicCardData, type MusicCardData } from "../../shared/music-card";
+import { requestTrackPlayback } from "../settings/music-playback";
+import type {
+  AskClarificationCard,
+  AskQuestion,
+  AskUserAnswer,
+} from "../../shared/ask-clarification";
 
 type Role = "user" | "model";
 
@@ -17,30 +44,38 @@ interface Message {
   role: Role;
   content: string;
   at: number;
+  modelContext?: string;
+  attachments?: MessageAttachment[];
   sticker?: string | null;
   thinking?: boolean;
+  transient?: boolean;
   ttsCacheKey?: string;
+  musicCard?: MusicCardData;
 }
 
-interface ChatReplyPayload {
-  reply: string;
-  sticker: string | null;
+type MessageAttachment = ImageMessageAttachment | DocumentMessageAttachment;
+
+interface ImageMessageAttachment {
+  kind: "image";
+  name: string;
+  filePath: string;
+  mime: string;
+  previewUrl?: string;
+  caption?: string;
+  hasAnnotations?: boolean;
+  status: "pending" | "done" | "error";
 }
 
-function normalizeChatReplyPayload(payload: unknown): ChatReplyPayload {
-  if (typeof payload === "string") {
-    return { reply: payload.trim(), sticker: null };
-  }
-
-  if (payload && typeof payload === "object") {
-    const record = payload as Partial<ChatReplyPayload>;
-    return {
-      reply: typeof record.reply === "string" ? record.reply.trim() : "",
-      sticker: record.sticker ?? null,
-    };
-  }
-
-  return { reply: "", sticker: null };
+interface DocumentMessageAttachment {
+  kind: "document";
+  name: string;
+  filePath: string;
+  status: DocumentIndexCardStatus;
+  jobId?: string;
+  processedKind?: "text" | "indexed" | "empty" | "unsupported";
+  chunks?: number;
+  importId?: string;
+  reason?: string;
 }
 
 interface ModelConfig {
@@ -61,10 +96,22 @@ interface ChatApi {
     close: () => void;
     toggleMaximize: () => void;
     isMaximized: () => Promise<boolean>;
-    sendMessage: (messages: Array<{ role: "user" | "model"; content: string }>, style: string) => Promise<ChatReplyPayload>;
     ingestDroppedFiles: (files: File[]) => Promise<Attachment[]>;
+    processDocuments: (filePaths: string[], query: string) => Promise<Attachment[]>;
+    onDocumentIndexProgress?: (callback: (progress: DocumentIndexProgress) => void) => () => void;
+    cancelDocumentIndex: (jobId: string) => Promise<boolean>;
+    captionImage: (filePath: string, hasAnnotations?: boolean) => Promise<{ ok: boolean; caption?: string; error?: string }>;
+    getImageSendStrategy: () => Promise<{ mode: "direct" | "caption" }>;
+    getGeneralSettings?: () => Promise<{ defaultChatMode?: DefaultChatMode; segmentedOutputMode?: "all" | "chat" | "off"; currentStyleId?: StyleId }>;
     getEnabledStickers?: () => Promise<Array<{ id: string; src: string; description?: string }>>;
+    startScreenshot: () => Promise<{ ok: boolean; reason?: string }>;
+    onScreenshotInsert: (callback: (data: ScreenshotInsertPayload) => void) => () => void;
+    saveScreenshotTemp: (base64: string, mime: string) => Promise<{ filePath: string }>;
   }
+
+interface ChatSettingsApi {
+  saveGeneral?: (config: { currentStyleId?: StyleId }) => Promise<unknown>;
+}
 
 /** AG-UI 事件流 API（window.agui）。 */
 const BUDGET_CHARS = 60000;
@@ -96,9 +143,13 @@ const COPY_ICON_DONE = `<svg class="msg__copy-icon msg__copy-icon--done" viewBox
 interface AguiApi {
   run: (input: {
     messages: unknown[];
-    style: string;
+    userTurnId?: string;
+    assistantTurnId?: string;
+    styleId: StyleId;
+    executionMode: "work" | "chat";
     sessionId?: string;
-    attachments?: Array<{ name: string; kind: "text" | "image"; text?: string; filePath?: string; mime?: string }>;
+    attachments?: { name: string; text: string }[];
+    imageAttachments?: { name: string; filePath: string; mime?: string }[];
   }) => Promise<{ success: boolean; error?: string }>;
   onEvent: (callback: (event: unknown) => void) => () => void;
   cancel: () => Promise<boolean>;
@@ -108,12 +159,20 @@ interface SchedulerEventsApi {
   onEvent: (callback: (event: unknown) => void) => () => void;
 }
 
-/** 用戶選擇卡片 API（window.choice）。卡片展示走 AGUI_EVENT CUSTOM，resolve 走獨立 IPC。 */
+/** 用户选择卡片 API（window.choice）。卡片展示走 AGUI_EVENT CUSTOM，resolve 走独立 IPC。 */
 interface ChoiceApi {
-  resolve: (id: string, value: string) => Promise<unknown>;
+  resolve: (id: string, value: unknown) => Promise<unknown>;
 }
 
-/** AG-UI BaseEvent 的最小本地類型（只取我們關心的字段）。 */
+interface ChatMusicApi {
+  playTrack: (trackId: string) => Promise<{
+    ok: boolean;
+    data?: { state: "dispatched" | "web_fallback" | "client_unavailable" | "launch_failed" };
+    errorCode?: string;
+  }>;
+}
+
+/** AG-UI BaseEvent 的最小本地类型（只取我们关心的字段）。 */
 interface AguiBaseEvent {
   type: string;
   messageId?: string;
@@ -123,6 +182,8 @@ interface AguiBaseEvent {
   toolCallName?: string;
   content?: string;
   error?: string;
+  message?: string;  // RUN_ERROR 的规范字段（upstream RunErrorEvent.message）
+  code?: string;     // 结构化错误码（AgentRuntimeError.code）
   stepName?: string;
   runId?: string;
   threadId?: string;
@@ -132,16 +193,45 @@ interface AguiBaseEvent {
   value?: unknown; // CUSTOM 事件的 value
 }
 
-/** 文件攝入結果（與 main 側 file-ingest.ts 的 Attachment 對齊）。 */
-type AttachmentKind = "text" | "image" | "indexed" | "empty" | "unsupported";
+/**
+ * 渲染端 Agent 错误。携带结构化 code，用于在 failRun reject 和 catch 之间传递。
+ * 与主进程的 AgentRuntimeError 对应，但这里是纯 renderer 类。
+ */
+class AgentRenderError extends Error {
+  constructor(
+    public readonly code: string | undefined,
+    message: string,
+  ) {
+    super(message);
+    this.name = "AgentRenderError";
+  }
+}
+
+/** 根据结构化错误码把 Agent 运行时错误翻译成面向用户的文案。 */
+function classifyAgentError(code: string | undefined, message: string): string {
+  if (code === "E_AGENT_NO_PROGRESS") return "任务执行未能继续，请重试";
+  if (code === "E_AGENT_GRAPH_ITERATION_LIMIT") return "Agent 执行达到循环上限";
+  if (code === "E_MODEL_REQUEST_FAILED") return "连接模型失败：" + message;
+  if (code === "E_ACTION_GATE_PROTOCOL") return "决策协议解析失败，请重试";
+  return message; // 兜底：原样显示
+}
+
+/** 文件摄入结果（与 main 侧 file-ingest.ts 的 Attachment 对齐）。 */
+type AttachmentKind = "text" | "indexed" | "empty" | "unsupported" | "error" | "image" | "document";
 
 interface Attachment {
   name: string;
   kind: AttachmentKind;
-  text?: string;
   filePath?: string;
   mime?: string;
+  previewUrl?: string;
+  caption?: string;
+  hasAnnotations?: boolean;
+  status?: DocumentIndexCardStatus;
+  text?: string;
   chunks?: number;
+  importId?: string;
+  retrievedChunks?: RetrievedDocumentChunk[];
   reason?: string;
 }
 
@@ -157,6 +247,11 @@ interface TodoState {
   updatedAt: number;
 }
 
+interface UserApi {
+  getAvatar: () => Promise<string | null>;
+  onAvatarChanged: (callback: () => void) => () => void;
+}
+
 declare global {
   interface Window {
     chat?: ChatApi;
@@ -164,10 +259,124 @@ declare global {
     schedulerEvents?: SchedulerEventsApi;
     modelConfig?: ModelConfigApi;
     choice?: ChoiceApi;
+    music?: ChatMusicApi;
+    user?: UserApi;
+    settings?: ChatSettingsApi;
   }
 }
 
 const messagesEl = document.getElementById("messages") as HTMLElement;
+
+// 初始化 Markdown 渲染系统（Shiki 异步启动 + 复制按钮事件委托）
+initMarkdownRenderer();
+initCodeBlockController(messagesEl);
+
+// ── 历史消息渐进渲染队列 ────────────────────────────────────
+// render() 先同步创建纯文本占位，标记 data-md-pending，
+// 队列用 requestIdleCallback 渐进升级为 Markdown HTML。
+
+/** 存储所有助手 bubble 的原始 markdown 文本（WeakMap 防 DOM 回收后泄漏） */
+const bubbleRawText = new WeakMap<HTMLElement, string>();
+/** 向后兼容：pendingMarkdownText 指向同一个 WeakMap */
+const pendingMarkdownText = bubbleRawText;
+
+/** 队列状态 */
+let renderGeneration = 0;
+let historyIdleId: number | null = null;
+
+const HISTORY_MAX_BATCH = 3;
+const HISTORY_MIN_REMAINING_MS = 4;
+
+/** 取消当前队列，递增 generation */
+function cancelHistoryRender(): void {
+  renderGeneration++;
+  if (historyIdleId !== null) {
+    cancelIdleCallback(historyIdleId);
+    historyIdleId = null;
+  }
+}
+
+/** 调度历史消息渐进渲染（在 render() 后调用） */
+function scheduleHistoryRender(): void {
+  cancelHistoryRender();
+  const gen = renderGeneration;
+
+  const processBatch = (deadline?: IdleDeadline): void => {
+    historyIdleId = null;
+    if (gen !== renderGeneration) return; // 已被取消
+
+    const pendingBubbles = messagesEl.querySelectorAll<HTMLElement>("[data-md-pending='true']");
+    if (pendingBubbles.length === 0) return;
+
+    let processed = 0;
+    const hasDeadline = !!deadline;
+
+    for (const bubble of pendingBubbles) {
+      if (gen !== renderGeneration) return; // 已被取消
+      if (!bubble.isConnected) continue;
+
+      const text = pendingMarkdownText.get(bubble);
+      if (text === undefined) {
+        bubble.removeAttribute("data-md-pending");
+        continue;
+      }
+
+      const result = renderMarkdown(text);
+      if (result.mode === "html") {
+        bubble.innerHTML = result.content;
+      } else {
+        bubble.textContent = result.content;
+      }
+      bubble.removeAttribute("data-md-pending");
+      pendingMarkdownText.delete(bubble);
+      processed++;
+
+      // 时间预算：有 deadline 时检查剩余时间，无 deadline 时按数量限制
+      if (processed >= HISTORY_MAX_BATCH) break;
+      if (hasDeadline && deadline!.timeRemaining() < HISTORY_MIN_REMAINING_MS) break;
+    }
+
+    // 还有 pending，继续调度
+    if (gen === renderGeneration && messagesEl.querySelector("[data-md-pending='true']")) {
+      historyIdleId = requestIdleCallback(processBatch, { timeout: 200 });
+    }
+  };
+
+  // requestIdleCallback fallback
+  if (typeof requestIdleCallback === "function") {
+    historyIdleId = requestIdleCallback(processBatch, { timeout: 200 });
+  } else {
+    historyIdleId = null;
+    setTimeout(() => processBatch(undefined), 0);
+  }
+}
+
+/**
+ * 主题切换时刷新已完成助手消息的 Markdown 渲染（Shiki 主题更新）。
+ * 不调用全局 render()，避免销毁流式 session DOM。
+ * 流式 session 中的已稳定代码块暂保留旧主题（方案 B），终态自动切换。
+ */
+function refreshMarkdownTheme(): void {
+  // 取消旧队列
+  cancelHistoryRender();
+
+  // 找到所有助手消息气泡，标记为 pending 重新渲染
+  const assistantBubbles = messagesEl.querySelectorAll<HTMLElement>(".msg--model .msg__bubble");
+  for (const bubble of assistantBubbles) {
+    const text = bubbleRawText.get(bubble);
+    if (text !== undefined && text.trim()) {
+      bubble.dataset.mdPending = "true";
+    }
+  }
+
+  scheduleHistoryRender();
+}
+
+// 监听主题切换
+window.cyreneTheme?.onChanged(() => {
+  refreshMarkdownTheme();
+});
+
 const formEl = document.getElementById("composer") as HTMLFormElement;
 const inputEl = document.getElementById("input") as HTMLTextAreaElement;
 const sendBtn = document.getElementById("send") as HTMLButtonElement;
@@ -185,10 +394,8 @@ const chatRailNew = document.getElementById("chat-rail-new") as HTMLButtonElemen
 const chatRailList = document.getElementById("chat-rail-list") as HTMLElement | null;
 const chatRailEmpty = document.getElementById("chat-rail-empty") as HTMLElement | null;
 
-// 舊版 localStorage key——首次啟動時檢測到老數據會遷移到主進程 chats 存儲再清掉。
+// 旧版 localStorage key——首次启动时检测到老数据会迁移到主进程 chats 存储再清掉。
 const LEGACY_STORAGE_KEY = "cyrene.chat.history.v1";
-const FRONTEND_REPLY_TIMEOUT_MS = 35000;
-
 /**
  * Avatar source per role. Empty string = use the gradient placeholder
  * baked into the CSS background of `.msg--user .msg__avatar`.
@@ -201,16 +408,31 @@ const AVATAR_SRC: Record<Role, string> = {
   user: "",
 };
 
-// Load user avatar from profile
-(async () => {
+// Load user avatar from profile and keep it in sync when changed in settings.
+async function loadUserAvatar(): Promise<boolean> {
   try {
-    const dataUrl = await (window as any).user?.getAvatar();
+    const dataUrl = await window.user?.getAvatar();
     if (dataUrl) {
       AVATAR_SRC.user = dataUrl;
-      render();
+      return true;
     }
   } catch { /* ignore */ }
+  return false;
+}
+
+(async () => {
+  if (await loadUserAvatar()) {
+    render();
+  }
 })();
+
+window.user?.onAvatarChanged(() => {
+  void (async () => {
+    if (await loadUserAvatar()) {
+      render();
+    }
+  })();
+});
 
 const BUILT_IN_STICKER_SRC: Record<string, string> = {
   playful: "/stickers/playful.png",
@@ -270,24 +492,27 @@ const BUILT_IN_STICKER_SRC: Record<string, string> = {
 function getStickerSrc(id: string): string | undefined {
   const raw = getStickerSrcForId(id, BUILT_IN_STICKER_SRC, enabledStickers);
   if (!raw) return undefined;
-  // 內置貼紙路徑以 /stickers/ 開頭（絕對路徑），在 file:// 協議下會解析到磁盤根
-  // 用 resolveAsset() 轉成正確的 file:// 或 http:// URL
+  // 内置贴纸路径以 /stickers/ 开头（绝对路径），在 file:// 协议下会解析到磁盘根
+  // 用 resolveAsset() 转成正确的 file:// 或 http:// URL
   if (raw.startsWith("/stickers/")) {
     return resolveAsset(raw);
   }
   return raw;
 }
 
-// 多會話改造：messages 是當前活躍 session 的消息數組（啟動時為空，由 bootstrap 填充）。
-// currentSessionId 是當前正在顯示的會話 id，所有持久化操作都基於它。
-// 啟動期間 currentSessionId 為 null，發送按鈕通過 sending 標誌兜底（bootstrap 極快）。
+// 多会话改造：messages 是当前活跃 session 的消息数组（启动时为空，由 bootstrap 填充）。
+// currentSessionId 是当前正在显示的会话 id，所有持久化操作都基于它。
+// 启动期间 currentSessionId 为 null，发送按钮通过 sending 标志兜底（bootstrap 极快）。
 const messages: Message[] = [];
 let currentSessionId: string | null = null;
+let sessionTailStart = 0;
+let segmentedOutputMode: "all" | "chat" | "off" = "off";
+const CHAT_WINDOW_SIZE = 100;
 let currentModelConfig: ModelConfig | null = null;
 
 function formatModelHint(config: ModelConfig | null): string {
-  if (!config || !config.connected) return "模型未連接";
-  return `${config.model} 已連接`;
+  if (!config || !config.connected) return "模型未连接";
+  return `${config.model} 已连接`;
 }
 
 function applyModelConfig(config: ModelConfig | null): void {
@@ -331,20 +556,26 @@ interface ChatStoreSession {
     role: Role;
     content: string;
     at: number;
+    modelContext?: string;
+    attachments?: MessageAttachment[];
     sticker?: string | null;
     ttsCacheKey?: string;
+    musicCard?: MusicCardData;
   }>;
   createdAt: number;
   updatedAt: number;
   schemaVersion: 1;
+  purpose?: "proactive-chat";
 }
 
 interface ChatStoreApi {
   list: () => Promise<ChatSessionMetaUI[]>;
   get: (id: string) => Promise<ChatStoreSession | null>;
+  getPage: (id: string, before: number | null, limit: number) => Promise<{ session: Omit<ChatStoreSession, "messages">; messages: ChatStoreSession["messages"]; hasMore: boolean } | null>;
   create: (payload?: { title?: string; identityId?: string | null }) => Promise<ChatStoreSession>;
   append: (id: string, message: unknown) => Promise<ChatStoreSession | null>;
   replaceMessages: (id: string, messages: unknown[]) => Promise<ChatStoreSession | null>;
+  replaceTail: (id: string, startIndex: number, messages: unknown[]) => Promise<ChatStoreSession | null>;
   rename: (id: string, title: string) => Promise<ChatStoreSession | null>;
   delete: (id: string) => Promise<boolean>;
   openFolder: () => Promise<boolean>;
@@ -363,36 +594,45 @@ declare global {
   }
 }
 
-// 把渲染端 Message 數組歸一化為後端能持久化的形態：
-// - 過濾空 content / 渲染中的 thinking 佔位（thinking=true 時通常 content 為空，但保險起見雙重過濾）
-// - 丟棄 thinking 字段（持久化層不存這種瞬態狀態）
+// 把渲染端 Message 数组归一化为后端能持久化的形态：
+// - 过滤空 content / 渲染中的 thinking 占位（thinking=true 时通常 content 为空，但保险起见双重过滤）
+// - 丢弃仅用于本轮模型调用的 modelContext 与 thinking 等瞬态字段
 function toPersistableMessages(arr: Message[]): Array<{
-  id: string; role: Role; content: string; at: number; sticker?: StickerId | null; ttsCacheKey?: string;
+  id: string; role: Role; content: string; at: number; attachments?: MessageAttachment[]; sticker?: StickerId | null; ttsCacheKey?: string; musicCard?: MusicCardData;
 }> {
   return arr
-    .filter((m) => m && (m.role === "user" || m.role === "model") && typeof m.content === "string" && m.content.trim() && !m.thinking)
+    .filter((m) => m && (m.role === "user" || m.role === "model") && !m.thinking && !m.transient && (
+      typeof m.content === "string" && m.content.trim()
+      || ((m.attachments?.length ?? 0) > 0)
+      || Boolean(m.sticker)
+      || Boolean(m.musicCard)
+    ))
     .map((m) => ({
       id: m.id,
       role: m.role,
       content: m.content,
       at: m.at,
+      attachments: m.attachments,
       sticker: m.sticker ?? null,
       ttsCacheKey: m.ttsCacheKey,
+      musicCard: m.musicCard,
     }));
 }
 
 async function saveSession(): Promise<void> {
   if (!currentSessionId || !window.chatStore) return;
   try {
-    await window.chatStore.replaceMessages(currentSessionId, toPersistableMessages(messages));
+    await window.chatStore.replaceTail(currentSessionId, sessionTailStart, toPersistableMessages(messages));
   } catch (err) {
-    console.warn("[Cyrene Chat] saveSession 失敗:", err);
+    console.warn("[Cyrene Chat] saveSession 失败:", err);
   }
 }
 
-// 把 store 裡的 ChatStoreSession 裝載到當前窗口（替換 messages 數組並 render）。
+// 把 store 里的 ChatStoreSession 装载到当前窗口（替换 messages 数组并 render）。
 function loadSessionIntoUI(session: ChatStoreSession): void {
   currentSessionId = session.id;
+  seenSessionUpdatedAt.set(session.id, session.updatedAt);
+  unreadProactiveSessionIds.delete(session.id);
   messages.length = 0;
   for (const m of session.messages) {
     messages.push({
@@ -400,26 +640,45 @@ function loadSessionIntoUI(session: ChatStoreSession): void {
       role: m.role,
       content: m.content,
       at: m.at,
+      attachments: m.attachments,
       sticker: m.sticker ?? null,
       ttsCacheKey: m.ttsCacheKey,
+      musicCard: m.musicCard,
     });
   }
-  // 上報活躍 sessionId（設置面板"刪除當前會話"差異化提示用）
+  // 上报活跃 sessionId（设置面板"删除当前会话"差异化提示用）
   void window.chatStore?.setActiveSession(session.id);
   render();
-  // 切換會話後刷新側欄列表的活躍高亮
+  // 切换会话后刷新侧栏列表的活跃高亮
   void renderRailList();
-  
-  // 通知父窗口活躍會話發生變化，以同步工作台的側欄列表高亮
-  try {
-    window.parent.postMessage({ type: "active-session-changed", sessionId: session.id }, "*");
-  } catch (err) { /* ignore */ }
 }
 
-// ── 會話側欄（點左上角 loader 展開）──
-// 精簡版：+新對話 / 列表點擊切換 / 活躍高亮。改名刪除留設置面板。
-// 渲染邏輯跟 settings.ts 的 renderChatSessions 同源（複用 shared 的格式化函數），
-// 但點擊行為不同：這裡是本地 loadSessionIntoUI，不走跨窗口 IPC，更快。
+async function loadSessionTailIntoUI(id: string): Promise<boolean> {
+  const page = await window.chatStore?.getPage(id, null, CHAT_WINDOW_SIZE);
+  if (!page) return false;
+  sessionTailStart = Math.max(0, page.session.messageCount - page.messages.length);
+  loadSessionIntoUI({ ...page.session, messages: page.messages });
+  return true;
+}
+
+async function loadEarlierMessages(): Promise<void> {
+  if (!currentSessionId || !window.chatStore || sessionTailStart <= 0) return;
+  const beforeHeight = messagesEl.scrollHeight;
+  const page = await window.chatStore.getPage(currentSessionId, sessionTailStart, CHAT_WINDOW_SIZE);
+  if (!page) return;
+  sessionTailStart -= page.messages.length;
+  messages.unshift(...page.messages);
+  render(true);
+  messagesEl.scrollTop = messagesEl.scrollHeight - beforeHeight;
+}
+
+// ── 会话侧栏（点左上角 loader 展开）──
+// 精简版：+新对话 / 列表点击切换 / 活跃高亮。改名删除留设置面板。
+// 渲染逻辑跟 settings.ts 的 renderChatSessions 同源（复用 shared 的格式化函数），
+// 但点击行为不同：这里是本地 loadSessionIntoUI，不走跨窗口 IPC，更快。
+
+const unreadProactiveSessionIds = new Set<string>();
+const seenSessionUpdatedAt = new Map<string, number>();
 
 async function renderRailList(): Promise<void> {
   if (!chatRailList || !window.chatStore) return;
@@ -452,7 +711,8 @@ function buildRailItem(session: ChatSessionMetaUI): HTMLLIElement {
 
   const titleEl = document.createElement("div");
   titleEl.className = "chat__rail-title";
-  titleEl.textContent = session.title || "新對話";
+  titleEl.textContent = session.title || "新对话";
+  if (unreadProactiveSessionIds.has(session.id)) titleEl.textContent = `● ${titleEl.textContent}`;
 
   const metaEl = document.createElement("div");
   metaEl.className = "chat__rail-meta";
@@ -461,18 +721,13 @@ function buildRailItem(session: ChatSessionMetaUI): HTMLLIElement {
   timeEl.className = "chat__rail-time";
   timeEl.textContent = formatChatRelativeTime(session.updatedAt);
 
-  const identityEl = document.createElement("span");
-  identityEl.className = "chat__rail-identity";
-  identityEl.textContent = "💼 " + (session.identityId ? session.identityId : CHAT_DEFAULT_IDENTITY_LABEL);
 
   metaEl.appendChild(timeEl);
-  metaEl.appendChild(identityEl);
 
-  // 點擊列表項 = 本地切換會話（不走跨窗口 IPC，比設置面板還快）
+  // 点击列表项 = 本地切换会话（不走跨窗口 IPC，比设置面板还快）
   li.addEventListener("click", async () => {
     if (session.id === currentSessionId) return;
-    const full = await window.chatStore?.get(session.id);
-    if (full) loadSessionIntoUI(full as ChatStoreSession);
+    await loadSessionTailIntoUI(session.id);
   });
 
   li.appendChild(titleEl);
@@ -522,41 +777,45 @@ async function maybeMigrateLegacy(): Promise<void> {
     }
     await window.chatStore?.migrateLegacy(normalized);
   } catch (err) {
-    console.warn("[Cyrene Chat] 舊 localStorage 遷移失敗:", err);
+    console.warn("[Cyrene Chat] 旧 localStorage 迁移失败:", err);
   } finally {
-    // 不管成功失敗都清掉，避免每次啟動都嘗試遷移
+    // 不管成功失败都清掉，避免每次启动都尝试迁移
     localStorage.removeItem(LEGACY_STORAGE_KEY);
   }
 }
 
-// 啟動流程：遷移老數據 → 決定加載哪個 session → render
+// 启动流程：迁移老数据 → 决定加载哪个 session → render
 async function bootstrap(): Promise<void> {
   if (!window.chatStore) {
-    console.warn("[Cyrene Chat] chatStore IPC 未就緒——可能是 preload 未加載");
+    console.warn("[Cyrene Chat] chatStore IPC 未就绪——可能是 preload 未加载");
     render();
     return;
   }
 
   await maybeMigrateLegacy();
 
-  // 優先級：URL ?sessionId= → 列表最新一條 → 自動建新
+  // 优先级：URL ?sessionId= → 列表最新一条 → 自动建新
   const urlSessionId = new URLSearchParams(window.location.search).get("sessionId");
-  let session: ChatStoreSession | null = null;
+  let sessionId: string | null = null;
 
   if (urlSessionId) {
-    session = await window.chatStore.get(urlSessionId);
+    sessionId = urlSessionId;
   }
-  if (!session) {
+  if (!sessionId) {
     const list = await window.chatStore.list();
     if (list.length > 0) {
-      session = await window.chatStore.get(list[0].id);
+      sessionId = list[0].id;
     }
   }
-  if (!session) {
-    session = await window.chatStore.create({ identityId: null });
+  if (!sessionId) {
+    sessionId = (await window.chatStore.create({ identityId: null })).id;
   }
 
-  loadSessionIntoUI(session);
+  if (!await loadSessionTailIntoUI(sessionId)) {
+    const session = await window.chatStore.create({ identityId: null });
+    sessionTailStart = 0;
+    loadSessionIntoUI(session);
+  }
 }
 
 function formatTime(at: number): string {
@@ -738,6 +997,160 @@ function buildChoiceCardEl(data: {
   return card;
 }
 
+function isAskClarificationCard(value: unknown): value is AskClarificationCard & { id: string } {
+  return Boolean(
+    value
+    && typeof value === "object"
+    && "id" in value
+    && "intro" in value
+    && "questions" in value
+    && Array.isArray((value as { questions?: unknown }).questions),
+  );
+}
+
+/** Ask Soul 多字段澄清卡片。按钮只负责选择，统一由底部确认按钮结构化提交。 */
+function buildAskClarificationCardEl(
+  data: AskClarificationCard & { id: string },
+): HTMLElement {
+  const card = document.createElement("div");
+  card.className = "choice-card choice-card--structured";
+  card.dataset.choiceId = data.id;
+
+  const intro = document.createElement("div");
+  intro.className = "choice-card__title";
+  intro.textContent = data.intro;
+  card.appendChild(intro);
+
+  const questionStates = new Map<string, {
+    question: AskQuestion;
+    selected: Set<string>;
+    customInput?: HTMLInputElement;
+    section: HTMLElement;
+  }>();
+
+  for (const question of data.questions.slice(0, 3)) {
+    const section = document.createElement("section");
+    section.className = "choice-card__question";
+    const prompt = document.createElement("div");
+    prompt.className = "choice-card__question-title";
+    prompt.textContent = question.question;
+    section.appendChild(prompt);
+    const selected = new Set<string>();
+    const state: {
+      question: AskQuestion;
+      selected: Set<string>;
+      customInput?: HTMLInputElement;
+      section: HTMLElement;
+    } = { question, selected, section };
+
+    if (question.type === "text") {
+      const input = document.createElement("input");
+      input.type = "text";
+      input.className = "choice-card__custom-input";
+      input.placeholder = question.freeTextPlaceholder || "请填写你的具体要求";
+      state.customInput = input;
+      section.appendChild(input);
+    } else {
+      const list = document.createElement("div");
+      list.className = "choice-card__list";
+      for (const option of question.options.slice(0, 4)) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "choice-card__option";
+        button.dataset.value = option.value;
+        const label = document.createElement("span");
+        label.className = "choice-card__option-label";
+        label.textContent = option.label;
+        button.appendChild(label);
+        if (option.description) {
+          const description = document.createElement("span");
+          description.className = "choice-card__option-desc";
+          description.textContent = option.description;
+          button.appendChild(description);
+        }
+        button.addEventListener("click", () => {
+          section.classList.remove("choice-card__question--invalid");
+          if (question.type === "single_select") {
+            selected.clear();
+            list.querySelectorAll(".choice-card__option").forEach((item) => {
+              item.classList.remove("choice-card__option--selected");
+            });
+          }
+          if (question.type === "multi_select" && selected.has(option.value)) {
+            selected.delete(option.value);
+            button.classList.remove("choice-card__option--selected");
+          } else {
+            selected.add(option.value);
+            button.classList.add("choice-card__option--selected");
+          }
+          if (option.value === "__custom__" && state.customInput) {
+            state.customInput.hidden = false;
+            state.customInput.focus();
+          } else if (question.type === "single_select" && state.customInput) {
+            state.customInput.hidden = true;
+            state.customInput.value = "";
+          }
+        });
+        list.appendChild(button);
+      }
+      section.appendChild(list);
+      if (question.options.some((option) => option.value === "__custom__")) {
+        const input = document.createElement("input");
+        input.type = "text";
+        input.hidden = true;
+        input.className = "choice-card__custom-input choice-card__custom-input--standalone";
+        input.placeholder = question.freeTextPlaceholder || "填写其他选择";
+        state.customInput = input;
+        section.appendChild(input);
+      }
+    }
+    questionStates.set(question.field, state);
+    card.appendChild(section);
+  }
+
+  const submit = document.createElement("button");
+  submit.type = "button";
+  submit.className = "choice-card__custom-btn choice-card__submit";
+  submit.textContent = "确认并继续";
+  submit.addEventListener("click", () => {
+    const answers: AskUserAnswer["answers"] = [];
+    let firstInvalid: HTMLElement | undefined;
+    for (const [field, state] of questionStates) {
+      state.section.classList.remove("choice-card__question--invalid");
+      const customText = state.customInput?.value.trim();
+      const selectedValues = [...state.selected].filter((value) => value !== "__custom__");
+      const usesCustom = state.question.type === "text" || state.selected.has("__custom__");
+      if ((usesCustom && !customText) || (!usesCustom && selectedValues.length === 0)) {
+        state.section.classList.add("choice-card__question--invalid");
+        firstInvalid ??= state.section;
+        continue;
+      }
+      answers.push({
+        field,
+        ...(selectedValues.length ? { selectedValues } : {}),
+        ...(usesCustom && customText ? { customText } : {}),
+      });
+    }
+    if (firstInvalid) {
+      firstInvalid.querySelector<HTMLElement>("input,button")?.focus();
+      return;
+    }
+    card.classList.add("choice-card--resolved");
+    card.querySelectorAll<HTMLButtonElement>("button").forEach((button) => {
+      button.disabled = true;
+    });
+    card.querySelectorAll<HTMLInputElement>("input").forEach((input) => {
+      input.disabled = true;
+    });
+    void window.choice?.resolve(data.id, {
+      requestId: data.id,
+      answers,
+    } satisfies AskUserAnswer);
+  });
+  card.appendChild(submit);
+  return card;
+}
+
 /** 構建權限審批卡片 DOM 元素（per-action 檔位下工具調用前彈出）。 */
 function buildApprovalCardEl(req: {
   id: string;
@@ -863,48 +1276,52 @@ function buildWeatherCardEl(data: Record<string, unknown>): HTMLElement {
   const humidity = Number(data.humidity ?? 0);
   const precip = Number(data.precip ?? 0);
   const pressure = Number(data.pressure ?? 0);
-  const icon = String(data.icon ?? "🌤️");
-  const windDir = String(data.windDir ?? "");
-  const windScale = String(data.windScale ?? "");
-  const visibility = data.visibility != null ? `${data.visibility}km` : "—";
-  const uv = String(data.uv ?? "—");
+  const icon = escapeHtml(String(data.icon ?? "🌤️"));
+  const windDir = escapeHtml(String(data.windDir ?? ""));
+  const windScale = escapeHtml(String(data.windScale ?? ""));
+  const visibility = data.visibility != null ? `${data.visibility}km` : "-";
+  const uv = escapeHtml(String(data.uv ?? "-"));
   const aqi = data.aqi != null ? Number(data.aqi) : null;
-  const aqiText = String(data.aqiText ?? "");
-  const kaomoji = aqi != null ? aqiKaomojiText(Number(aqi)) : "";
+  const aqiText = escapeHtml(String(data.aqiText ?? ""));
+  const kaomoji = aqi != null ? escapeHtml(aqiKaomojiText(Number(aqi))) : "";
+  const city = escapeHtml(String(data.city ?? ""));
+  const adm = escapeHtml(String(data.adm ?? ""));
+  const desc = escapeHtml(String(data.text ?? ""));
+  const source = escapeHtml(String(data.source ?? ""));
 
   card.innerHTML = `
     <div class="w-header">
       <div class="w-datetime"><span class="w-date">${dateStr}</span><span class="w-time">${timeStr} 更新</span></div>
-      <div class="w-loc"><span class="w-city">${String(data.city ?? "")}</span><span class="w-adm">${String(data.adm ?? "")}</span></div>
+      <div class="w-loc"><span class="w-city">${city}</span><span class="w-adm">${adm}</span></div>
     </div>
     <div class="w-main">
-      <div class="w-icon-box"><span class="w-icon">${icon}</span><span class="w-desc">${String(data.text ?? "")}</span></div>
+      <div class="w-icon-box"><span class="w-icon">${icon}</span><span class="w-desc">${desc}</span></div>
       <div class="w-temp-box">
         <div class="w-temp">${temp}<span class="w-deg">°</span></div>
         ${data.hi != null ? `<div class="w-hilo"><span class="w-hi">↑${data.hi}°</span><span class="w-sep">|</span><span class="w-lo">↓${data.lo}°</span></div>` : ""}
       </div>
     </div>
-    <div class="w-feels">體感 ${feelsLike}°C</div>
+    <div class="w-feels">体感 ${feelsLike}°C</div>
     <div class="w-quick">
-      <div class="w-qitem"><div class="w-qicon">💧</div><div class="w-qlabel">溼度</div><div class="w-qvalue">${humidity}%</div></div>
-      <div class="w-qitem"><div class="w-qicon">💨</div><div class="w-qlabel">風力</div><div class="w-qvalue">${windScale}</div></div>
+      <div class="w-qitem"><div class="w-qicon">💧</div><div class="w-qlabel">湿度</div><div class="w-qvalue">${humidity}%</div></div>
+      <div class="w-qitem"><div class="w-qicon">💨</div><div class="w-qlabel">风力</div><div class="w-qvalue">${windScale}</div></div>
       <div class="w-qitem"><div class="w-qicon">🌧️</div><div class="w-qlabel">降水</div><div class="w-qvalue">${precip}mm</div></div>
-      <div class="w-qitem"><div class="w-qicon">📊</div><div class="w-qlabel">氣壓</div><div class="w-qvalue">${pressure || "—"}</div></div>
+      <div class="w-qitem"><div class="w-qicon"><svg width="24" height="24" viewBox="0 0 48 48" fill="none" aria-hidden="true"><title>气压</title><path d="M4 42H44" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><rect x="8" y="28" width="6" height="14" fill="none" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/><rect x="21" y="18" width="6" height="24" fill="none" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/><rect x="34" y="6" width="6" height="36" fill="none" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/></svg></div><div class="w-qlabel">气压</div><div class="w-qvalue">${pressure || "-"}</div></div>
     </div>
     <button class="w-expand" type="button">查看更多 <span class="w-arrow">▼</span></button>
     <div class="w-details">
       <div class="w-detail-grid">
-        <div class="w-ditem"><span class="w-dicon">🌡️</span><div><div class="w-dlabel">體感溫度</div><div class="w-dvalue">${feelsLike}°C</div></div></div>
-        <div class="w-ditem"><span class="w-dicon">💨</span><div><div class="w-dlabel">風向風力</div><div class="w-dvalue">${windDir} ${windScale}</div></div></div>
-        <div class="w-ditem"><span class="w-dicon">🔆</span><div><div class="w-dlabel">紫外線</div><div class="w-dvalue">${uv}</div></div></div>
-        <div class="w-ditem"><span class="w-dicon">👁️</span><div><div class="w-dlabel">能見度</div><div class="w-dvalue">${visibility}</div></div></div>
-        ${aqi != null ? `<div class="w-ditem"><span class="w-dicon">🌿</span><div><div class="w-dlabel">空氣質量</div><div class="w-dvalue">${aqi} ${aqiText} <span class="w-kaomoji">${kaomoji}</span></div></div></div>` : ""}
+        <div class="w-ditem"><span class="w-dicon">🌡️</span><div><div class="w-dlabel">体感温度</div><div class="w-dvalue">${feelsLike}°C</div></div></div>
+        <div class="w-ditem"><span class="w-dicon">💨</span><div><div class="w-dlabel">风向风力</div><div class="w-dvalue">${windDir} ${windScale}</div></div></div>
+        <div class="w-ditem"><span class="w-dicon">🔆</span><div><div class="w-dlabel">紫外线</div><div class="w-dvalue">${uv}</div></div></div>
+        <div class="w-ditem"><span class="w-dicon">👁️</span><div><div class="w-dlabel">能见度</div><div class="w-dvalue">${visibility}</div></div></div>
+        ${aqi != null ? `<div class="w-ditem"><span class="w-dicon">🌿</span><div><div class="w-dlabel">空气质量</div><div class="w-dvalue">${aqi} ${aqiText} <span class="w-kaomoji">${kaomoji}</span></div></div></div>` : ""}
       </div>
     </div>
-    <div class="w-source"><span>${icon} ${String(data.source ?? "")}</span><span>${timeStr} 更新</span></div>
+    <div class="w-source"><span>${icon} ${source}</span><span>${timeStr} 更新</span></div>
   `;
 
-  // 展開按鈕點擊切換
+  // 展开按钮点击切换
   const expandBtn = card.querySelector(".w-expand") as HTMLButtonElement | null;
   if (expandBtn) {
     expandBtn.addEventListener("click", (e) => {
@@ -913,6 +1330,64 @@ function buildWeatherCardEl(data: Record<string, unknown>): HTMLElement {
     });
   }
 
+  return card;
+}
+
+function buildMusicCardEl(data: MusicCardData): HTMLElement {
+  const card = document.createElement("div");
+  card.className = "music-agui-card";
+
+  const header = document.createElement("div");
+  header.className = "music-agui-card__header";
+  const title = document.createElement("strong");
+  title.textContent = data.source === "daily_recommendation" ? "今日推荐" : "歌曲候选";
+  const badge = document.createElement("span");
+  badge.textContent = "网易云音乐";
+  header.append(title, badge);
+  card.appendChild(header);
+
+  data.tracks.forEach((track, index) => {
+    const row = document.createElement("div");
+    row.className = "music-agui-card__track";
+
+    const order = document.createElement("span");
+    order.className = "music-agui-card__order";
+    order.textContent = String(index + 1);
+    const meta = document.createElement("div");
+    meta.className = "music-agui-card__meta";
+    const name = document.createElement("strong");
+    name.textContent = track.name;
+    const detail = document.createElement("span");
+    detail.textContent = [track.artists.join(" / "), track.album].filter(Boolean).join(" · ");
+    meta.append(name, detail);
+
+    const play = document.createElement("button");
+    play.type = "button";
+    play.className = "music-agui-card__play";
+    play.textContent = "播放";
+    play.setAttribute("aria-label", `播放 ${track.name}`);
+    play.addEventListener("click", async () => {
+      if (!window.music) return;
+      play.disabled = true;
+      const original = play.textContent;
+      try {
+        const feedback = await requestTrackPlayback(window.music, track);
+        play.textContent = feedback.kind === "ok" ? "已发送" : "不可用";
+        play.title = feedback.message;
+      } catch (err) {
+        play.textContent = "失败";
+        play.title = err instanceof Error ? err.message : String(err);
+      } finally {
+        window.setTimeout(() => {
+          play.disabled = false;
+          play.textContent = original;
+        }, 1800);
+      }
+    });
+
+    row.append(order, meta, play);
+    card.appendChild(row);
+  });
   return card;
 }
 
@@ -944,82 +1419,176 @@ function setAvatar(slot: HTMLElement, role: Role): void {
   slot.appendChild(img);
 }
 
-function buildCodexImageHandoff(request: string): string | null {
-  const cleanRequest = request.replace(/\[sticker:[^\]]+\]/g, "").trim();
-  if (!cleanRequest) return null;
-
-  const actionPattern = /(幫我|請|想要|可以|能不能|替我|給我|來一張|做一張|生成|產生|畫|繪製|製作)/i;
-  const imagePattern = /(圖片|照片|插畫|圖像|繪圖|桌布|壁紙|頭像|立繪|角色圖|anime|image|photo|illustration)/i;
-  if (!actionPattern.test(cleanRequest) || !imagePattern.test(cleanRequest)) return null;
-
-  return [
-    "請使用 imagegen 技能直接生成圖片。",
-    "",
-    `原始要求：${cleanRequest}`,
-    "",
-    "請保留使用者指定的人物、服裝、姿勢、場景、風格與畫面比例；未指定的細節可合理補全。",
-    "若要求涉及既有角色，請以使用者在對話中提供的參考圖為準；如參考圖未隨訊息帶入，提醒使用者重新附上。",
-    "生成完成後直接顯示圖片，並提供可下載的檔案連結。",
-  ].join("\n");
+function createMessageBubble(text?: string): HTMLElement {
+  const item = document.createElement("div");
+  item.className = "msg__bubble";
+  item.hidden = false;
+  if (text) item.textContent = text;
+  return item;
 }
 
-function createCodexImageHandoffCard(request: string): HTMLElement | null {
-  const handoffPrompt = buildCodexImageHandoff(request);
-  if (!handoffPrompt) return null;
+function getLastBubbleForMessage(messageId: string): HTMLElement | null {
+  const row = messagesEl.querySelector(`[data-msg-id="${messageId}"]`);
+  if (!row) return null;
+  const bubbles = row.querySelectorAll<HTMLElement>(".msg__bubble");
+  return bubbles.length > 0 ? bubbles[bubbles.length - 1] : null;
+}
 
-  const card = document.createElement("section");
-  card.className = "codex-handoff";
-  card.setAttribute("aria-label", "交給 Codex 生成圖片");
+function appendBubbleForMessage(messageId: string): HTMLElement | null {
+  const row = messagesEl.querySelector(`[data-msg-id="${messageId}"]`);
+  const body = row?.querySelector(".msg__body");
+  if (!body) return null;
+  const bubble = createMessageBubble();
+  bubble.hidden = true;
+  body.appendChild(bubble);
+  return bubble;
+}
 
-  const orbit = document.createElement("div");
-  orbit.className = "codex-handoff__orbit";
-  orbit.setAttribute("aria-hidden", "true");
-  orbit.innerHTML = "<span>CY</span><i></i><b>✦</b>";
-
-  const copy = document.createElement("div");
-  copy.className = "codex-handoff__copy";
-  const eyebrow = document.createElement("span");
-  eyebrow.className = "codex-handoff__eyebrow";
-  eyebrow.textContent = "IMAGE HANDOFF";
-  const title = document.createElement("strong");
-  title.textContent = "交給 Codex 繪製";
-  const description = document.createElement("small");
-  description.textContent = "複製完整委託後，貼到目前的 Codex 對話即可生成。";
-  copy.append(eyebrow, title, description);
-
-  const button = document.createElement("button");
-  button.type = "button";
-  button.className = "codex-handoff__button";
-  button.textContent = "複製給 Codex";
-  button.addEventListener("click", () => {
-    void copyTextToClipboard(handoffPrompt).then((ok) => {
-      if (!ok) {
-        button.textContent = "複製失敗，請重試";
-        button.classList.add("is-error");
-        return;
+function renderMessageAttachments(body: HTMLElement, attachments: MessageAttachment[] | undefined): void {
+  if (!attachments || attachments.length === 0) return;
+  const list = document.createElement("div");
+  list.className = "msg__attachments";
+  for (const att of attachments) {
+    if (att.kind === "image") {
+      const card = document.createElement("div");
+      card.className = "msg__image-card";
+      const preview = document.createElement("div");
+      preview.className = "msg__image-preview";
+      if (att.previewUrl) {
+        const img = document.createElement("img");
+        img.src = att.previewUrl;
+        img.alt = att.name;
+        img.draggable = false;
+        img.addEventListener("load", () => {
+          messagesEl.scrollTop = messagesEl.scrollHeight;
+        });
+        img.addEventListener("error", () => {
+          preview.classList.add("is-error");
+          preview.textContent = "图片无法预览";
+        });
+        preview.appendChild(img);
+      } else {
+        preview.classList.add("is-error");
+        preview.textContent = "图片无法预览";
       }
-      button.textContent = "已複製 · 到 Codex 貼上";
-      button.classList.remove("is-error");
-      button.classList.add("is-copied");
-      window.setTimeout(() => {
-        button.textContent = "複製給 Codex";
-        button.classList.remove("is-copied");
-      }, 3200);
-    });
-  });
-
-  card.append(orbit, copy, button);
-  return card;
+      const name = document.createElement("div");
+      name.className = "msg__image-name";
+      name.textContent = att.name;
+      card.appendChild(preview);
+      card.appendChild(name);
+      list.appendChild(card);
+    } else if (att.kind === "document") {
+      const card = document.createElement("div");
+      card.className = `msg__document-card msg__document-card--${att.status}`;
+      const icon = document.createElement("div");
+      icon.className = "msg__document-icon";
+      icon.textContent = "📄";
+      const meta = document.createElement("div");
+      meta.className = "msg__document-meta";
+      const name = document.createElement("div");
+      name.className = "msg__document-name";
+      name.textContent = att.name;
+      const status = document.createElement("div");
+      status.className = "msg__document-status";
+      status.textContent = att.status === "done"
+        ? (att.processedKind === "indexed" ? `已索引 ${att.chunks ?? 0} 段` : "已处理")
+        : getDocumentIndexStatusLabel(att.status);
+      meta.appendChild(name);
+      meta.appendChild(status);
+      card.appendChild(icon);
+      card.appendChild(meta);
+      if (canCancelDocumentIndexStatus(att.status) && att.jobId) {
+        const cancel = document.createElement("button");
+        cancel.type = "button";
+        cancel.className = "msg__document-cancel";
+        cancel.textContent = "×";
+        cancel.title = "取消处理";
+        cancel.setAttribute("aria-label", "取消处理");
+        cancel.addEventListener("click", () => {
+          void window.chat?.cancelDocumentIndex(att.jobId!);
+        });
+        card.appendChild(cancel);
+      }
+      list.appendChild(card);
+    } else {
+      continue;
+    }
+  }
+  if (list.childElementCount > 0) body.appendChild(list);
 }
 
-function render(): void {
-  // 空態：當前會話還沒有消息時（新建/全清）顯示"昔漣期待與你聊天哦 ✨"佔位
-  // thinking 狀態（昔漣主動開場/流式回覆中）也算有消息，膠囊應立即消失
+function updateDocumentAttachmentProgress(progress: DocumentIndexProgress): void {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const attachment = messages[index].attachments?.find((item): item is DocumentMessageAttachment =>
+      item.kind === "document"
+      && item.filePath === progress.filePath
+      && (!item.jobId || item.jobId === progress.jobId)
+    );
+    if (!attachment) continue;
+    attachment.jobId = progress.jobId;
+    attachment.status = progress.status;
+    attachment.reason = progress.reason;
+    if (typeof progress.totalChunks === "number") attachment.chunks = progress.totalChunks;
+    return;
+  }
+}
+
+window.chat?.onDocumentIndexProgress?.((progress) => {
+  updateDocumentAttachmentProgress(progress);
+  render();
+});
+
+let transientStatusEl: HTMLElement | null = null;
+
+function showTransientStatus(text: string): void {
+  if (!transientStatusEl) {
+    transientStatusEl = document.createElement("div");
+    transientStatusEl.className = "chat-transient-status";
+    const dots = document.createElement("span");
+    dots.className = "chat-transient-status__dots";
+    for (let i = 0; i < 3; i += 1) {
+      const dot = document.createElement("span");
+      dot.className = "thinking-dot";
+      dots.appendChild(dot);
+    }
+    const label = document.createElement("span");
+    label.className = "chat-transient-status__text";
+    transientStatusEl.appendChild(dots);
+    transientStatusEl.appendChild(label);
+    messagesEl.appendChild(transientStatusEl);
+  }
+  const label = transientStatusEl.querySelector(".chat-transient-status__text");
+  if (label) label.textContent = text;
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+
+function hideTransientStatus(): void {
+  transientStatusEl?.remove();
+  transientStatusEl = null;
+}
+
+function render(preserveScroll = false): void {
+  // 空态：当前会话还没有消息时（新建/全清）显示"昔涟期待与你聊天哦 ✨"占位
+  // thinking 状态（昔涟主动开场/流式回复中）也算有消息，胶囊应立即消失
   const emptyEl = document.getElementById("chat-empty");
-  const hasMessages = messages.some((m) => m.content.trim() || m.thinking);
+  const hasMessages = messages.some((m) =>
+    m.content.trim()
+    || m.thinking
+    || ((m.attachments?.length ?? 0) > 0)
+    || Boolean(m.sticker)
+    || Boolean(m.musicCard)
+  );
   if (emptyEl) emptyEl.toggleAttribute("hidden", hasMessages);
 
   messagesEl.replaceChildren();
+  if (sessionTailStart > 0) {
+    const loadEarlier = document.createElement("button");
+    loadEarlier.type = "button";
+    loadEarlier.className = "chat__load-earlier";
+    loadEarlier.textContent = "加载更早消息";
+    loadEarlier.addEventListener("click", () => void loadEarlierMessages());
+    messagesEl.appendChild(loadEarlier);
+  }
   for (const m of messages) {
     const row = document.createElement("div");
     row.className = `msg msg--${m.role}`;
@@ -1033,9 +1602,8 @@ function render(): void {
     const body = document.createElement("div");
     body.className = "msg__body";
 
-    const bubble = document.createElement("div");
-    bubble.className = "msg__bubble";
-    bubble.hidden = false;
+    const bubbles: HTMLElement[] = [];
+    const bubble = createMessageBubble();
     if (m.thinking) {
       bubble.classList.add("msg__bubble--thinking");
       const dot1 = document.createElement("span");
@@ -1047,31 +1615,33 @@ function render(): void {
       bubble.appendChild(dot1);
       bubble.appendChild(dot2);
       bubble.appendChild(dot3);
+      bubbles.push(bubble);
     } else if (m.role === "user") {
-      // 用戶消息：去掉 [sticker:xxx] 標記後顯示純文字
+      // 用户消息：去掉 [sticker:xxx] 标记后显示纯文字
       const cleanText = m.content.replace(/\[sticker:[^\]]+\]/g, "").trim();
       if (cleanText) bubble.textContent = cleanText;
-      else bubble.hidden = true; // 純表情包消息不顯示氣泡
+      else bubble.hidden = true; // 纯表情包消息不显示气泡
+      if (!bubble.hidden) bubbles.push(bubble);
     } else {
-      // 昔漣消息：檢測是否包含 HTML 互動網頁或小遊戲
-      let textContent = m.content;
-      let htmlCode = "";
-      
-      const blockMatch = m.content.match(/```html\s*([\s\S]*?)```/i);
-      if (blockMatch) {
-        htmlCode = blockMatch[1];
-        textContent = m.content.replace(blockMatch[0], "\n\n*(昔漣已為您編寫並加載了以下互動小遊戲，可在下方直接運行遊玩哦 🎮)*\n\n");
-      } else {
-        const rawHtmlStart = m.content.indexOf("<!DOCTYPE html>");
-        if (rawHtmlStart !== -1) {
-          htmlCode = m.content.slice(rawHtmlStart);
-          textContent = m.content.slice(0, rawHtmlStart) + "\n\n*(昔漣已為您編寫並加載了以下互動小遊戲，可在下方直接運行遊玩哦 🎮)*\n\n";
+      const currentMode = isChatMode() ? "chat" : "work";
+      const segments = getAssistantReplyBubbleTexts(m.content, currentMode, segmentedOutputMode, {
+        preserveEmpty: !!m.transient,
+      });
+      for (const segment of segments) {
+        const text = segment.trim();
+        if (text || m.transient) {
+          const bubble = createMessageBubble();
+          if (m.transient) {
+            // 流式期：纯文本，由 StreamingMarkdownSession 管理后续 DOM
+            bubble.textContent = text;
+          } else {
+            // 终态：先放纯文本占位，标记为 pending，由历史渐进队列升级为 Markdown
+            bubble.textContent = text;
+            bubble.dataset.mdPending = "true";
+          }
+          bubbleRawText.set(bubble, text);
+          bubbles.push(bubble);
         }
-      }
-      
-      bubble.textContent = textContent;
-      if (htmlCode) {
-        (m as any).htmlCodeForSandbox = htmlCode;
       }
     }
 
@@ -1079,76 +1649,8 @@ function render(): void {
     time.className = "msg__time";
     time.textContent = formatTime(m.at);
 
-    if (!bubble.hidden) body.appendChild(bubble);
-
-    if (m.role === "user" && !m.thinking) {
-      const handoffCard = createCodexImageHandoffCard(m.content);
-      if (handoffCard) body.appendChild(handoffCard);
-    }
-
-    // 如果消息帶有互動網頁或小遊戲，在氣泡下方渲染沙盒卡片
-    if ((m as any).htmlCodeForSandbox) {
-      const htmlCode = (m as any).htmlCodeForSandbox;
-      const sandboxCard = document.createElement("div");
-      sandboxCard.className = "sandbox-card";
-      
-      const header = document.createElement("div");
-      header.className = "sandbox-card__header";
-      header.innerHTML = `
-        <div class="sandbox-card__title">
-          <span class="sandbox-card__icon">🎮</span>
-          <span>昔漣的互動沙盒</span>
-        </div>
-        <div class="sandbox-card__actions">
-          <button type="button" class="sandbox-tab-btn is-active" data-tab="play">運行</button>
-          <button type="button" class="sandbox-tab-btn" data-tab="code">代碼</button>
-        </div>
-      `;
-      
-      const contentArea = document.createElement("div");
-      contentArea.className = "sandbox-card__content";
-      
-      const iframeContainer = document.createElement("div");
-      iframeContainer.className = "sandbox-play-container";
-      const sandboxIframe = document.createElement("iframe");
-      sandboxIframe.className = "sandbox-iframe";
-      sandboxIframe.sandbox.add("allow-scripts");
-      sandboxIframe.srcdoc = htmlCode;
-      iframeContainer.appendChild(sandboxIframe);
-      
-      const codeContainer = document.createElement("div");
-      codeContainer.className = "sandbox-code-container is-hidden";
-      const pre = document.createElement("pre");
-      const codeEl = document.createElement("code");
-      codeEl.textContent = htmlCode;
-      pre.appendChild(codeEl);
-      codeContainer.appendChild(pre);
-      
-      contentArea.appendChild(iframeContainer);
-      contentArea.appendChild(codeContainer);
-      
-      sandboxCard.appendChild(header);
-      sandboxCard.appendChild(contentArea);
-      
-      const tabs = header.querySelectorAll(".sandbox-tab-btn");
-      tabs.forEach((tab) => {
-        tab.addEventListener("click", () => {
-          tabs.forEach(t => t.classList.remove("is-active"));
-          tab.classList.add("is-active");
-          
-          const tabType = (tab as HTMLElement).dataset.tab;
-          if (tabType === "play") {
-            iframeContainer.classList.remove("is-hidden");
-            codeContainer.classList.add("is-hidden");
-          } else {
-            iframeContainer.classList.add("is-hidden");
-            codeContainer.classList.remove("is-hidden");
-          }
-        });
-      });
-      
-      body.appendChild(sandboxCard);
-    }
+    for (const item of bubbles) body.appendChild(item);
+    if (m.role === "user") renderMessageAttachments(body, m.attachments);
 
     if (m.sticker) {
       const stickerSrc = getStickerSrc(m.sticker);
@@ -1156,10 +1658,10 @@ function render(): void {
         const sticker = document.createElement("img");
         sticker.className = "msg__sticker";
         sticker.src = stickerSrc;
-        sticker.alt = m.role === "user" ? "用戶表情" : "昔漣表情";
+        sticker.alt = m.role === "user" ? "用户表情" : "昔涟表情";
         sticker.draggable = false;
-        // <img> 高度異步加載，render() 末尾的滾動會在圖片撐開前就執行，
-        // 導致 sticker 底部被輸入框擋住。加載完成後再補一次滾到底。
+        // <img> 高度异步加载，render() 末尾的滚动会在图片撑开前就执行，
+        // 导致 sticker 底部被输入框挡住。加载完成后再补一次滚到底。
         sticker.addEventListener("load", () => {
           messagesEl.scrollTop = messagesEl.scrollHeight;
         });
@@ -1167,27 +1669,30 @@ function render(): void {
       }
     }
 
-    // actions 行：喇叭 / 複製 / 時間三個控件水平排在氣泡下方。
-    // 沒有可顯示控件的消息（純表情包 / thinking 空內容）跳過整行。
+    if (m.musicCard) body.appendChild(buildMusicCardEl(m.musicCard));
+
+    // actions 行：喇叭 / 复制 / 时间三个控件水平排在气泡下方。
+    // 流式中的 transient 消息会继续追加新气泡；此时先隐藏 actions，
+    // 避免时间戳被夹在第一段气泡和后续气泡之间。
     const actions = document.createElement("div");
     actions.className = "msg__actions";
 
     let hasActionItem = false;
 
-    // model 消息加 SVG 朗讀按鈕（thinking 中的不顯示）
-    if (m.role === "model" && !m.thinking && m.content.trim()) {
+    // model 消息加 SVG 朗读按钮（thinking 中的不显示）
+    if (!m.transient && m.role === "model" && !m.thinking && m.content.trim()) {
       const speakBtn = document.createElement("button");
       speakBtn.type = "button";
       speakBtn.className = "msg__speak";
-      speakBtn.title = "朗讀";
-      speakBtn.setAttribute("aria-label", "朗讀這條消息");
-      // 用 SVG 而不是 emoji，顏色隨主題走，播放時切到波形版
+      speakBtn.title = "朗读";
+      speakBtn.setAttribute("aria-label", "朗读这条消息");
+      // 用 SVG 而不是 emoji，颜色随主题走，播放时切到波形版
       speakBtn.innerHTML = SPEAK_ICON_IDLE;
-      // 點擊邏輯：正在播放則停止，否則開始朗讀（避免重疊）
+      // 点击逻辑：正在播放则停止，否则开始朗读（避免重叠）
       speakBtn.addEventListener("click", () => {
-        console.log("[TTS] 喇叭點擊, currentTtsAudio=", currentTtsAudio ? "有" : "無");
+        console.log("[TTS] 喇叭点击, currentTtsAudio=", currentTtsAudio ? "有" : "无");
         if (currentSpeakingMsgId === m.id) {
-          // 當前消息正在播放 → 停止並復位 UI
+          // 当前消息正在播放 → 停止并复位 UI
           stopCurrentTts();
           setSpeakingMsgId(null);
         } else {
@@ -1198,14 +1703,14 @@ function render(): void {
       hasActionItem = true;
     }
 
-    // 複製按鈕：user / model 都有，thinking / 空內容 / 純表情包跳過
-    //   user 複製時去掉 [sticker:xxx] 標記，model 直接複製 content
-    if (!m.thinking && m.content.trim()) {
+    // 复制按钮：user / model 都有，thinking / 空内容 / 纯表情包跳过
+    //   user 复制时去掉 [sticker:xxx] 标记，model 直接复制 content
+    if (!m.transient && !m.thinking && m.content.trim()) {
       const copyBtn = document.createElement("button");
       copyBtn.type = "button";
       copyBtn.className = "msg__copy";
-      copyBtn.title = "複製";
-      copyBtn.setAttribute("aria-label", "複製這條消息");
+      copyBtn.title = "复制";
+      copyBtn.setAttribute("aria-label", "复制这条消息");
       copyBtn.innerHTML = COPY_ICON_IDLE;
       copyBtn.addEventListener("click", () => {
         const text = m.role === "user"
@@ -1231,9 +1736,12 @@ function render(): void {
       hasActionItem = true;
     }
 
-    // 時間戳總是顯示；哪怕只有一個時間，也用 actions 行保持視覺一致
-    actions.appendChild(time);
-    hasActionItem = true;
+    // 时间戳总是显示；哪怕只有一个时间，也用 actions 行保持视觉一致。
+    // 但流式 transient 阶段先不显示，等最终 render 后再出现到整条消息底部。
+    if (!m.transient) {
+      actions.appendChild(time);
+      hasActionItem = true;
+    }
 
     if (hasActionItem) body.appendChild(actions);
 
@@ -1241,7 +1749,23 @@ function render(): void {
     row.appendChild(body);
     messagesEl.appendChild(row);
   }
-  messagesEl.scrollTop = messagesEl.scrollHeight;
+  if (!preserveScroll) messagesEl.scrollTop = messagesEl.scrollHeight;
+
+  // 历史消息渐进渲染：纯文本占位 -> Markdown HTML
+  scheduleHistoryRender();
+}
+
+let schedulerEventsOff: (() => void) | null = null;
+const activeAguiOffs = new Set<() => void>();
+
+function registerAguiListener(callback: (event: unknown) => void): () => void {
+  const off = window.agui!.onEvent(callback);
+  const release = () => {
+    if (!activeAguiOffs.delete(release)) return;
+    off();
+  };
+  activeAguiOffs.add(release);
+  return release;
 }
 
 function installSchedulerEventListener(): void {
@@ -1270,7 +1794,8 @@ function installSchedulerEventListener(): void {
     render();
   };
 
-  window.schedulerEvents.onEvent((rawEvent) => {
+  schedulerEventsOff?.();
+  schedulerEventsOff = window.schedulerEvents.onEvent((rawEvent) => {
     const event = rawEvent as AguiBaseEvent;
     if (event.type === "CUSTOM" && event.name === "scheduler.started") {
       const value = event.value as { taskId?: string; title?: string; firedAt?: string; runId?: string } | undefined;
@@ -1318,7 +1843,9 @@ function installSchedulerEventListener(): void {
       streams.delete(runKey);
     } else if (event.type === "RUN_ERROR") {
       msg.thinking = false;
-      msg.content = "定時任務執行失敗：" + (event.error ?? event.content ?? "未知錯誤");
+      // 优先读 upstream 规范的 `message` 字段，兜底兼容旧的 `error`/`content`
+      const rawMessage = event.message ?? event.error ?? event.content ?? "未知错误";
+      msg.content = "定时任务执行失败：" + classifyAgentError(event.code, rawMessage);
       render();
       void saveSession();
       streams.delete(runKey);
@@ -1357,6 +1884,10 @@ interface TtsSettings {
   ttsMimoKey: string;
   ttsMimoVoiceAudioPath: string;
   ttsMimoStylePrompt: string;
+  // Mossland（api.mosi.cn）
+  ttsMosslandKey: string;
+  ttsMosslandVoiceId: string;
+  ttsMosslandModel: string;
   // MiniMax 流式播放
   ttsStreaming: boolean;
 }
@@ -1412,16 +1943,17 @@ declare global {
   }
 }
 
-// 當前正在播放的 TTS 音頻實例（全局唯一）。點新朗讀前先停這個，避免重疊。
+// 当前正在播放的 TTS 音频实例（全局唯一）。点新朗读前先停这个，避免重叠。
 let currentTtsAudio: HTMLAudioElement | null = null;
-// 當前正在朗讀的消息 ID，用於給對應消息 row 加 .is-speaking class 並切換喇叭圖標。
-// null 表示沒有正在播放。
+let currentTtsObjectUrl: string | null = null;
+// 当前正在朗读的消息 ID，用于给对应消息 row 加 .is-speaking class 并切换喇叭图标。
+// null 表示没有正在播放。
 let currentSpeakingMsgId: string | null = null;
 let speechToken = 0;
 let textMouthStarted = false;
 let ttsPlaybackSequence = 0;
 
-/** 複製文本到剪貼板，優先用現代 Clipboard API，失敗時回落到 textarea+execCommand。 */
+/** 复制文本到剪贴板，优先用现代 Clipboard API，失败时回落到 textarea+execCommand。 */
 async function copyTextToClipboard(text: string): Promise<boolean> {
   try {
     if (navigator.clipboard?.writeText) {
@@ -1490,19 +2022,29 @@ function stopLive2dMouth(): void {
 }
 
 function startTextModeMouth(): void {
-  if (textMouthStarted || isStudyMode() || isGameMode()) return;
+  if (textMouthStarted) return;
   textMouthStarted = true;
   window.live2dSpeech?.startMouth(TEXT_MODE_MOUTH_DURATION_MS);
 }
 
-/** 停止當前正在播放的 TTS 音頻（如果有）。只停 audio，UI 復位由調用方決定。 */
+/** 停止当前正在播放的 TTS 音频（如果有）。只停 audio，UI 复位由调用方决定。 */
 function stopCurrentTts(): void {
   if (currentTtsAudio) {
-    currentTtsAudio.pause();
-    currentTtsAudio.currentTime = 0;
-    currentTtsAudio = null;
+    releaseCurrentTtsAudio(currentTtsAudio);
   }
   stopLive2dMouth();
+}
+
+function releaseCurrentTtsAudio(audio: HTMLAudioElement): void {
+  if (currentTtsAudio !== audio) return;
+  currentTtsAudio = null;
+  const url = currentTtsObjectUrl;
+  currentTtsObjectUrl = null;
+  audio.pause();
+  audio.currentTime = 0;
+  audio.removeAttribute("src");
+  audio.load();
+  if (url) URL.revokeObjectURL(url);
 }
 
 async function loadTtsSettings(): Promise<TtsSettings | null> {
@@ -1529,6 +2071,9 @@ async function loadTtsSettings(): Promise<TtsSettings | null> {
       ttsMimoKey: String(raw.ttsMimoKey ?? ""),
       ttsMimoVoiceAudioPath: String(raw.ttsMimoVoiceAudioPath ?? ""),
       ttsMimoStylePrompt: String(raw.ttsMimoStylePrompt ?? ""),
+      ttsMosslandKey: String(raw.ttsMosslandKey ?? ""),
+      ttsMosslandVoiceId: String(raw.ttsMosslandVoiceId ?? ""),
+      ttsMosslandModel: String(raw.ttsMosslandModel ?? "moss-tts"),
       ttsStreaming: raw.ttsStreaming !== false,
     };
   } catch {
@@ -1580,14 +2125,14 @@ function playTtsBase64(
   audio.preload = "auto";
   audio.load();
   currentTtsAudio = audio;
-  // 標記喇叭 UI 進入播放態（即使沒傳 msgId 也清掉舊的）
+  currentTtsObjectUrl = url;
+  // 标记喇叭 UI 进入播放态（即使没传 msgId 也清掉旧的）
   setSpeakingMsgId(msgId ?? null);
 
   audio.onended = () => {
-    URL.revokeObjectURL(url);
-    if (currentTtsAudio === audio) currentTtsAudio = null;
+    releaseCurrentTtsAudio(audio);
     if (speechToken === token) stopLive2dMouth();
-    // 復位喇叭 UI：僅噹噹前記錄的就是這條消息才清，避免覆蓋後啟動的
+    // 复位喇叭 UI：仅当当前记录的就是这条消息才清，避免覆盖后启动的
     if (msgId === undefined || currentSpeakingMsgId === msgId) {
       setSpeakingMsgId(null);
     }
@@ -1598,9 +2143,8 @@ function playTtsBase64(
     try {
       await audio.play();
     } catch (err) {
-      console.warn("[TTS] 播放失敗:", err);
-      URL.revokeObjectURL(url);
-      if (currentTtsAudio === audio) currentTtsAudio = null;
+      console.warn("[TTS] 播放失败:", err);
+      releaseCurrentTtsAudio(audio);
       if (speechToken === token) stopLive2dMouth();
       if (msgId === undefined || currentSpeakingMsgId === msgId) {
         setSpeakingMsgId(null);
@@ -1637,6 +2181,8 @@ async function streamAndPlayCached(
   let sourceBuffer: SourceBuffer | null = null;
   let audioEl: HTMLAudioElement | null = null;
   const chunkQueue: Uint8Array[] = [];
+  const maxQueuedAudioBytes = 12 * 1024 * 1024;
+  let queuedAudioBytes = 0;
   let ended = false;
   let resolvedCacheKey: string | null = null;
   let pollTimer: ReturnType<typeof setInterval> | null = null;
@@ -1653,6 +2199,8 @@ async function streamAndPlayCached(
     if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
     offChunk?.(); offEnd?.(); offErr?.();
     offChunk = offEnd = offErr = null;
+    chunkQueue.length = 0;
+    queuedAudioBytes = 0;
   };
 
   const finishStream = (result: { cacheKey: string } | null) => {
@@ -1680,29 +2228,31 @@ async function streamAndPlayCached(
         finishStream(null);
         return;
       }
-      // append 隊列裡的 chunk（如果 sourceBuffer 空閒）
+      // append 队列里的 chunk（如果 sourceBuffer 空闲）
       if (sourceBuffer && !sourceBuffer.updating && chunkQueue.length > 0) {
         const chunk = chunkQueue.shift()!;
+        queuedAudioBytes -= chunk.byteLength;
         try {
           sourceBuffer.appendBuffer(chunk);
         } catch {
           chunkQueue.unshift(chunk);
+          queuedAudioBytes += chunk.byteLength;
         }
       }
-      // 第一塊 append 成功後（buffered 有數據）開始播放
+      // 第一块 append 成功后（buffered 有数据）开始播放
       if (!startedPlayback && sourceBuffer && sourceBuffer.buffered.length > 0 && audioEl && audioEl.paused) {
         startedPlayback = true;
         void audioEl.play().then(() => {
-          console.log(`[TTS-Stream] play() 開始 +${Math.round(performance.now() - t0)}ms`);
+          console.log(`[TTS-Stream] play() 开始 +${Math.round(performance.now() - t0)}ms`);
           if (speechToken !== token) return;
           const estDurationMs = Math.max(2000, Array.from(text).length * 180);
           window.live2dSpeech?.startMouth(estDurationMs);
         }).catch((err) => {
-          console.warn("[TTS-Stream] play 失敗:", err);
+          console.warn("[TTS-Stream] play 失败:", err);
           markPlaybackEnded();
         });
       }
-      // 結束且隊列空 → endOfStream
+      // 结束且队列空 → endOfStream
       if (ended && chunkQueue.length === 0 && sourceBuffer && !sourceBuffer.updating && !done) {
         done = true;
         try { mediaSource?.endOfStream(); } catch { /* */ }
@@ -1730,16 +2280,24 @@ async function streamAndPlayCached(
     });
     console.log(`[TTS-Stream] streamStart 返回 +${Math.round(performance.now() - t0)}ms started=${startResult.started} cached=${startResult.cached}`);
 
-    // 註冊監聽（只註冊一次）
+    // 注册监听（只注册一次）
     let firstChunkAt = 0;
     offChunk = window.tts.onAudioChunk((payload) => {
       if (speechToken !== token) return;
       if (!firstChunkAt) {
         firstChunkAt = performance.now();
-        console.log(`[TTS-Stream] 第一個 chunk +${Math.round(firstChunkAt - t0)}ms`);
+        console.log(`[TTS-Stream] 第一个 chunk +${Math.round(firstChunkAt - t0)}ms`);
       }
       const bytes = Uint8Array.from(atob(payload.base64), (c) => c.charCodeAt(0));
+      if (queuedAudioBytes + bytes.byteLength > maxQueuedAudioBytes) {
+        console.warn("[TTS-Stream] 音频队列超过 12MB，停止本轮流式播放");
+        cleanup();
+        if (audioEl) releaseCurrentTtsAudio(audioEl);
+        finishStream(null);
+        return;
+      }
       chunkQueue.push(bytes);
+      queuedAudioBytes += bytes.byteLength;
     });
     offEnd = window.tts.onStreamEnd((payload) => {
       ended = true;
@@ -1753,17 +2311,17 @@ async function streamAndPlayCached(
       try { mediaSource?.endOfStream(); } catch { /* */ }
     });
 
-    // 設置 MediaSource + Audio
+    // 设置 MediaSource + Audio
     mediaSource = new MediaSource();
     const url = URL.createObjectURL(mediaSource);
     audioEl = new Audio(url);
     currentTtsAudio = audioEl;
+    currentTtsObjectUrl = url;
 
-    window.live2dSpeech?.prepare();  // stopLive2dMouth 已在開頭 stopCurrentTts 裡調過
+    window.live2dSpeech?.prepare();  // stopLive2dMouth 已在开头 stopCurrentTts 里调过
 
     audioEl.onended = () => {
-      URL.revokeObjectURL(url);
-      if (currentTtsAudio === audioEl) currentTtsAudio = null;
+      releaseCurrentTtsAudio(audioEl!);
       if (speechToken === token) stopLive2dMouth();
       markPlaybackEnded();
     };
@@ -1817,6 +2375,7 @@ async function synthesizeAndPlayCached(
     const isGptsovitsCache = existing.ttsCacheKey.startsWith("gptsovits-");
     const isCustomCloudCache = existing.ttsCacheKey.startsWith("custom-cloud-");
     const isMimoCache = existing.ttsCacheKey.startsWith("mimo-");
+    const isMosslandCache = existing.ttsCacheKey.startsWith("mossland-");
     try {
       if (isGptsovitsCache) {
         const result = await window.tts.synthesizeCachedGptsovits({
@@ -1859,12 +2418,26 @@ async function synthesizeAndPlayCached(
           expectedCacheKey: existing.ttsCacheKey,
         });
         if (result.cached) {
-          console.log("[TTS] mimo 緩存命中，直接播放");
+          console.log("[TTS] mimo 缓存命中，直接播放");
+          playTtsBase64(result.base64, result.format, msgId);
+          return { cacheKey: result.cacheKey };
+        }
+      } else if (isMosslandCache) {
+        const result = await window.tts.synthesizeCachedMossland({
+          apiKey: "cache-only",
+          voiceId: "cache-only",
+          text,
+          model: "moss-tts",
+          format: "mp3",
+          expectedCacheKey: existing.ttsCacheKey,
+        });
+        if (result.cached) {
+          console.log("[TTS] mossland 缓存命中，直接播放");
           playTtsBase64(result.base64, result.format, msgId);
           return { cacheKey: result.cacheKey };
         }
       } else {
-        // minimax 緩存回聽（保持原邏輯）
+        // minimax 缓存回听（保持原逻辑）
         const result = await window.tts.synthesizeCached({
           apiKey: "cache-only",
           voiceId: "cache-only",
@@ -1980,6 +2553,30 @@ async function synthesizeAndPlayCached(
       return { cacheKey: result.cacheKey };
     } catch (err) {
       console.warn("[TTS] 小米 MiMo 合成失敗:", err);
+      return null;
+    }
+  }
+
+  if (settings.ttsEngine === "mossland") {
+    if (!settings.ttsMosslandKey || !settings.ttsMosslandVoiceId) {
+      console.warn("[TTS] 缺少 Mossland API Key 或 voice_id");
+      return null;
+    }
+    try {
+      const result = await window.tts.synthesizeCachedMossland({
+        apiKey: settings.ttsMosslandKey,
+        voiceId: settings.ttsMosslandVoiceId,
+        text,
+        speed: settings.ttsSpeed,
+        volume: settings.ttsVolume,
+        model: settings.ttsMosslandModel || "moss-tts",
+        format: "mp3",
+        expectedCacheKey: existing?.ttsCacheKey,
+      });
+      playTtsBase64(result.base64, result.format, msgId);
+      return { cacheKey: result.cacheKey };
+    } catch (err) {
+      console.warn("[TTS] Mossland 合成失败:", err);
       return null;
     }
   }
@@ -2181,137 +2778,75 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && !stickerPicker.hidden) hideStickerPicker();
 });
 
-function buildModelMessages(): Array<{ role: "user" | "model"; content: string }> {
+function buildModelMessages(): Array<{ role: "user" | "model"; content: string; at?: number }> {
   return messages
-    .filter((message) => message.content.trim())
+    .filter((message) => !message.transient && (message.content.trim() || message.modelContext?.trim() || message.sticker))
     .slice(-16)
     .map((message) => ({
       role: message.role,
-      content: message.content.replace(/\[sticker:([^\]]+)\]/g, (_match, id) => {
+      at: Number.isFinite(message.at) ? message.at : undefined,
+      content: (message.content + (message.modelContext ? "\n\n" + message.modelContext : "")).replace(/\[sticker:([^\]]+)\]/g, (_match, id) => {
         const desc = getStickerDescription(id);
-        return `（用戶發送表情包：${desc}）`;
+        return `（用户发送表情包：${desc}）`;
       }),
     }));
 }
 
-function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const timer = window.setTimeout(() => reject(new Error(message)), timeoutMs);
-    promise
-      .then(resolve, reject)
-      .finally(() => window.clearTimeout(timer));
-  });
-}
-
-
-let currentWorkspaceStyle = "01_default.md";
-let currentWorkspaceMode = "chat";
-
-window.addEventListener("message", (e) => {
-  if (!e.data) return;
-  
-  if (e.data.type === "set-style") {
-    currentWorkspaceStyle = e.data.value;
-  }
-  if (e.data.type === "set-mode") {
-    currentWorkspaceMode = e.data.value;
-  }
-  if (e.data.type === "switch-session") {
-    const sessionId = e.data.sessionId;
-    if (sessionId && window.chatStore && sessionId !== currentSessionId) {
-      window.chatStore.get(sessionId).then((full) => {
-        if (full) loadSessionIntoUI(full as ChatStoreSession);
-      });
+/** 文档全文、RAG 片段和图片 caption 只服务于当前请求，不能随历史常驻。 */
+function clearModelContexts(): boolean {
+  let changed = false;
+  for (const message of messages) {
+    if (message.modelContext !== undefined) {
+      message.modelContext = undefined;
+      changed = true;
     }
   }
-  if (e.data.type === "create-session") {
-    if (window.chatStore) {
-      window.chatStore.create({ identityId: null }).then(async (session) => {
-        if (session?.id) {
-          const full = await window.chatStore.get(session.id);
-          if (full) loadSessionIntoUI(full as ChatStoreSession);
-        }
-      }).catch(err => console.error("[Chat] Failed to create session from workspace:", err));
-    }
-  }
-});
-
-if (window.chat?.onUpdateMode) {
-  window.chat.onUpdateMode((mode) => {
-    currentWorkspaceMode = mode;
-    if (window.self !== window.top) {
-      window.top.postMessage({ type: "mode-updated-by-text", value: mode }, "*");
-    } else {
-      const opts = document.querySelectorAll("#mode-dropdown .dm-opt");
-      opts.forEach((opt) => {
-        const o = opt as HTMLElement;
-        if (o.dataset.value === mode) {
-          opts.forEach((el) => el.classList.remove("is-active"));
-          o.classList.add("is-active");
-          const valEl = document.querySelector("#mode-val");
-          if (valEl) valEl.textContent = o.textContent?.trim() || "";
-        }
-      });
-    }
-  });
+  return changed;
 }
 
-function isTalkMode(): boolean {
-  if (window.self !== window.top) {
-    return currentWorkspaceMode === "talk";
-  }
-  const active = document.querySelector("#mode-dropdown .dm-opt.is-active") as HTMLElement | null;
-  return active?.dataset?.value === "talk";
+function isChatMode(): boolean {
+  const active = document.querySelector(".mode-switch__option.is-active") as HTMLElement | null;
+  return active?.dataset?.modeValue === "chat";
 }
 
-function isStudyMode(): boolean {
-  if (window.self !== window.top) {
-    return currentWorkspaceMode === "study";
-  }
-  const active = document.querySelector("#mode-dropdown .dm-opt.is-active") as HTMLElement | null;
-  return active?.dataset?.value === "study";
-}
-
-function isGameMode(): boolean {
-  if (window.self !== window.top) {
-    return currentWorkspaceMode === "game";
-  }
-  const active = document.querySelector("#mode-dropdown .dm-opt.is-active") as HTMLElement | null;
-  return active?.dataset?.value === "game";
-}
-
-function getCurrentStyle(): string {
-  if (window.self !== window.top) {
-    if (currentWorkspaceMode === "talk") return "talk";
-    if (currentWorkspaceMode === "study") return "study";
-    if (currentWorkspaceMode === "game") return "game";
-    return currentWorkspaceStyle;
-  }
+function getCurrentStyleId(): StyleId {
   const active = document.querySelector("#style-dropdown .dm-opt.is-active") as HTMLElement | null;
-  const style = (active && active.dataset && active.dataset.value) || "01_default.md";
-  if (isTalkMode()) return "talk";
-  if (isStudyMode()) return "study";
-  if (isGameMode()) return "game";
-  return style;
-}
-async function getModelReply(): Promise<ChatReplyPayload> {
-  if (!window.chat?.sendMessage) {
-    throw new Error("聊天 IPC 尚未就緒，請重啟應用後再試。");
-  }
-  const payload = await withTimeout(
-    window.chat.sendMessage(buildModelMessages(), getCurrentStyle()),
-    FRONTEND_REPLY_TIMEOUT_MS,
-    "模型響應超時，請稍後重試。",
-  );
-  return normalizeChatReplyPayload(payload);
+  return normalizeStyleId(active?.dataset?.value);
 }
 
 let sending = false;
 
-// ── 快捷預設膠囊 ──────────────────────────────────────────
-// 空對話時在 empty-state 下方顯示的半透明膠囊，點擊後：
-// - fill 模式：預設提示詞填入輸入框，用戶修改後發送
-// - chat 模式：昔漣主動開口（注入隱藏種子消息觸發 agent）
+// 发送期间到达的 proactive-chat 外部变更（如昔涟又发了一条主动消息）不立刻重载，
+// 否则会清掉 transient 思考消息 / 冲掉刚落库的回复。记下 sessionId，等发送结束、
+// 最终 saveSession 落盘后再 flush 重载。
+let pendingProactiveReloadId: string | null = null;
+
+/**
+ * 发送结束后调用：若有排队的外部变更，重载当前会话。
+ *
+ * 依赖 IPC 有序处理：发送的最终 saveSession（replaceTail）在 finally 之前已同步
+ * 发出 IPC，flush 这里的 getPage IPC 一定排在它之后被主进程处理，所以重载读到的
+ * 是已落库的回复，不会把它冲掉。
+ *
+ * 已知限制：若外部主动消息在用户 saveSession 之前 append，replaceMessagesTail
+ * 会用本地视图覆盖它（写冲突）。当前无调度器触发 evaluateCandidate，外部主动消息
+ * 不会在发送期间产生，此限制暂不构成实际问题；未来接入调度器时需把 saveSession
+ * 改成 merge-aware。
+ */
+async function flushPendingProactiveReload(): Promise<void> {
+  const pendingId = pendingProactiveReloadId;
+  if (!pendingId) return;
+  pendingProactiveReloadId = null;
+  // 重载前再确认仍是当前会话；用户可能已手动切走。
+  if (pendingId === currentSessionId) {
+    await loadSessionTailIntoUI(pendingId);
+  }
+}
+
+// ── 快捷预设胶囊 ──────────────────────────────────────────
+// 空对话时在 empty-state 下方显示的半透明胶囊，点击后：
+// - fill 模式：预设提示词填入输入框，用户修改后发送
+// - chat 模式：昔涟主动开口（注入隐藏种子消息触发 agent）
 
 interface QuickPreset {
   id: string;
@@ -2322,14 +2857,14 @@ interface QuickPreset {
 }
 
 const QUICK_PRESETS: QuickPreset[] = [
-  { id: "chat",     label: "和昔漣聊天", icon: "💬",  mode: "chat" },
-  { id: "schedule", label: "設置定時任務", icon: "⏰", mode: "fill", prompt: "幫我設置一個定時任務：" },
-  { id: "weather",  label: "查看天氣",   icon: "🌤️", mode: "fill", prompt: "幫我查一下今天的天氣" },
-  { id: "document", label: "生成文檔",   icon: "📄", mode: "fill", prompt: "幫我生成一份文檔：" },
-  { id: "email",    label: "發送郵件",   icon: "✉️", mode: "fill", prompt: "幫我發一封郵件：" },
+  { id: "chat",     label: "和昔涟聊天", icon: `<svg width="18" height="18" viewBox="0 0 48 48" fill="none" aria-hidden="true"><path d="M33 38H22V30H36V22H44V38H39L36 41L33 38Z" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 6H36V30H17L13 34L9 30H4V6Z" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><path d="M19 18H20" stroke="currentColor" stroke-width="4" stroke-linecap="round"/><path d="M26 18H27" stroke="currentColor" stroke-width="4" stroke-linecap="round"/><path d="M12 18H13" stroke="currentColor" stroke-width="4" stroke-linecap="round"/></svg>`,  mode: "chat" },
+  { id: "schedule", label: "设置定时任务", icon: `<svg width="18" height="18" viewBox="0 0 48 48" fill="none" aria-hidden="true"><path d="M23.9998 44.3332C34.1251 44.3332 42.3332 36.1251 42.3332 25.9999C42.3332 15.8747 34.1251 7.66656 23.9998 7.66656C13.8746 7.66656 5.6665 15.8747 5.6665 25.9999C5.6665 36.1251 13.8746 44.3332 23.9998 44.3332Z" fill="none" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/><path d="M23.7594 15.3536L23.7582 26.3624L31.5305 34.1347" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 9.00001L11 4.00001" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><path d="M44 9.00001L37 4.00001" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></svg>`, mode: "fill", prompt: "帮我设置一个定时任务：" },
+  { id: "weather",  label: "查看天气",   icon: `<svg width="18" height="18" viewBox="0 0 48 48" fill="none" aria-hidden="true"><path d="M30.7826 24.5652C34.5285 24.5652 37.5652 21.5285 37.5652 17.7826C37.5652 14.0367 34.5285 11 30.7826 11C27.4338 11 24.6518 13.427 24.0996 16.618" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><path d="M33 7C34.1046 7 35 6.10457 35 5C35 3.89543 34.1046 3 33 3C31.8954 3 31 3.89543 31 5C31 6.10457 31.8954 7 33 7Z" fill="currentColor"/><path d="M42 12C43.1046 12 44 11.1046 44 10C44 8.89543 43.1046 8 42 8C40.8954 8 40 8.89543 40 10C40 11.1046 40.8954 12 42 12Z" fill="currentColor"/><path d="M44 21C45.1046 21 46 20.1046 46 19C46 17.8954 45.1046 17 44 17C42.8954 17 42 17.8954 42 19C42 20.1046 42.8954 21 44 21Z" fill="currentColor"/><path d="M22 10C23.1046 10 24 9.10457 24 8C24 6.89543 23.1046 6 22 6C20.8954 6 20 6.89543 20 8C20 9.10457 20.8954 10 22 10Z" fill="currentColor"/><path d="M9.45455 39.9942C6.14242 37.461 4 33.4278 4 28.8851C4 21.2166 10.1052 15 17.6364 15C23.9334 15 29.2336 19.3462 30.8015 25.2533C32.0353 24.6159 33.431 24.2567 34.9091 24.2567C39.9299 24.2567 44 28.4011 44 33.5135C44 37.3094 41.7562 40.5716 38.5455 42" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><path d="M22.2426 24.7574C21.1569 23.6716 19.6569 23 18 23C14.6863 23 12 25.6863 12 29C12 30.6569 12.6716 32.1569 13.7574 33.2426" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></svg>`, mode: "fill", prompt: "帮我查一下今天的天气" },
+  { id: "document", label: "生成文档",   icon: `<svg width="18" height="18" viewBox="0 0 48 48" fill="none" aria-hidden="true"><rect x="6" y="6" width="36" height="36" rx="3" fill="none" stroke="currentColor" stroke-width="4"/><path d="M14 16L18 32L24 19L30 32L34 16" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></svg>`, mode: "fill", prompt: "帮我生成一份文档：" },
+  { id: "email",    label: "发送邮件",   icon: `<svg width="18" height="18" viewBox="0 0 48 48" fill="none" aria-hidden="true"><path d="M36 15H44V28V41H4V28V15H12" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><path d="M24 19V5" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><path d="M30 11L24 5L18 11" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 15L24 30L44 15" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></svg>`, mode: "fill", prompt: "帮我发一封邮件：" },
 ];
 
-/** 動態生成膠囊 DOM 並綁定點擊。bootstrap 末尾調一次。 */
+/** 动态生成胶囊 DOM 并绑定点击。bootstrap 末尾调一次。 */
 function buildQuickPresets(): void {
   const container = document.getElementById("quick-presets");
   if (!container) return;
@@ -2341,7 +2876,7 @@ function buildQuickPresets(): void {
     btn.dataset.presetId = preset.id;
     const icon = document.createElement("span");
     icon.className = "chat__preset-icon";
-    icon.textContent = preset.icon;
+    icon.innerHTML = preset.icon;
     const label = document.createElement("span");
     label.className = "chat__preset-label";
     label.textContent = preset.label;
@@ -2384,7 +2919,7 @@ async function triggerCyreneGreeting(): Promise<void> {
   let streamMsgId = "";
   try {
     streamMsgId = String(Date.now() + 1);
-    const streamMsg = { id: streamMsgId, role: "model" as const, content: "", at: Date.now(), thinking: true };
+    const streamMsg = { id: streamMsgId, role: "model" as const, content: "", at: Date.now(), thinking: true, transient: true };
     messages.push(streamMsg);
     render();
 
@@ -2396,6 +2931,7 @@ async function triggerCyreneGreeting(): Promise<void> {
     let pendingTtsCachePromise: Promise<{ cacheKey: string } | null> | null = null;
     let sticker: string | null = null;
     let pendingWeatherCard: Record<string, unknown> | null = null;
+    let pendingMusicCard: MusicCardData | null = null;
 
     let finishRun!: () => void;
     let failRun!: (err: Error) => void;
@@ -2405,11 +2941,14 @@ async function triggerCyreneGreeting(): Promise<void> {
     });
 
     const deltaQueue: string[] = [];
+    let streamSession: StreamingMarkdownSession | null = null;
     let playbackTimer: number | null = null;
     let runFinishedArrived = false;
+    let startNextStreamingBubble = false;
+    let streamingBubbleCount = 1;
+    const allowStreamingBubbleSplit = shouldSegmentAssistantReply(isChatMode() ? "chat" : "work", segmentedOutputMode);
     const getStreamingBubble = (): HTMLElement | null => {
-      const row = messagesEl.querySelector(`[data-msg-id="${streamMsgId}"]`);
-      return row ? row.querySelector(".msg__bubble") as HTMLElement : null;
+      return getLastBubbleForMessage(streamMsgId);
     };
     const tryFinish = (): void => {
       if (runFinishedArrived && deltaQueue.length === 0 && playbackTimer === null) {
@@ -2422,12 +2961,23 @@ async function triggerCyreneGreeting(): Promise<void> {
         const next = deltaQueue.shift();
         if (next !== undefined) {
           streamContent += next;
-          const bubble = getStreamingBubble();
+          const bubble = startNextStreamingBubble
+            ? (appendBubbleForMessage(streamMsgId) ?? getStreamingBubble())
+            : getStreamingBubble();
+          startNextStreamingBubble = false;
           if (bubble) {
-            const span = document.createElement("span");
-            span.className = "msg__char";
-            span.textContent = next;
-            bubble.appendChild(span);
+            if (!streamSession) {
+              streamSession = createStreamingMarkdownSession(getMd(), bubble, streamMsgId, messagesEl);
+            }
+            streamSession.append(next);
+          }
+          if (
+            allowStreamingBubbleSplit
+            && streamingBubbleCount < MAX_ASSISTANT_REPLY_BUBBLES
+            && shouldBreakStreamingBubbleAfterChar(next)
+          ) {
+            startNextStreamingBubble = true;
+            streamingBubbleCount += 1;
           }
           messagesEl.scrollTop = messagesEl.scrollHeight;
           return;
@@ -2436,7 +2986,7 @@ async function triggerCyreneGreeting(): Promise<void> {
         tryFinish();
       }, 40);
     };
-    const offEvent = window.agui!.onEvent((rawEvent) => {
+    const offEvent = registerAguiListener((rawEvent) => {
       try {
         const event = rawEvent as AguiBaseEvent;
         const msg = messages.find(m => m.id === streamMsgId);
@@ -2480,7 +3030,7 @@ async function triggerCyreneGreeting(): Promise<void> {
             if (event.delta) {
               ttsContent += event.delta;
               earlyMinimaxPlayback.append(ttsContent);
-              deltaQueue.push(event.delta);
+              deltaQueue.push(...Array.from(event.delta));
               if (!textMouthStarted) {
                 void loadTtsSettings().then((settings) => {
                   if (settings && !settings.ttsAutoRead) {
@@ -2503,11 +3053,20 @@ async function triggerCyreneGreeting(): Promise<void> {
               sticker = (event.value as StickerId | null) ?? null;
             } else if (event.name === "cyrene.weather") {
               pendingWeatherCard = event.value as Record<string, unknown>;
+            } else if (event.name === "cyrene.music") {
+              pendingMusicCard = normalizeMusicCardData(event.value);
             } else if (event.name === "cyrene.todos") {
               renderTodoPanel(event.value as TodoState | null);
             } else if (event.name === "cyrene.choice") {
-              const choiceData = event.value as { id: string; question: string; options: Array<{ label: string; value: string; description?: string }>; default?: string };
-              const card = buildChoiceCardEl(choiceData);
+              const choiceData = event.value;
+              const card = isAskClarificationCard(choiceData)
+                ? buildAskClarificationCardEl(choiceData)
+                : buildChoiceCardEl(choiceData as {
+                    id: string;
+                    question: string;
+                    options: Array<{ label: string; value: string; description?: string }>;
+                    default?: string;
+                  });
               messagesEl.appendChild(card);
               messagesEl.scrollTop = messagesEl.scrollHeight;
             }
@@ -2517,35 +3076,45 @@ async function triggerCyreneGreeting(): Promise<void> {
             tryFinish();
             break;
           case "RUN_ERROR":
-            failRun(new Error(event.content || "模型請求失敗"));
+            failRun(new AgentRenderError(event.code, event.message ?? "模型请求失败"));
             break;
           default:
             break;
         }
       } catch (err) {
-        console.error("[Chat] onEvent回調拋錯:", err);
+        console.error("[Chat] onEvent回调抛错:", err);
       }
     });
 
-    // 種子消息：不推入 messages 數組、不渲染，只作為 agent 輸入觸發昔漣主動開口
+    // 种子消息：不推入 messages 数组、不渲染，只作为 agent 输入触发昔涟主动开口
     const ack = await window.agui!.run({
-      messages: [{ role: "user", content: "[internal] 用戶點擊了「和昔漣聊天」，請你主動開口聊幾句，像朋友打招呼一樣自然開場。" }],
-      style: getCurrentStyle(),
+      messages: [{ role: "user", content: "[internal] 用户点击了「和昔涟聊天」，请你主动开口聊几句，像朋友打招呼一样自然开场。" }],
+      styleId: getCurrentStyleId(),
+      executionMode: isChatMode() ? "chat" : "work",
       sessionId: currentSessionId || undefined,
     });
     if (!ack.success) {
       offEvent();
-      throw new Error(ack.error || "模型請求發起失敗");
+      throw new Error(ack.error || "模型请求发起失败");
     }
 
     await runDone;
     offEvent();
 
+    // flush + dispose 流式 Markdown session（终态 render 会全量重建）
+    if (streamSession) {
+      streamSession.flush();
+      streamSession.dispose();
+      streamSession = null;
+    }
+
     const msg = messages.find(m => m.id === streamMsgId);
     if (msg) {
       msg.thinking = false;
+      msg.transient = false;
       msg.content = streamContent;
       msg.sticker = sticker;
+      msg.musicCard = pendingMusicCard ?? undefined;
     }
     void saveSession();
     const finishedMsgId = streamMsgId;
@@ -2564,16 +3133,19 @@ async function triggerCyreneGreeting(): Promise<void> {
       pendingWeatherCard = null;
     }
   } catch (err) {
-    const message = err instanceof Error ? err.message : "模型請求失敗";
+    const message = err instanceof Error ? err.message : "模型请求失败";
+    const code = err instanceof AgentRenderError ? err.code : undefined;
+    const userMessage = classifyAgentError(code, message);
     const msg = messages.find(m => m.id === streamMsgId);
     if (msg) {
       msg.thinking = false;
-      msg.content = "連接模型失敗：" + message;
+      msg.transient = false;
+      msg.content = userMessage;
     } else {
       messages.push({
         id: String(Date.now() + 2),
         role: "model",
-        content: "連接模型失敗：" + message,
+        content: userMessage,
         at: Date.now(),
       });
     }
@@ -2584,81 +3156,59 @@ async function triggerCyreneGreeting(): Promise<void> {
     sendBtn.disabled = false;
     chatHintEl.textContent = formatModelHint(currentModelConfig);
     inputEl.focus();
+    void flushPendingProactiveReload();
   }
 }
 
 async function send(): Promise<void> {
   const text = inputEl.value.trim();
   if ((!text && attachedFiles.length === 0) || sending) return;
-  // bootstrap 極快但理論上仍有競態：currentSessionId 為 null 時消息無處可存，
-  // 直接攔截避免丟失。正常情況下 bootstrap 會在用戶首次按鍵前完成。
+  // bootstrap 极快但理论上仍有竞态：currentSessionId 为 null 时消息无处可存，
+  // 直接拦截避免丢失。正常情况下 bootstrap 会在用户首次按键前完成。
   if (!currentSessionId) {
-    console.warn("[Cyrene Chat] 會話尚未初始化完成，已忽略此次發送");
+    console.warn("[Cyrene Chat] 会话尚未初始化完成，已忽略此次发送");
     return;
   }
-
-    // Option C（臨時注入）：內容不進 messages 歷史，只附在 agui.run payload 傳給本輪。
-    // fullUserText 只放精簡 hint 進 history，不堆內容。
-    const hintsByKind: string[] = [];
-    const turnAttachments: Array<{ name: string; kind: "text" | "image"; text?: string; filePath?: string; mime?: string }> = [];
-    let budgetUsed = 0;
-    const budgetExceeded: string[] = [];
-    for (const f of attachedFiles) {
-      switch (f.kind) {
-        case "text":
-          if (f.text) {
-            const remaining = BUDGET_CHARS - budgetUsed;
-            if (f.text.length > remaining) {
-              turnAttachments.push({ name: f.name, kind: "text", text: f.text.slice(0, remaining) });
-              budgetExceeded.push(f.name);
-              budgetUsed = BUDGET_CHARS;
-            } else {
-              turnAttachments.push({ name: f.name, kind: "text", text: f.text });
-              budgetUsed += f.text.length;
-            }
-          }
-          hintsByKind.push(`📝 ${f.name}（附件，內容已注入本輪上下文）`);
-          break;
-        case "image":
-          if (f.filePath) {
-            turnAttachments.push({ name: f.name, kind: "image", filePath: f.filePath, mime: f.mime });
-          }
-          hintsByKind.push(`🖼️ ${f.name}（圖片，昔漣會在本輪查看）`);
-          break;
-        case "indexed":
-          hintsByKind.push(`📚 ${f.name}（已索引 ${f.chunks ?? 0} 段，可用 imported_docs 工具檢索）`);
-          break;
-        case "empty":
-          hintsByKind.push(`📄 ${f.name}（為空）`);
-          break;
-        case "unsupported":
-          hintsByKind.push(`⚠️ ${f.name}（暫不支持：${f.reason || ""}）`);
-          break;
-      }
-    }
-    if (budgetExceeded.length > 0) {
-      hintsByKind.push(`⚠️ ${budgetExceeded.join("、")} 已省略部分內容（超一輪預算）`);
-    }
-    const fileHint = hintsByKind.length > 0
-      ? "\n\n【本輪文件】\n" + hintsByKind.join("\n")
-      : "";
-    const hasImage = attachedFiles.some((attachment) => attachment.kind === "image");
-    const fallbackText = hasImage ? "想和你分享這張照片，請看看吧" : "請幫我看看這些文件";
-    const fullUserText = (text || (attachedFiles.length > 0 ? fallbackText : "")) + fileHint;
 
   sending = true;
   sendBtn.disabled = true;
   await refreshModelConfig();
-  chatHintEl.textContent = currentModelConfig?.connected ? `${currentModelConfig.model} 思考中…` : "模型未連接";
+  chatHintEl.textContent = currentModelConfig?.connected ? `${currentModelConfig.model} 思考中…` : "模型未连接";
 
-  const stickerMatch = fullUserText.match(/\[sticker:([^\]]+)\]/);
+  const filesForThisTurn = [...attachedFiles];
+  const attachmentsForMsg: MessageAttachment[] = filesForThisTurn
+    .filter((f) => (f.kind === "image" || f.kind === "document") && typeof f.filePath === "string")
+    .map((f) => {
+      if (f.kind === "image") {
+        return {
+          kind: "image",
+          name: f.name,
+          filePath: f.filePath!,
+          mime: f.mime || "application/octet-stream",
+          previewUrl: f.previewUrl,
+          caption: f.caption,
+          hasAnnotations: f.hasAnnotations,
+          status: f.status || "pending",
+        };
+      }
+      return {
+        kind: "document",
+        name: f.name,
+        filePath: f.filePath!,
+        status: f.status || "pending",
+      };
+    });
+
+  const stickerMatch = text.match(/\[sticker:([^\]]+)\]/);
   const userStickerId = stickerMatch ? stickerMatch[1] : null;
 
   const userMsg: Message = {
     id: String(Date.now()),
     role: "user",
-    content: fullUserText,
+    content: text,
     at: Date.now(),
+    attachments: attachmentsForMsg.length > 0 ? attachmentsForMsg : undefined,
+    modelContext: undefined,
     sticker: userStickerId,
   };
   messages.push(userMsg);
@@ -2668,10 +3218,229 @@ async function send(): Promise<void> {
   void saveSession();
   render();
 
+  const hintsByKind: string[] = [];
+  const modelContextParts: string[] = [];
+  let hasDocumentContext = false;
+  let hasImageCaptionContext = false;
+  let hasDirectImageContext = false;
+  let hasUserAnnotationContext = false;
+  const appendDocumentContext = (lines: string[]) => {
+    if (lines.length === 0) return;
+    if (!hasDocumentContext) {
+      modelContextParts.push(`【文档内容】\n${lines.join("\n\n")}`);
+      hasDocumentContext = true;
+      return;
+    }
+    modelContextParts.push(...lines);
+  };
+  const appendImageCaptionContext = (line: string) => {
+    if (!hasImageCaptionContext) {
+      modelContextParts.push("【图片视觉信息】\n以下内容是视觉模型对用户本轮图片的观察结果，请将其视为你已经看到的图片内容；如果某张图分析失败，请不要编造。\n" + line);
+      hasImageCaptionContext = true;
+      return;
+    }
+    modelContextParts.push(line);
+  };
+  const appendDirectImageContext = (line: string) => {
+    if (!hasDirectImageContext) {
+      modelContextParts.push("【图片附件】\n以下图片已随本轮消息直接发送给主模型，请直接结合图片内容回答。\n" + line);
+      hasDirectImageContext = true;
+      return;
+    }
+    modelContextParts.push(line);
+  };
+  const appendUserAnnotationContext = () => {
+    if (hasUserAnnotationContext) return;
+    const notice = userAnnotationNotice(true);
+    if (notice) modelContextParts.push(`【用户截图标注】\n${notice}`);
+    hasUserAnnotationContext = true;
+  };
+  const directImageAttachments: { name: string; filePath: string; mime?: string }[] = [];
+  let budgetUsed = 0;
+  const budgetExceeded: string[] = [];
+  const documentFilesForThisTurn = filesForThisTurn.filter((f) => f.kind === "document" && typeof f.filePath === "string");
+  const imageFilesForThisTurn = filesForThisTurn.filter((f) => f.kind === "image");
+
+  if (documentFilesForThisTurn.length > 0) {
+    showTransientStatus("正在分析文档...");
+    try {
+      let waitMessage: Message | null = null;
+      const processedDocs = await processDocumentsWithWait({
+        processDocuments: async (filePaths, query) => window.chat?.processDocuments(filePaths, query) ?? [],
+        filePaths: documentFilesForThisTurn.map((f) => f.filePath!),
+        query: text,
+        onWaitStart: (content) => {
+          waitMessage = {
+            id: `document-wait-${Date.now()}`,
+            role: "model",
+            content,
+            at: Date.now(),
+            transient: true,
+          };
+          messages.push(waitMessage);
+          render();
+        },
+        onWaitEnd: () => {
+          if (!waitMessage) return;
+          const index = messages.indexOf(waitMessage);
+          if (index >= 0) messages.splice(index, 1);
+          waitMessage = null;
+          render();
+        },
+      });
+      for (const f of documentFilesForThisTurn) {
+        const result = processedDocs.find((doc) => doc.filePath === f.filePath)
+          ?? processedDocs.find((doc) => doc.name === f.name)
+          ?? {
+            name: f.name,
+            kind: "unsupported" as const,
+            filePath: f.filePath,
+            reason: "文档处理未返回结果",
+          };
+        const msgAtt = userMsg.attachments?.find((att): att is DocumentMessageAttachment =>
+          att.kind === "document" && att.filePath === f.filePath
+        );
+        const processedKind = result.kind === "text" || result.kind === "indexed" || result.kind === "empty" || result.kind === "unsupported"
+          ? result.kind
+          : "unsupported";
+        if (msgAtt) {
+          msgAtt.processedKind = processedKind;
+          msgAtt.chunks = result.chunks;
+          msgAtt.importId = result.kind === "indexed" ? result.importId : undefined;
+          msgAtt.reason = result.reason;
+        }
+
+        if (result.kind === "text") {
+          if (msgAtt) msgAtt.status = "done";
+          const docText = result.text || "";
+          const remaining = BUDGET_CHARS - budgetUsed;
+          if (remaining <= 0) {
+            budgetExceeded.push(result.name);
+            hintsByKind.push(`📝 ${result.name}（附件，内容因一轮预算限制未注入）`);
+          } else if (docText.length > remaining) {
+            const clipped = docText.slice(0, remaining);
+            appendDocumentContext([`文档 ${result.name} 内容节选：\n${clipped}`]);
+            budgetExceeded.push(result.name);
+            budgetUsed = BUDGET_CHARS;
+            hintsByKind.push(`📝 ${result.name}（附件，内容已按预算节选注入本轮上下文）`);
+          } else {
+            appendDocumentContext([`文档 ${result.name} 内容：\n${docText}`]);
+            budgetUsed += docText.length;
+            hintsByKind.push(`📝 ${result.name}（附件，内容已注入本轮上下文）`);
+          }
+        } else if (result.kind === "indexed") {
+          if (result.reason && (result.chunks ?? 0) <= 0) {
+            if (msgAtt) msgAtt.status = "error";
+            hintsByKind.push(`⚠️ ${result.name}（文档处理失败）`);
+            appendDocumentContext(buildDocumentContextLines([result]));
+          } else {
+            if (msgAtt) msgAtt.status = "done";
+            hintsByKind.push(`📚 ${result.name}（已索引 ${result.chunks ?? 0} 段）`);
+            appendDocumentContext(buildDocumentContextLines([result]));
+          }
+        } else if (result.kind === "empty") {
+          if (msgAtt) msgAtt.status = "done";
+          hintsByKind.push(`📄 ${result.name}（为空）`);
+          appendDocumentContext(buildDocumentContextLines([result]));
+        } else {
+          const reason = result.reason || "暂不支持或无法读取";
+          if (msgAtt) msgAtt.status = reason === "cancelled" ? "cancelled" : "error";
+          hintsByKind.push(`⚠️ ${result.name}（暂不支持或处理失败）`);
+          appendDocumentContext(buildDocumentContextLines([{ ...result, reason }]));
+        }
+      }
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      for (const f of documentFilesForThisTurn) {
+        const msgAtt = userMsg.attachments?.find((att): att is DocumentMessageAttachment =>
+          att.kind === "document" && att.filePath === f.filePath
+        );
+        if (msgAtt) {
+          msgAtt.status = "error";
+          msgAtt.processedKind = "unsupported";
+          msgAtt.reason = reason;
+        }
+        hintsByKind.push(`⚠️ ${f.name}（文档处理失败）`);
+        appendDocumentContext(buildDocumentContextLines([{ kind: "error", name: f.name, reason }]));
+      }
+    } finally {
+      hideTransientStatus();
+      void saveSession();
+      render();
+    }
+  }
+
+  let imageSendStrategy: { mode: "direct" | "caption" } = { mode: "caption" };
+  if (imageFilesForThisTurn.length > 0) {
+    try {
+      imageSendStrategy = await window.chat.getImageSendStrategy();
+    } catch (err) {
+      console.warn("[Cyrene Chat] 获取图片发送策略失败，回退 caption:", err);
+    }
+  }
+  const shouldCaptionImages = imageFilesForThisTurn.length > 0 && imageSendStrategy.mode !== "direct";
+  if (shouldCaptionImages) showTransientStatus("正在分析图片...");
+  try {
+    for (const f of filesForThisTurn) {
+      switch (f.kind) {
+        case "document":
+          break;
+        case "image": {
+          const msgAtt = userMsg.attachments?.find((att) => att.filePath === f.filePath);
+          if (f.hasAnnotations) appendUserAnnotationContext();
+          if (!f.filePath) {
+            f.status = "error";
+            f.reason = "缺少图片路径";
+            if (msgAtt) msgAtt.status = "error";
+            appendImageCaptionContext(`- ${f.name}：图片分析失败：缺少图片路径。请诚实说明暂时无法看清这张图。`);
+            break;
+          }
+          if (imageSendStrategy.mode === "direct") {
+            f.status = "done";
+            if (msgAtt) msgAtt.status = "done";
+            directImageAttachments.push({ name: f.name, filePath: f.filePath, mime: f.mime });
+            appendDirectImageContext(`- ${f.name}：图片已随本轮消息直接发送给主模型。`);
+            break;
+          }
+          const result = await window.chat?.captionImage(f.filePath, f.hasAnnotations === true);
+          if (result?.ok && result.caption) {
+            f.status = "done";
+            f.caption = result.caption;
+            if (msgAtt) {
+              msgAtt.status = "done";
+              msgAtt.caption = result.caption;
+            }
+            appendImageCaptionContext(`- ${f.name}：${result.caption}`);
+          } else {
+            f.status = "error";
+            f.reason = result?.error || "图片分析失败";
+            if (msgAtt) msgAtt.status = "error";
+            appendImageCaptionContext(`- ${f.name}：图片分析失败：${f.reason}。请诚实说明暂时无法看清这张图。`);
+          }
+          break;
+        }
+        case "unsupported":
+          hintsByKind.push(`⚠️ ${f.name}（暂不支持：${f.reason || ""}）`);
+          break;
+      }
+    }
+  } finally {
+    if (shouldCaptionImages) hideTransientStatus();
+  }
+  if (budgetExceeded.length > 0) {
+    hintsByKind.push(`⚠️ ${budgetExceeded.join("、")} 已省略部分内容（超一轮预算）`);
+  }
+  if (hintsByKind.length > 0) {
+    modelContextParts.unshift("【本轮文件】\n" + hintsByKind.join("\n"));
+  }
+  userMsg.modelContext = modelContextParts.join("\n\n");
+  void saveSession();
+  render();
+
   let streamMsgId = "";
   try {
     streamMsgId = String(Date.now() + 1);
-    const streamMsg = { id: streamMsgId, role: "model", content: "", at: Date.now(), thinking: true };
+    const streamMsg = { id: streamMsgId, role: "model", content: "", at: Date.now(), thinking: true, transient: true };
     messages.push(streamMsg);
     render();
 
@@ -2683,9 +3452,10 @@ async function send(): Promise<void> {
     let pendingTtsCachePromise: Promise<{ cacheKey: string } | null> | null = null;
     let sticker: string | null = null;
     let pendingWeatherCard: Record<string, unknown> | null = null;
+    let pendingMusicCard: MusicCardData | null = null;
 
-    // 終態信號：由事件流的 RUN_FINISHED/RUN_ERROR 觸發 resolve，
-    // 不依賴 invoke 的 resolve（invoke 只做 ack，可能與事件投遞存在順序競爭）。
+    // 终态信号：由事件流的 RUN_FINISHED/RUN_ERROR 触发 resolve，
+    // 不依赖 invoke 的 resolve（invoke 只做 ack，可能与事件投递存在顺序竞争）。
     let finishRun!: () => void;
     let failRun!: (err: Error) => void;
     const runDone = new Promise<void>((resolve, reject) => {
@@ -2693,18 +3463,21 @@ async function send(): Promise<void> {
       failRun = reject;
     });
 
-    // AG-UI 事件流：訂閱 window.agui.onEvent，按事件類型渲染
-    // 主進程在 FC 完成後瞬間把所有 delta 發完，渲染端用"回放隊列"按固定節奏逐字顯示，
-    // 營造真流式感。流式中的氣泡用增量 span 追加 + CSS 漸顯，不調 render() 全量重建。
+    // AG-UI 事件流：订阅 window.agui.onEvent，按事件类型渲染
+    // 主进程在 FC 完成后瞬间把所有 delta 发完，渲染端用"回放队列"按固定节奏逐字显示，
+    // 营造真流式感。流式中的气泡用增量 span 追加 + CSS 渐显，不调 render() 全量重建。
     const deltaQueue: string[] = [];
+    let streamSession: StreamingMarkdownSession | null = null;
     let playbackTimer: number | null = null;
     let runFinishedArrived = false;
-    /** 找到當前流式消息的氣泡 DOM（TEXT_MESSAGE_START 時 render 過一次，帶 data-msg-id）。 */
+    let startNextStreamingBubble = false;
+    let streamingBubbleCount = 1;
+    const allowStreamingBubbleSplit = shouldSegmentAssistantReply(isChatMode() ? "chat" : "work", segmentedOutputMode);
+    /** 找到当前流式消息的气泡 DOM（TEXT_MESSAGE_START 时 render 过一次，带 data-msg-id）。 */
     const getStreamingBubble = (): HTMLElement | null => {
-      const row = messagesEl.querySelector(`[data-msg-id="${streamMsgId}"]`);
-      return row ? row.querySelector(".msg__bubble") as HTMLElement : null;
+      return getLastBubbleForMessage(streamMsgId);
     };
-    // 終態條件：RUN_FINISHED 到達 AND 回放隊列空。兩者都滿足才 finishRun。
+    // 终态条件：RUN_FINISHED 到达 AND 回放队列空。两者都满足才 finishRun。
     const tryFinish = (): void => {
       if (runFinishedArrived && deltaQueue.length === 0 && playbackTimer === null) {
         finishRun();
@@ -2716,13 +3489,24 @@ async function send(): Promise<void> {
         const next = deltaQueue.shift();
         if (next !== undefined) {
           streamContent += next;
-          // 增量追加 span 到氣泡，CSS 漸顯。不調 render()，避免全量重建卡頓。
-          const bubble = getStreamingBubble();
+          // 增量追加 span 到气泡，CSS 渐显。不调 render()，避免全量重建卡顿。
+          const bubble = startNextStreamingBubble
+            ? (appendBubbleForMessage(streamMsgId) ?? getStreamingBubble())
+            : getStreamingBubble();
+          startNextStreamingBubble = false;
           if (bubble) {
-            const span = document.createElement("span");
-            span.className = "msg__char";
-            span.textContent = next;
-            bubble.appendChild(span);
+            if (!streamSession) {
+              streamSession = createStreamingMarkdownSession(getMd(), bubble, streamMsgId, messagesEl);
+            }
+            streamSession.append(next);
+          }
+          if (
+            allowStreamingBubbleSplit
+            && streamingBubbleCount < MAX_ASSISTANT_REPLY_BUBBLES
+            && shouldBreakStreamingBubbleAfterChar(next)
+          ) {
+            startNextStreamingBubble = true;
+            streamingBubbleCount += 1;
           }
           messagesEl.scrollTop = messagesEl.scrollHeight;
           return;
@@ -2732,7 +3516,7 @@ async function send(): Promise<void> {
         tryFinish();
       }, 40);
     };
-    const offEvent = window.agui!.onEvent((rawEvent) => {
+    const offEvent = registerAguiListener((rawEvent) => {
       try {
         const event = rawEvent as AguiBaseEvent;
         const msg = messages.find(m => m.id === streamMsgId);
@@ -2780,7 +3564,7 @@ async function send(): Promise<void> {
             if (event.delta) {
               ttsContent += event.delta;
               earlyMinimaxPlayback.append(ttsContent);
-              deltaQueue.push(event.delta);
+              deltaQueue.push(...Array.from(event.delta));
               if (!textMouthStarted) {
                 void loadTtsSettings().then((settings) => {
                   if (settings && !settings.ttsAutoRead) {
@@ -2793,70 +3577,93 @@ async function send(): Promise<void> {
             }
             break;
           case "TEXT_MESSAGE_END":
-            // 全文 delta 已收齊時，ttsContent 已經同步累加完整；UI 的 streamContent 仍按 40ms 逐字回放。
-            // 這樣聲音可儘早開始，且不受前端打字動畫隊列影響。
+            // 全文 delta 已收齐时，ttsContent 已经同步累加完整；UI 的 streamContent 仍按 40ms 逐字回放。
+            // 这样声音可尽早开始，且不受前端打字动画队列影响。
             if (!autoSpeakTriggered && ttsContent.trim()) {
               autoSpeakTriggered = true;
-              pendingTtsCachePromise = earlyMinimaxPlayback.finish(ttsContent, streamMsgId);
+              pendingTtsCachePromise = earlyMinimaxPlayback.finish(ttsContent);
             }
             break;
           case "CUSTOM":
-            // 主進程發的自定義事件：sticker / 天氣卡片 / 任務清單 / 選擇卡片
+            // 主进程发的自定义事件：sticker / 天气卡片 / 任务清单 / 选择卡片
             if (event.name === "cyrene.sticker") {
               sticker = (event.value as StickerId | null) ?? null;
             } else if (event.name === "cyrene.weather") {
-              // 暫存天氣數據，等 runDone 後 render 再插入（避免 render 的 replaceChildren 清掉卡片）
-              console.log("[Chat] 收到天氣卡片數據:", JSON.stringify(event.value)?.slice(0, 100));
+              // 暂存天气数据，等 runDone 后 render 再插入（避免 render 的 replaceChildren 清掉卡片）
+              console.log("[Chat] 收到天气卡片数据:", JSON.stringify(event.value)?.slice(0, 100));
               pendingWeatherCard = event.value as Record<string, unknown>;
+            } else if (event.name === "cyrene.music") {
+              pendingMusicCard = normalizeMusicCardData(event.value);
             } else if (event.name === "cyrene.todos") {
               renderTodoPanel(event.value as TodoState | null);
             } else if (event.name === "cyrene.choice") {
-              // 選擇卡片：立即插入聊天流（不等 runDone，因為要即時交互）
-              const choiceData = event.value as { id: string; question: string; options: Array<{ label: string; value: string; description?: string }>; default?: string };
-              const card = buildChoiceCardEl(choiceData);
+              // 选择卡片：立即插入聊天流（不等 runDone，因为要即时交互）
+              const choiceData = event.value;
+              const card = isAskClarificationCard(choiceData)
+                ? buildAskClarificationCardEl(choiceData)
+                : buildChoiceCardEl(choiceData as {
+                    id: string;
+                    question: string;
+                    options: Array<{ label: string; value: string; description?: string }>;
+                    default?: string;
+                  });
               messagesEl.appendChild(card);
               messagesEl.scrollTop = messagesEl.scrollHeight;
             }
             break;
           case "RUN_FINISHED":
-            // 終態信號到達，但要等回放隊列空才真正 finishRun（保證流式播完）
+            // 终态信号到达，但要等回放队列空才真正 finishRun（保证流式播完）
             runFinishedArrived = true;
             tryFinish();
             break;
           case "RUN_ERROR":
-            failRun(new Error(event.content || "模型請求失敗"));
+            failRun(new AgentRenderError(event.code, event.message ?? "模型请求失败"));
             break;
           default:
-            // TOOL_CALL_* / STEP_* 暫不在 UI 處理（骨架階段）
+            // TOOL_CALL_* / STEP_* 暂不在 UI 处理（骨架阶段）
             break;
         }
       } catch (err) {
-        console.error("[Chat] onEvent回調拋錯:", err);
+        console.error("[Chat] onEvent回调抛错:", err);
       }
     });
 
-    // invoke 只確認"已發起"，不等 Observable 結束。
-    // 真正的完成由事件流 RUN_FINISHED/RUN_ERROR 驅動（await runDone）。
+    // invoke 只确认"已发起"，不等 Observable 结束。
+    // 真正的完成由事件流 RUN_FINISHED/RUN_ERROR 驱动（await runDone）。
+    const modelMessages = buildModelMessages();
     const ack = await window.agui!.run({
-      messages: buildModelMessages(),
-      style: getCurrentStyle(),
+      messages: modelMessages,
+      userTurnId: userMsg.id,
+      assistantTurnId: streamMsgId,
+      styleId: getCurrentStyleId(),
+      executionMode: isChatMode() ? "chat" : "work",
       sessionId: currentSessionId || undefined,
-      attachments: turnAttachments,
+      imageAttachments: directImageAttachments.length > 0 ? directImageAttachments : undefined,
     });
     if (!ack.success) {
       offEvent();
-      throw new Error(ack.error || "模型請求發起失敗");
+      throw new Error(ack.error || "模型请求发起失败");
     }
+    if (clearModelContexts()) void saveSession();
 
-    // 等事件流終態
+    // 等事件流终态
     await runDone;
     offEvent();
+
+    // flush + dispose 流式 Markdown session（终态 render 会全量重建）
+    if (streamSession) {
+      streamSession.flush();
+      streamSession.dispose();
+      streamSession = null;
+    }
 
     const msg = messages.find(m => m.id === streamMsgId);
     if (msg) {
       msg.thinking = false;
+      msg.transient = false;
       msg.content = streamContent;
       msg.sticker = sticker;
+      msg.musicCard = pendingMusicCard ?? undefined;
     }
     void saveSession();
     const finishedMsgId = streamMsgId;
@@ -2868,26 +3675,29 @@ async function send(): Promise<void> {
       void saveSession();
     });
     render();
-    // 天氣卡片在 render 後追加到末尾（模型回覆之後）
+    // 天气卡片在 render 后追加到末尾（模型回复之后）
     if (pendingWeatherCard) {
-      console.log("[Chat] 插入天氣卡片");
+      console.log("[Chat] 插入天气卡片");
       const card = buildWeatherCardEl(pendingWeatherCard);
       messagesEl.appendChild(card);
       messagesEl.scrollTop = messagesEl.scrollHeight;
       pendingWeatherCard = null;
     }
-    // TTS 已在 TEXT_MESSAGE_END 時觸發，這裡不再重複朗讀
+    // TTS 已在 TEXT_MESSAGE_END 时触发，这里不再重复朗读
   } catch (err) {
-    const message = err instanceof Error ? err.message : "模型請求失敗";
+    const message = err instanceof Error ? err.message : "模型请求失败";
+    const code = err instanceof AgentRenderError ? err.code : undefined;
+    const userMessage = classifyAgentError(code, message);
     const msg = messages.find(m => m.id === streamMsgId);
     if (msg) {
       msg.thinking = false;
-      msg.content = "連接模型失敗：" + message;
+      msg.transient = false;
+      msg.content = userMessage;
     } else {
       messages.push({
         id: String(Date.now() + 2),
         role: "model",
-        content: "連接模型失敗：" + message,
+        content: userMessage,
         at: Date.now(),
       });
     }
@@ -2897,6 +3707,7 @@ async function send(): Promise<void> {
     sendBtn.disabled = false;
     chatHintEl.textContent = formatModelHint(currentModelConfig);
     inputEl.focus();
+    void flushPendingProactiveReload();
   }
 }
 function clearChat(): void {
@@ -2939,10 +3750,11 @@ inputEl.addEventListener("keydown", (e) => {
 /* ===== File upload ===== */
 const fileInput = document.getElementById("file-input") as HTMLInputElement | null;
 const attachBtn = document.getElementById("attach-btn") as HTMLButtonElement | null;
+const screenshotBtn = document.getElementById("screenshot-btn") as HTMLButtonElement | null;
 let attachedFiles: Attachment[] = [];
 	
-// ── path-based 文件攝入 ──
-// 路徑提取在 preload（webUtils.getPathForFile），renderer 不碰 Electron API。
+// ── path-based 文件摄入 ──
+// 路径提取在 preload（webUtils.getPathForFile），renderer 不碰 Electron API。
 async function ingestDroppedFiles(files: File[]): Promise<void> {
   if (files.length === 0) return;
   attachBtn!.disabled = true;
@@ -2967,23 +3779,19 @@ async function ingestDroppedFiles(files: File[]): Promise<void> {
 	    return;
 	  }
 	  attachBtn?.classList.add("has-file");
-	  const kindLabel: Record<AttachmentKind, string> = {
-	    text: "📝",
-	    image: "🖼️",
-	    indexed: "📚",
-	    empty: "📄",
-	    unsupported: "⚠️",
-	  };
 	  attachedFiles.forEach((f, i) => {
 	    const tag = document.createElement("div");
 	    tag.className = "chat__file-tag";
+	    if (f.kind === "image" && f.previewUrl) {
+	      const preview = document.createElement("img");
+	      preview.className = "chat__file-tag-preview";
+	      preview.src = f.previewUrl;
+	      preview.alt = f.name;
+	      tag.appendChild(preview);
+	    }
 	    const label = document.createElement("span");
-	    const icon = kindLabel[f.kind] || "📄";
-	    const detail = f.kind === "text" ? "（附件）" :
-	      f.kind === "image" ? "（圖片）" :
-	      f.kind === "indexed" ? `（${f.chunks ?? 0} 段）` :
-	      f.kind === "empty" ? "（空）" :
-	      "（暫不支持）";
+	    const icon = getAttachmentIcon(f.kind);
+	    const detail = formatAttachmentTagDetail(f);
 	    label.textContent = `${icon} ${f.name} ${detail}`;
 	    const btn = document.createElement("button");
 	    btn.type = "button";
@@ -3008,6 +3816,79 @@ async function ingestDroppedFiles(files: File[]): Promise<void> {
 	    void ingestDroppedFiles(Array.from(fileInput.files));
 	  }
 	});
+
+/* ===== Screenshot ===== */
+
+/** 统一插入图片附件（粘贴和截图按钮共用） */
+async function insertImageAttachment(input: {
+  base64?: string;
+  mime: string;
+  filePath?: string;
+  previewUrl?: string;
+  name?: string;
+  hasAnnotations?: boolean;
+}): Promise<void> {
+  const filePath = input.filePath
+    ?? (input.base64
+      ? (await window.chat?.saveScreenshotTemp(input.base64, input.mime))?.filePath
+      : undefined);
+  if (!filePath) throw new Error("SCREENSHOT_FILE_PATH_REQUIRED");
+
+  attachedFiles.push({
+    kind: "image",
+    name: input.name ?? `截图_${Date.now()}.png`,
+    filePath,
+    mime: input.mime,
+    previewUrl: input.base64
+      ? `data:${input.mime};base64,${input.base64}`
+      : input.previewUrl,
+    hasAnnotations: input.hasAnnotations,
+    status: "pending",
+  });
+  updateFileTags();
+}
+
+// 截图按钮 -> 触发主进程截图流程（按钮模式：选区后直接插入，不需要粘贴）
+screenshotBtn?.addEventListener("click", () => {
+  void window.chat?.startScreenshot();
+});
+
+// 按钮模式回调：主进程裁剪完直接发图片过来
+window.chat?.onScreenshotInsert?.((data) => {
+  void insertImageAttachment({
+    mime: data.mime,
+    filePath: data.filePath,
+    previewUrl: data.previewUrl,
+    hasAnnotations: data.hasAnnotations,
+    name: `截图_${Date.now()}.png`,
+  });
+});
+
+// 粘贴监听：检测剪贴板图片 -> 插入附件（热键模式：Alt+Shift+S 截图后 Ctrl+V）
+document.addEventListener("paste", async (e) => {
+  const items = e.clipboardData?.items;
+  if (!items) return;
+  for (const item of items) {
+    if (item.type.startsWith("image/")) {
+      e.preventDefault();
+      const blob = item.getAsFile();
+      if (!blob) continue;
+      const reader = new FileReader();
+      reader.onload = async () => {
+        const dataUrl = reader.result as string;
+        const base64 = dataUrl.split(",")[1] ?? "";
+        if (!base64) return;
+        try {
+          await insertImageAttachment({ base64, mime: blob.type || "image/png" });
+        } catch (err) {
+          console.error("[Chat] 粘贴图片失败:", err);
+        }
+      };
+      reader.readAsDataURL(blob);
+      break; // 只处理第一张图片
+    }
+  }
+});
 	
 	function removeAttachedFiles(): void {
 	  attachedFiles = [];
@@ -3056,19 +3937,33 @@ clearBtn.addEventListener("click", clearChat);
 
 
 
-/* ===== Dropdown: mode + style + reasoning (body-level menus) ===== */
+/* ===== Work / Chat switch + style / reasoning dropdowns ===== */
 (function() {
   var triggers = document.querySelectorAll(".dropdown-trigger");
+  var modeOptions = document.querySelectorAll(".mode-switch__option");
   var menus = {
-    "mode-dropdown": document.getElementById("mode-dropdown"),
     "style-dropdown": document.getElementById("style-dropdown"),
     "reasoning-dropdown": document.getElementById("reasoning-dropdown")
   };
   var values = {
-    "mode-dropdown": document.getElementById("mode-val"),
     "style-dropdown": document.getElementById("style-val"),
     "reasoning-dropdown": document.getElementById("reasoning-val")
   };
+
+  function selectModeOption(value) {
+    const normalized = normalizeDefaultChatMode(value);
+    modeOptions.forEach(function(option) {
+      const active = (option as HTMLElement).dataset.modeValue === normalized;
+      option.classList.toggle("is-active", active);
+      option.setAttribute("aria-pressed", active ? "true" : "false");
+    });
+  }
+
+  modeOptions.forEach(function(option) {
+    option.addEventListener("click", function() {
+      selectModeOption((option as HTMLElement).dataset.modeValue);
+    });
+  });
 
   // Close all dropdowns
   function closeAll() {
@@ -3089,6 +3984,17 @@ clearBtn.addEventListener("click", clearChat);
     trigger.classList.add("is-open");
   }
 
+  function selectDropdownOption(id, value) {
+    var menu = menus[id];
+    if (!menu) return;
+    var target = menu.querySelector('.dm-opt[data-value="' + value + '"]');
+    if (!target) return;
+    menu.querySelectorAll(".dm-opt").forEach(function(o) { o.classList.remove("is-active"); });
+    target.classList.add("is-active");
+    var val = values[id];
+    if (val) val.textContent = target.textContent?.trim() || "";
+  }
+
   // Trigger click
   triggers.forEach(function(t) {
     t.addEventListener("click", function(e) {
@@ -3106,14 +4012,141 @@ clearBtn.addEventListener("click", clearChat);
     if (!menu) return;
     menu.querySelectorAll(".dm-opt").forEach(function(opt) {
       opt.addEventListener("click", function() {
-        menu.querySelectorAll(".dm-opt").forEach(function(o) { o.classList.remove("is-active"); });
-        opt.classList.add("is-active");
-        var val = values[id];
-        if (val) val.textContent = opt.textContent?.trim() || "";
+        selectDropdownOption(id, opt.getAttribute("data-value"));
+        if (id === "style-dropdown") {
+          const styleId = normalizeStyleId(opt.getAttribute("data-value"));
+          void window.settings?.saveGeneral?.({ currentStyleId: styleId });
+        }
         closeAll();
       });
     });
   });
+
+  // ── 推理下拉：动态生成 ──────────────────────────────
+  let reasoningDropdownActive = false;
+  let reasoningProviderKey = "";
+  let reasoningDropdownDisabled = false;
+  let reasoningActivePreference: unknown = null;
+
+  async function rebuildReasoningDropdown() {
+    try {
+      const state = await window.chat!.getReasoningState() as {
+        providerKey: string; providerId: string; model: string;
+        preference?: { mode: string; effort?: string };
+      };
+      reasoningProviderKey = state.providerKey;
+      // 动态 import 纯函数（vite tree-shake 后仍可执行）
+      const { computeReasoningDropdown, formatReasoningTriggerLabel } = await import("./reasoning-dropdown");
+      const view = computeReasoningDropdown(state.providerId, state.model, state.preference);
+      reasoningDropdownDisabled = view.disabled;
+      reasoningActivePreference = view.activePreference;
+
+      // 填充下拉项
+      const menu = menus["reasoning-dropdown"];
+      if (!menu) return;
+      // 保留 dm-title，清空后续所有 dm-opt
+      const title = menu.querySelector(".dm-title");
+      menu.replaceChildren();
+      if (title) menu.appendChild(title);
+
+      for (const item of view.items) {
+        const opt = document.createElement("div");
+        opt.className = "dm-opt";
+        opt.dataset.reasoningPreference = JSON.stringify(item.preference);
+        opt.textContent = item.label;
+        if (item.disabled) {
+          opt.classList.add("is-disabled");
+          opt.style.opacity = "0.4";
+          opt.style.pointerEvents = "none";
+        }
+        if (item.hint) opt.title = item.hint;
+        // 当前选中
+        if (JSON.stringify(item.preference) === JSON.stringify(view.activePreference)) {
+          opt.classList.add("is-active");
+        }
+        // disabled item 不绑 click
+        if (item.disabled) {
+          opt.addEventListener("click", (e) => e.stopPropagation());
+        } else {
+          opt.addEventListener("click", () => {
+            if (!window.chat) return;
+            window.chat.setReasoning({
+              providerKey: reasoningProviderKey,
+              preference: item.preference,
+            }).then(() => {
+              reasoningActivePreference = item.preference;
+              menu.querySelectorAll(".dm-opt").forEach(o => o.classList.remove("is-active"));
+              opt.classList.add("is-active");
+              const val = values["reasoning-dropdown"];
+              if (val) val.textContent = formatReasoningTriggerLabel(item.label);
+              closeAll();
+            }).catch(() => {});
+          });
+        }
+        menu.appendChild(opt);
+      }
+
+      // 更新触发按钮文案
+      const val = values["reasoning-dropdown"];
+      if (val && view.statusText) {
+        val.textContent = formatReasoningTriggerLabel(view.statusText);
+        // dm-title hidden when dropdown is active (view controls visualization)
+        const title2 = menu.querySelector(".dm-title") as HTMLElement | null;
+        if (title2) title2.style.display = "";
+      }
+      reasoningDropdownActive = true;
+    } catch {
+      // 失败安全占位（用户修正 #4）：塞入 disabled "跟随模型"
+      reasoningDropdownDisabled = true;
+      reasoningDropdownActive = false;
+      const menu = menus["reasoning-dropdown"];
+      if (menu) {
+        const title = menu.querySelector(".dm-title");
+        menu.replaceChildren();
+        if (title) menu.appendChild(title);
+        const opt = document.createElement("div");
+        opt.className = "dm-opt is-disabled";
+        opt.textContent = "跟随模型";
+        opt.style.opacity = "0.4";
+        opt.style.pointerEvents = "none";
+        opt.title = "推理控制暂时不可用";
+        menu.appendChild(opt);
+      }
+      const val = values["reasoning-dropdown"];
+      if (val) val.textContent = "推理 · 跟随模型";
+    }
+  }
+
+  // 初始加载
+  void rebuildReasoningDropdown();
+
+  // trigger 点击时先重渲染（model 可能已切换）
+  const reasoningTrigger = document.querySelector<HTMLElement>('.dropdown-trigger[data-dropdown="reasoning-dropdown"]');
+  if (reasoningTrigger) {
+    reasoningTrigger.addEventListener("click", async (e) => {
+      if (reasoningDropdownDisabled) {
+        e.stopImmediatePropagation(); // 当控件 disabled 时阻止原 handler 打开下拉
+        return;
+      }
+      await rebuildReasoningDropdown();
+      // 不阻止原 handler：原 handler 会 closeAll() + openDropdown(id, t)
+    }, true); // capture phase: 在原 handler (bubble 注册) 之前执行
+  }
+
+  void window.chat?.getGeneralSettings?.()
+    .then(function(settings) {
+      selectModeOption(settings?.defaultChatMode);
+      selectDropdownOption("style-dropdown", normalizeStyleId(settings?.currentStyleId));
+      segmentedOutputMode = settings?.segmentedOutputMode === "chat" || settings?.segmentedOutputMode === "off"
+        ? settings.segmentedOutputMode
+        : settings?.segmentedOutputMode === "all" ? "all" : "off";
+      render(true);
+    })
+    .catch(function() {
+      selectModeOption("work");
+      segmentedOutputMode = "off";
+      render(true);
+    });
 
   // Click outside closes
   document.addEventListener("click", closeAll);
@@ -3146,6 +4179,7 @@ let particles: Particle[] = [];
 let particlesDpr = 1;
 let particlesW = 0;
 let particlesH = 0;
+let particlesRaf: number | null = null;
 
 function spawnParticle(): Particle {
   return {
@@ -3198,13 +4232,13 @@ function drawParticles(): void {
     particlesCtx.arc(p.x, p.y, r, 0, Math.PI * 2);
     particlesCtx.fill();
   }
-  requestAnimationFrame(drawParticles);
+  particlesRaf = requestAnimationFrame(drawParticles);
 }
 
 if (particlesCtx) {
   resizeParticles();
   particles = Array.from({ length: PARTICLE_COUNT }, spawnParticle);
-  requestAnimationFrame(drawParticles);
+  particlesRaf = requestAnimationFrame(drawParticles);
   window.addEventListener("resize", resizeParticles);
 }
 
@@ -3220,17 +4254,27 @@ void (async () => {
   void initModelConfig();
 })();
 
-// main → renderer：權限審批請求（per-action 檔位下工具調用前）
-// 插入一張審批卡片到聊天流；用戶點同意/拒絕後回傳給主進程。
+window.addEventListener("beforeunload", () => {
+  for (const off of [...activeAguiOffs]) off();
+  schedulerEventsOff?.();
+  schedulerEventsOff = null;
+  stopCurrentTts();
+  if (particlesRaf !== null) cancelAnimationFrame(particlesRaf);
+  particlesRaf = null;
+  window.removeEventListener("resize", resizeParticles);
+});
+
+// main → renderer：权限审批请求（per-action 档位下工具调用前）
+// 插入一张审批卡片到聊天流；用户点同意/拒绝后回传给主进程。
 window.settings?.onPermissionApprovalRequest?.((req) => {
   console.log("[Cyrene/Chat] permission approval request:", req.id, req.toolId);
   const card = buildApprovalCardEl(req);
   messagesEl.appendChild(card);
-  // 滾動到底部讓用戶看到
+  // 滚动到底部让用户看到
   messagesEl.scrollTop = messagesEl.scrollHeight;
 });
 
-// main → renderer：設置面板點列表/新對話時，讓窗口切到指定 session
+// main → renderer：设置面板点列表/新对话时，让窗口切到指定 session
 window.chatStore?.onSwitchSession(async (sessionId) => {
   if (!window.chatStore) return;
   if (sessionId === currentSessionId) return;
@@ -3238,18 +4282,38 @@ window.chatStore?.onSwitchSession(async (sessionId) => {
   if (session) loadSessionIntoUI(session);
 });
 
-// 任意會話變動後 main 廣播——兩種處理：
-// 1. 當前活躍會話被外部刪了 → fallback 到最新一條 / 自動建新
-// 2. 側欄展開時刷新列表（別的窗口新建/改名/刪除都會觸發）
+// 任意会话变动后 main 广播——两种处理：
+// 1. 当前活跃会话被外部删了 → fallback 到最新一条 / 自动建新
+// 2. 侧栏展开时刷新列表（别的窗口新建/改名/删除都会触发）
 window.chatStore?.onChanged(async () => {
-  // 側欄展開時刷新列表（收起時不浪費 DOM 寫入）
-  if (chatRail && !chatRail.hidden) void renderRailList();
-
   if (!window.chatStore || !currentSessionId) return;
+  const sessions = await window.chatStore.list();
+  for (const session of sessions) {
+    const seenAt = seenSessionUpdatedAt.get(session.id) ?? 0;
+    if (session.purpose === "proactive-chat" && session.id !== currentSessionId && session.updatedAt > seenAt) {
+      unreadProactiveSessionIds.add(session.id);
+    }
+  }
+  // 标记未读后再刷新，确保红点在本次变更中立即出现。
+  if (chatRail && !chatRail.hidden) void renderRailList();
   const stillExists = await window.chatStore.get(currentSessionId);
-  if (stillExists) return;
-  // 當前會話已被外部刪除：fallback 到最新一條 / 自動建新
-  const list = await window.chatStore.list();
+  if (stillExists) {
+    const decision = decideReloadCurrentSession({
+      purpose: stillExists.purpose,
+      updatedAt: stillExists.updatedAt,
+      seenAt: seenSessionUpdatedAt.get(stillExists.id) ?? 0,
+      sending,
+    });
+    if (decision === "reload") {
+      await loadSessionTailIntoUI(stillExists.id);
+    } else if (decision === "defer") {
+      // 发送期间到达的外部变更：排队，等发送结束 flush（见 send/triggerCyreneGreeting 的 finally）。
+      pendingProactiveReloadId = stillExists.id;
+    }
+    return;
+  }
+  // 当前会话已被外部删除：fallback 到最新一条 / 自动建新
+  const list = sessions;
   let next: ChatStoreSession | null = null;
   if (list.length > 0) next = await window.chatStore.get(list[0].id);
   if (!next) next = await window.chatStore.create({ identityId: null });

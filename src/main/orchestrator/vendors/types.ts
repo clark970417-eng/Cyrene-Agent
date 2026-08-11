@@ -1,6 +1,8 @@
-// 廠商工具調用適配層 —— 統一類型
-// 調度層（function-calling.ts）只依賴這裡的統一結構，絕不出現 if (provider === "xxx")。
-// 協議事實來源：docs/vendors/tool-calling-matrix.md
+// 厂商工具调用适配层 —— 统一类型
+// 调度层（function-calling.ts）只依赖这里的统一结构，绝不出现 if (provider === "xxx")。
+// 协议事实来源：docs/vendors/tool-calling-matrix.md
+
+import type { ReasoningPreference } from "../../../shared/reasoning";
 
 export type Transport = "openai" | "anthropic";
 export type AuthStyle = "bearer" | "x-api-key";
@@ -8,42 +10,54 @@ export type ThinkingField = "reasoning_content" | "thinking" | "reasoning_detail
 export type CacheStrategy = "prompt_cache_key" | "cache_control" | "auto" | "none";
 export type TestStrategy = "text" | "text+tool";
 
-/** 調度層傳入適配器的廠商運行時配置（結構兼容 main/index.ts 的 ModelSettings）。 */
+/** 调度层传入适配器的厂商运行时配置（结构兼容 main/index.ts 的 ModelSettings）。 */
 export interface VendorConfig {
-  provider: string; // 廠商顯示名，如 "MiniMax（稀宇科技）"，與 capability 表的 displayName 對齊
+  provider: string; // 厂商显示名，如 "MiniMax（稀宇科技）"，与 capability 表的 displayName 对齐
   baseUrl: string;
   model: string;
   apiKey: string;
   /**
-   * 用戶在 settings UI 顯式指定的 transport；"auto" 走 baseUrl 啟發式 + capabilities fallback。
-   * resolveTransport(cfg) 負責把 auto 解析為具體 transport。
+   * 用户在 settings UI 显式指定的 transport；"auto" 走 baseUrl 启发式 + capabilities fallback。
+   * resolveTransport(cfg) 负责把 auto 解析为具体 transport。
    */
   explicitTransport?: Transport | "auto";
+  /**
+   * 用户保存的推理偏好。adapter buildRequest 必须透传此字段；
+   * 不传时 applyReasoningPreference 缺省按 auto 处理。
+   * commit 2 落地后由 ModelSettings 顶层镜像字段填充；commit 1 期间为可选。
+   */
+  reasoning?: ReasoningPreference;
 }
 
-/** 統一工具調用描述（項目內部），與 OpenAI/Anthropic wire 格式解耦。 */
+export type OpenAIContentBlock =
+  | { type: "text"; text: string }
+  | { type: "image_url"; image_url: { url: string } };
+
+export type ChatMessageContent = string | OpenAIContentBlock[];
+
+/** 统一工具调用描述（项目内部），与 OpenAI/Anthropic wire 格式解耦。 */
 export interface ToolCall {
   id: string;
   name: string;
-  arguments: string; // JSON 字符串，沿用 OpenAI 習慣
+  arguments: string; // JSON 字符串，沿用 OpenAI 习惯
 }
 
 /**
- * 統一消息結構。兩個 transport 各自只讀自己需要的字段，調度層透傳。
- * - OpenAI transport 讀 content / toolCalls / toolCallId / name
- * - Anthropic transport 額外讀 thinking / rawAssistant（多輪必須原樣回傳 content block 數組）
+ * 统一消息结构。两个 transport 各自只读自己需要的字段，调度层透传。
+ * - OpenAI transport 读 content / toolCalls / toolCallId / name
+ * - Anthropic transport 额外读 thinking / rawAssistant（多轮必须原样回传 content block 数组）
  */
 export interface ChatMessage {
   role: "system" | "user" | "assistant" | "tool";
-  content?: string;
-  /** assistant 上的工具調用（統一結構，OpenAI wire 再轉成 tool_calls[].function）。 */
+  content?: ChatMessageContent;
+  /** assistant 上的工具调用（统一结构，OpenAI wire 再转成 tool_calls[].function）。 */
   toolCalls?: ToolCall[];
-  /** role:"tool" 的回填錨點（OpenAI: tool_call_id；Anthropic: tool_use_id）。 */
+  /** role:"tool" 的回填锚点（OpenAI: tool_call_id；Anthropic: tool_use_id）。 */
   toolCallId?: string;
   name?: string;
-  /** 思考/推理純文本（reasoning_content / thinking block 抽出來）。 */
+  /** 思考/推理纯文本（reasoning_content / thinking block 抽出来）。 */
   thinking?: string;
-  /** Anthropic 多輪必須原樣回傳 assistant.content block 數組；OpenAI transport 不讀。 */
+  /** Anthropic 多轮必须原样回传 assistant.content block 数组；OpenAI transport 不读。 */
   rawAssistant?: unknown;
 }
 
@@ -53,27 +67,66 @@ export interface ToolSpec {
   parameters: object; // JSON Schema
 }
 
+export type StructuredOutputRequest =
+  | {
+      mode: "json_schema";
+      name: string;
+      schema: object;
+      strict: boolean;
+    }
+  | {
+      mode: "json_object";
+    }
+  | {
+      mode: "prompt_json";
+      sendJsonObjectHint: boolean;
+    };
+
+/**
+ * Action Gate 专用：直接指定 tool_choice wire 值，绕过 resolveToolChoicePolicy。
+ * Native FC 不设此字段，仍走 toolChoiceIntent + resolveToolChoicePolicy。
+ *
+ * `none` 和 `omit` 的区别：
+ * - `none`：明确发送"禁止调用工具"（wire: tool_choice: "none"）
+ * - `omit`：请求里完全不出现 tool_choice 字段
+ */
+export type ToolChoiceOverride =
+  | { kind: "named"; toolName: string }
+  | { kind: "required" }
+  | { kind: "auto" }
+  | { kind: "none" }
+  | { kind: "omit" };
+
 export interface ChatRequest {
   model: string;
   messages: ChatMessage[];
   tools?: ToolSpec[];
+  /** Runtime semantic intent; the active Adapter maps it to named/required/any/auto/omitted wire syntax. */
+  toolChoiceIntent?: { mode: "must_call"; toolName: string };
+  /** Action Gate 专用：直接指定 tool_choice wire 值，绕过 resolveToolChoicePolicy。 */
+  toolChoiceOverride?: ToolChoiceOverride;
   temperature?: number;
+  topP?: number;
+  frequencyPenalty?: number;
+  repetitionPenalty?: number;
   stream?: boolean;
+  /** CITA/Action Gate only. Native FC keeps using real tools instead. */
+  structuredOutput?: StructuredOutputRequest;
   /**
-   * 非流式調用時的 max_tokens 上限（OpenAI wire: `max_tokens`；Anthropic wire 覆蓋默認 4096）。
-   * 流式時由 adapter 決定是否使用（通常不用——流式靠 finish_reason 判斷）。
+   * 非流式调用时的 max_tokens 上限（OpenAI wire: `max_tokens`；Anthropic wire 覆盖默认 4096）。
+   * 流式时由 adapter 决定是否使用（通常不用--流式靠 finish_reason 判断）。
    */
   maxTokens?: number;
-  /** 透傳到請求體頂層的廠商擴展字段（如 Kimi 的 prompt_cache_key）。 */
+  /** 透传到请求体顶层的厂商扩展字段（如 Kimi 的 prompt_cache_key）。 */
   extraBody?: Record<string, unknown>;
 }
 
 /**
- * Transport-無關的統一流式事件。
- * Reader 層（createSseReader）把 HTTP body 字節流切分成 StreamEvent 列表；
- * Adapter 層 parseStreamEvent(event) 是純函數，無狀態。
+ * Transport-无关的统一流式事件。
+ * Reader 层（createSseReader）把 HTTP body 字节流切分成 StreamEvent 列表；
+ * Adapter 层 parseStreamEvent(event) 是纯函数，无状态。
  *
- * - OpenAI 流式：Reader 切出的 eventType 固定為 "data"，data 是 data: {...} 行的 JSON 字符串。
+ * - OpenAI 流式：Reader 切出的 eventType 固定为 "data"，data 是 data: {...} 行的 JSON 字符串。
  * - Anthropic 流式：eventType 是事件名（message_start / content_block_delta / message_delta /
  *   message_stop 等），data 是 data: {...} 行的 JSON 字符串。
  */
@@ -104,6 +157,8 @@ export interface ChatResponse {
   assistantMessage: ChatMessage;
   text: string;
   thinking?: string;
+  /** Provider-declared refusal; it may coexist with a normal-looking finish reason. */
+  refusal?: string;
   toolCalls: ToolCall[];
   finishReason: string;
   raw: unknown;
@@ -147,18 +202,20 @@ export interface ProviderCapability {
   thinkingField: ThinkingField;
   cacheStrategy: CacheStrategy;
   testStrategy: TestStrategy;
-  /** 是否支持視覺（圖片）輸入。非多模態模型禁止走 read_image。 */
+  /** 是否支持视觉（图片）输入。非多模态模型禁止走 read_image。 */
   supportsVision: boolean;
+  /** Supported must-call wire policies; Adapter maps required to OpenAI required / Anthropic any. */
+  toolChoiceModes?: ReadonlyArray<"named" | "required" | "auto" | "omit">;
   /**
-   * 視覺模型的 OpenAI 兼容 baseUrl。僅當主聊天走 Anthropic 入口、視覺需走 OpenAI 入口時才需要標
-   * （如 MiniMax 主配 /anthropic，視覺要走 /v1）。不標 = 視覺用主配置 baseUrl。
+   * 视觉模型的 OpenAI 兼容 baseUrl。仅当主聊天走 Anthropic 入口、视觉需走 OpenAI 入口时才需要标
+   * （如 MiniMax 主配 /anthropic，视觉要走 /v1）。不标 = 视觉用主配置 baseUrl。
    */
   visionBaseUrl?: string;
-  /** UI 是否允許選擇（Claude 等 Anthropic adapter 未就緒前先禁用）。 */
+  /** UI 是否允许选择（Claude 等 Anthropic adapter 未就绪前先禁用）。 */
   disabled?: boolean;
 }
 
-/** 調度層只看到這一層接口。 */
+/** 调度层只看到这一层接口。 */
 export interface ChatVendorAdapter {
   readonly id: string;
   readonly transport: Transport;

@@ -18,30 +18,37 @@ const LONG_POLL_TIMEOUT_MS = 35_000;
 // ─────────────────────────────────────────────────────────────────────────────
 
 export type ItemType = 1 | 2 | 3 | 4 | 5;  // text|image|voice|file|video
-export type MessageType = 1;               // 摘要只描述了 user→bot 類型
+export type MessageType = 1;               // 摘要只描述了 user→bot 类型
+export enum MediaType {
+  IMAGE = 1,
+  VIDEO = 2,
+  FILE = 3,
+  VOICE = 4,
+}
 
 export interface Credentials {
   botToken: string;
   ilinkBotId: string;
   baseUrl: string;            // 一般就是 BASE_URL
   ilinkUserId: string;
-  /** 顯示用的賬號 id（用 ilinkBotId @ 之前的一段，或完整） */
+  /** 显示用的账号 id（用 ilinkBotId @ 之前的一段，或完整） */
   accountId?: string;
 }
 
-/** 入站消息（已展開成單一形狀） */
+/** 入站消息（已展开成单一形状） */
 export interface WeixinMessage {
   msgId: string;
   fromUserId: string;
   toUserId: string;
   msgType: number;            // 1=user, 2=bot echo
-  content: string;            // 從 item_list[].text_item.text 提取
-  contextToken: string;       // ⚠️ 回覆時原樣帶回
+  content: string;            // 从 item_list[].text_item.text 提取
+  items: WeixinItem[];
+  contextToken: string;       // ⚠️ 回复时原样带回
   createTimeMs?: number;
   raw: unknown;
 }
 
-/** iLink item 形狀（與 SDK WireMessageItem 一致） */
+/** iLink item 形状（与 SDK WireMessageItem 一致） */
 export interface WeixinItem {
   type: ItemType;             // 1=text 2=image 3=voice 4=file 5=video
   text_item?: { text: string };
@@ -74,13 +81,40 @@ interface GetUpdatesResponse {
   longpolling_timeout_ms?: number;
 }
 
-interface SendMessageItem {
+export interface CDNMedia {
+  encrypt_query_param: string;
+  aes_key: string;
+  encrypt_type?: 0 | 1;
+  full_url?: string;
+}
+
+export interface SendMessageItem {
   type: ItemType;
   text_item?: { text: string };
   image_item?: any;
   voice_item?: any;
   file_item?: any;
   video_item?: any;
+}
+
+export interface GetUploadUrlRequest {
+  filekey: string;
+  media_type: MediaType;
+  to_user_id: string;
+  rawsize: number;
+  rawfilemd5: string;
+  filesize: number;
+  thumb_rawsize?: number;
+  thumb_rawfilemd5?: string;
+  thumb_filesize?: number;
+  no_need_thumb?: boolean;
+  aeskey?: string;
+}
+
+export interface GetUploadUrlResponse {
+  upload_param: string;
+  thumb_upload_param?: string;
+  upload_full_url?: string;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -160,6 +194,7 @@ export class ILinkClient {
       toUserId: w.to_user_id,
       msgType: w.message_type,
       content: text,
+      items: w.item_list ?? [],
       contextToken: w.context_token,
       createTimeMs: w.create_time_ms,
       raw: w,
@@ -214,6 +249,19 @@ export class ILinkClient {
       if (err instanceof SessionExpiredError) throw err;
       return { ok: false, error: String(err) };
     }
+  }
+
+  async getUploadUrl(req: GetUploadUrlRequest): Promise<GetUploadUrlResponse> {
+    const resp = await this.doJson<unknown>("POST", "/ilink/bot/getuploadurl", {
+      ...req,
+      base_info: { channel_version: "2.0.0" },
+    });
+    const data = resp as GetUploadUrlResponse & { ret?: number; errmsg?: string };
+    if (data.ret === -14) throw new SessionExpiredError("session expired on getuploadurl");
+    if (data.ret !== 0 && data.ret !== undefined) {
+      throw new Error(`iLink getuploadurl failed: ${data.errmsg ?? `ret=${data.ret}`}`);
+    }
+    return data;
   }
 
   // ── Typing ──────────────────────────────────────────────────────────────

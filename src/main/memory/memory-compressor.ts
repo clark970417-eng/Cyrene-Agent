@@ -8,7 +8,7 @@
 
 import { memoryStore } from "./memory-store";
 import type { L0WritableField } from "./memory-store";
-import { getEntriesBySource } from "../rag/index";
+import { addL2MemoryVector, deleteUserMemoryVectors, getEntriesBySource } from "../rag/index";
 import { cosineSimilarity } from "../rag/vectorstore";
 import { L0_FIELD_DESCRIPTIONS } from "./memory-types";
 import type { L2Memory } from "./memory-types";
@@ -17,9 +17,10 @@ import * as path from "path";
 import { app } from "electron";
 import { getAdapterForConfig } from "../orchestrator/vendors";
 import { recordUsage } from "../token-usage-store";
+import { commitMemoryCompression } from "./memory-compression-transaction";
 import { revealSecrets } from "../security/secret-vault";
 
-// ── LLM 調用（複用與 MemoryJudge 相同的 API 模式） ──
+// ── LLM 调用（复用与 MemoryJudge 相同的 API 模式） ──
 
 interface ModelSettings {
   provider: string;
@@ -204,73 +205,83 @@ async function compressMemories(): Promise<number> {
   }
 
   if (groups.length === 0) {
-    console.log("[MemoryCompressor] 未找到可壓縮的條目組");
+    console.log("[MemoryCompressor] 未找到可压缩的条目组");
     return 0;
   }
 
-  console.log(`[MemoryCompressor] 發現 ${groups.length} 個可壓縮組`);
+  console.log(`[MemoryCompressor] 发现 ${groups.length} 个可压缩组`);
 
-  // 對每組調 LLM 生成總結
+  // 对每组调 LLM 生成总结
   let totalCompressed = 0;
   for (const group of groups) {
     try {
       const texts = group.map((g) => `- ${g.l2.content}`);
       const prompt = [
-        "你是一個記憶總結助手。以下是一組相似的用戶記憶條目，請將它們合併成一條簡潔的總結。",
+        "你是一个记忆总结助手。以下是一组相似的用户记忆条目，请将它们合并成一条简洁的总结。",
         "要求：",
-        "- 保留所有關鍵信息，去重",
-        "- 用中文自然語言",
-        "- 控制在 100 字以內",
-        "- 直接輸出總結文本，不要額外解釋",
+        "- 保留所有关键信息，去重",
+        "- 用中文自然语言",
+        "- 控制在 100 字以内",
+        "- 直接输出总结文本，不要额外解释",
         "",
-        "記憶條目：",
+        "记忆条目：",
         ...texts,
       ].join("\n");
 
       const summary = await callLLM([
-        { role: "system", content: "你是一個簡潔的記憶總結助手。" },
+        { role: "system", content: "你是一个简洁的记忆总结助手。" },
         { role: "user", content: prompt },
       ], 300);
 
       const cleanSummary = summary.replace(/^["「『]|["」』]$/g, "").trim();
       if (!cleanSummary || cleanSummary.length < 5) continue;
 
-      // 收集原始條目 id
       const subEntryIds = group.map((g) => g.l2.id);
-
-      // 創建壓縮總結條目
-      await memoryStore.addL2Memory({
+      await commitMemoryCompression({
         content: cleanSummary,
         triggerText: group[0].l2.triggerText,
         sourceConversationId: group[0].l2.sourceConversationId,
-        ragId: undefined,
-        embedding: [],
-        isPinned: false,
-        isSummary: true,
-        subEntryIds,
+        sources: group.map((entry) => ({
+          id: entry.l2.id,
+          ragId: entry.l2.ragId,
+          status: entry.l2.status,
+        })),
+      }, {
+        createSummary: (input) => memoryStore.addL2Memory(input),
+        addSummaryVector: addL2MemoryVector,
+        markSummarySynced: (l2Id, ragId) => memoryStore.markL2SyncStatus(l2Id, "synced", ragId),
+        archiveSources: (ids) => memoryStore.archiveL2Batch(ids),
+        restoreSources: async (sources) => {
+          const byStatus = new Map<L2Memory["status"], string[]>();
+          for (const source of sources) {
+            byStatus.set(source.status, [...(byStatus.get(source.status) ?? []), source.id]);
+          }
+          for (const [status, ids] of byStatus) await memoryStore.updateL2Status(ids, status);
+        },
+        deactivateSummary: (id) => memoryStore.updateL2Status([id], "archived"),
+        deleteSummary: (id) => memoryStore.deleteL2(id),
+        deleteVectors: (ids) => deleteUserMemoryVectors(ids),
+        warn: (message, error) => console.warn(`[MemoryCompressor] ${message}:`, error),
       });
 
-      // 原始條目歸檔
-      await memoryStore.archiveL2Batch(subEntryIds);
-
-      // 記錄日誌
+      // 记录日志
       await memoryStore.appendReflectionLog({
         type: "compression",
-        summary: `壓縮 ${subEntryIds.length} 條記憶為一條總結`,
-        details: `原條目：${texts.join(" | ")}\n總結：${cleanSummary}`,
+        summary: `压缩 ${subEntryIds.length} 条记忆为一条总结`,
+        details: `原条目：${texts.join(" | ")}\n总结：${cleanSummary}`,
       });
 
       totalCompressed += subEntryIds.length;
-      console.log(`[MemoryCompressor] 壓縮了 ${subEntryIds.length} 條 → "${cleanSummary.slice(0, 40)}"`);
+      console.log(`[MemoryCompressor] 压缩了 ${subEntryIds.length} 条 → "${cleanSummary.slice(0, 40)}"`);
     } catch (err) {
-      console.warn("[MemoryCompressor] 組壓縮失敗:", err);
+      console.warn("[MemoryCompressor] 组压缩失败:", err);
     }
   }
 
   return totalCompressed;
 }
 
-// ── 階段 B：Reflection（L0/L1 元認知更新） ──
+// ── 阶段 B：Reflection（L0/L1 元认知更新） ──
 
 async function runReflection(): Promise<void> {
   try {

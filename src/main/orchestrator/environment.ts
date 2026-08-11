@@ -15,6 +15,7 @@ import { listMcpServers } from "./mcp-manager";
 import { ACCESS_LEVEL_LABEL, getCurrentLevel, policyFor } from "../permission";
 import type { ToolRiskLevel } from "../permission";
 import { getCapability } from "./vendors/capabilities";
+import { resolveChatContextTimezone } from "../chat-time-context";
 
 const LOG_PREFIX = "[Env]";
 
@@ -22,15 +23,6 @@ const LOG_PREFIX = "[Env]";
 export interface ModelInfo {
   provider: string;
   model: string;
-  baseUrl?: string;
-}
-
-export function modelSupportsVision(modelInfo?: ModelInfo): boolean {
-  if (!modelInfo) return false;
-  const cap = getCapability(modelInfo.provider);
-  if (cap?.supportsVision) return true;
-  // 設定頁的 OpenRouter Free 沿用 Custom profile key；Router 會依 image_url 自動篩視覺模型。
-  return /openrouter\.ai/i.test(modelInfo.baseUrl ?? "") || /^openrouter\//i.test(modelInfo.model);
 }
 
 /** 用戶信息片段（由 index.ts 注入，避免循環依賴）。 */
@@ -40,6 +32,7 @@ export interface UserInfoContext {
   birthday?: string;
   defaultCity?: string;
   timezone?: string;
+  gender?: string;
 }
 
 function safeGetPath(name: "desktop" | "documents" | "downloads" | "home"): string {
@@ -51,13 +44,52 @@ function safeGetPath(name: "desktop" | "documents" | "downloads" | "home"): stri
   }
 }
 
-function formatDate(d: Date): string {
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  const dd = String(d.getDate()).padStart(2, "0");
-  const week = ["週日", "週一", "週二", "週三", "週四", "週五", "週六"][d.getDay()];
-  const hh = String(d.getHours()).padStart(2, "0");
-  const min = String(d.getMinutes()).padStart(2, "0");
+/**
+ * 把 d 在 tz 时区下的"年月日 星期 时分"按 part 类型固定组装成 `YYYY-MM-DD 周X HH:MM`。
+ * 不依赖 Intl 本地化字符串的标点/顺序（不同 Node/locale 下 `format()` 输出不稳定），
+ * 因此走 `formatToParts` 拿结构化字段，再固定拼装。
+ * 注：short weekday 在 zh-CN 下通常是"周一"等，否则按 JS Date.getDay() 兜底映射。
+ */
+function formatDate(d: Date, tz: string): string {
+  let parts: Intl.DateTimeFormatPart[];
+  try {
+    parts = new Intl.DateTimeFormat("zh-CN", {
+      timeZone: tz,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      weekday: "short",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    }).formatToParts(d);
+  } catch (err) {
+    console.warn(LOG_PREFIX, "formatToParts 失败，回退系统本地时间:", err);
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    const week = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"][d.getDay()];
+    const hh = String(d.getHours()).padStart(2, "0");
+    const min = String(d.getMinutes()).padStart(2, "0");
+    return `${yyyy}-${mm}-${dd} ${week} ${hh}:${min}`;
+  }
+
+  const get = (type: Intl.DateTimeFormatPartTypes): string =>
+    parts.find((p) => p.type === type)?.value ?? "";
+
+  const yyyy = get("year");
+  const mm = get("month");
+  const dd = get("day");
+  const weekdayRaw = get("weekday");
+  // zh-CN short weekday 形如"周一"；其它 locale 兜底按 d.getUTCDay() 映射
+  // （注意：getUTCDay 对 tz 不是 tz 本地日，下方回退仅在 Intl 异常路径使用）。
+  const weekMap = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
+  const week =
+    weekdayRaw && /[周星期]/.test(weekdayRaw)
+      ? weekdayRaw
+      : weekMap[d.getDay()];
+  const hh = get("hour");
+  const min = get("minute");
   return `${yyyy}-${mm}-${dd} ${week} ${hh}:${min}`;
 }
 
@@ -84,10 +116,11 @@ export function buildEnvironmentContext(modelInfo?: ModelInfo, userInfo?: UserIn
   const downloads = safeGetPath("downloads");
   const home = safeGetPath("home");
   const username = os.userInfo().username;
-  const dateStr = formatDate(new Date());
-  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "unknown";
+  // 用户时区（profile.timezone 缺/非法时由 resolver 回退 Asia/Shanghai），不再读系统时区。
+  const tz = resolveChatContextTimezone(userInfo?.timezone);
+  const dateStr = formatDate(new Date(), tz);
 
-  // 工具清單：按"啟用 + 當前檔位放行"兩個維度過濾，讓模型只看到當下能用的
+  // 工具清单：按"启用 + 当前档位放行"两个维度过滤，让模型只看到当下能用的
   const allEnabled = toolRegistry.getEnabledTools();
   const allowedTools: string[] = [];
   const askTools: string[] = [];
@@ -100,66 +133,85 @@ export function buildEnvironmentContext(modelInfo?: ModelInfo, userInfo?: UserIn
     else deniedTools.push(`${t.id}(${risk})`);
   }
 
-  // MCP server 狀態
-  let mcpLine = "未連接任何 MCP server";
+  // MCP server 状态
+  let mcpLine = "未连接任何 MCP server";
   try {
     const servers = listMcpServers();
     if (servers.length > 0) {
       mcpLine = servers
-        .map((s) => `${s.name}[${s.connected ? "已連接" : "未連接"}, ${s.toolCount} 工具]`)
+        .map((s) => `${s.name}[${s.connected ? "已连接" : "未连接"}, ${s.toolCount} 工具]`)
         .join(", ");
     }
   } catch (err) {
-    console.warn(LOG_PREFIX, "列 MCP server 失敗:", err);
+    console.warn(LOG_PREFIX, "列 MCP server 失败:", err);
   }
 
   const lines: string[] = [];
-  lines.push("## 運行環境（機器實際狀態，不要再憑印象猜）");
+  lines.push("## 运行环境（机器实际状态，不要再凭印象猜）");
   lines.push("");
-  lines.push(`- 當前時間：${dateStr}（時區 ${tz}）`);
-  lines.push(`- 操作系統：${platformLabel()}`);
-  lines.push(`- 當前用戶名：${username}`);
-  if (home) lines.push(`- 用戶主目錄：${home}`);
-  if (desktop) lines.push(`- 桌面路徑：${desktop}`);
-  if (documents) lines.push(`- 文檔路徑：${documents}`);
-  if (downloads) lines.push(`- 下載路徑：${downloads}`);
+  lines.push(`- 当前时间：${dateStr}（时区 ${tz}）`);
+  lines.push(`- 操作系统：${platformLabel()}`);
+  lines.push(`- 当前用户名：${username}`);
+  if (home) lines.push(`- 用户主目录：${home}`);
+  if (desktop) lines.push(`- 桌面路径：${desktop}`);
+  if (documents) lines.push(`- 文档路径：${documents}`);
+  if (downloads) lines.push(`- 下载路径：${downloads}`);
   lines.push("");
-  lines.push(`- 文件權限檔位：${levelLabel}（${level}）`);
-  lines.push(`- 當前檔位下可直接調用的工具：${allowedTools.length > 0 ? allowedTools.join(", ") : "（無）"}`);
+  lines.push(`- 文件权限档位：${levelLabel}（${level}）`);
+  lines.push(`- 当前档位下可直接调用的工具：${allowedTools.length > 0 ? allowedTools.join(", ") : "（无）"}`);
   if (askTools.length > 0) {
-    lines.push(`- 當前檔位需先彈審批的工具：${askTools.join(", ")}`);
+    lines.push(`- 当前档位需先弹审批的工具：${askTools.join(", ")}`);
   }
   if (deniedTools.length > 0) {
-    lines.push(`- 當前檔位被拒絕的工具（提到也調不出）：${deniedTools.join(", ")}`);
+    lines.push(`- 当前档位被拒绝的工具（提到也调不出）：${deniedTools.join(", ")}`);
   }
-  lines.push(`- MCP 服務：${mcpLine}`);
+  lines.push(`- MCP 服务：${mcpLine}`);
   lines.push("");
 
-  // 模型能力邊界：把"你當前這個模型能不能看圖"作為事實告訴模型，
-  // 讓它遇到圖片問題時敢於說"我看不了"，而不是硬編。
-  // 沒傳 modelInfo（比如降級路徑）時保守地告訴它"看不了"。
-  const supportsVision = modelSupportsVision(modelInfo);
-  lines.push(`- 當前模型是否支持查看圖片：${supportsVision ? "支持（可調 read_image 看圖）" : "不支持（看不了圖片，遇到圖片問題必須如實說明，不許編造圖片內容）"}`);
+  // 模型能力边界：把"你当前这个模型能不能看图"作为事实告诉模型，
+  // 让它遇到图片问题时敢于说"我看不了"，而不是硬编。
+  // 没传 modelInfo（比如降级路径）时保守地告诉它"看不了"。
+  let supportsVision = false;
+  if (modelInfo) {
+    const cap = getCapability(modelInfo.provider);
+    supportsVision = cap?.supportsVision ?? false;
+  }
+  lines.push(`- 当前模型是否支持查看图片：${supportsVision ? "支持（可调 read_image 看图）" : "不支持（看不了图片，遇到图片问题必须如实说明，不许编造图片内容）"}`);
   lines.push("");
 
-  // 用戶信息：暱稱、稱呼偏好、生日、默認城市等。讓模型知道"在和誰說話、用戶在哪"，
-  // 避免每次問天氣/位置都要反問用戶。默認城市尤其重要——天氣工具會用到。
+  // 用户信息：昵称、称呼偏好、生日、默认城市等。让模型知道"在和谁说话、用户在哪"，
+  // 避免每次问天气/位置都要反问用户。默认城市尤其重要——天气工具会用到。
   if (userInfo) {
-    lines.push("## 用戶信息");
+    lines.push("## 用户信息");
     lines.push("");
     if (userInfo.callPreference) {
-      lines.push(`- 稱呼偏好：${userInfo.callPreference}（稱呼用戶時優先用這個）`);
+      lines.push(`- 称呼偏好：${userInfo.callPreference}（称呼用户时优先用这个）`);
     } else if (userInfo.nickname) {
-      lines.push(`- 暱稱：${userInfo.nickname}（稱呼用戶時用這個）`);
+      lines.push(`- 昵称：${userInfo.nickname}（称呼用户时用这个）`);
     }
     if (userInfo.birthday) lines.push(`- 生日：${userInfo.birthday}`);
-    if (userInfo.defaultCity) lines.push(`- 默認城市：${userInfo.defaultCity}（用戶問天氣/位置且沒指定其他城市時，默認用這個）`);
-    if (userInfo.timezone && userInfo.timezone !== tz) lines.push(`- 用戶時區：${userInfo.timezone}`);
+    if (userInfo.defaultCity) lines.push(`- 默认城市：${userInfo.defaultCity}（用户问天气/位置且没指定其他城市时，默认用这个）`);
+    if (userInfo.gender === "male") lines.push(`- 性别：男`);
+    else if (userInfo.gender === "female") lines.push(`- 性别：女`);
+    const preferredAddress = userInfo.callPreference?.trim() || userInfo.nickname?.trim();
+    if (preferredAddress) {
+      lines.push(`- 称呼使用：在重要提问或确认时，可以自然使用一次「${preferredAddress}」；不要每句话重复称呼。`);
+    }
+    if (userInfo.gender === "male") {
+      lines.push("- 性别约束：不得使用女性指向称呼；性别只用于防止误称，不要求主动提及。");
+    } else if (userInfo.gender === "female") {
+      lines.push("- 性别约束：不得使用男性指向称呼；性别只用于防止误称，不要求主动提及。");
+    } else {
+      lines.push("- 性别约束：性别未知或保密时只使用中性称呼，不得根据昵称、头像或语气推断。");
+    }
+    lines.push("");
+    // 时区≠地点：明确告知模型 timezone 与 defaultCity 是两个独立维度，不得交叉推断。
+    lines.push("> 用户时区仅用于时间计算，不代表用户所在地，不得根据时区推断用户所在城市。默认城市仅用于天气等需要定位的工具。");
     lines.push("");
   }
 
   lines.push(
-    "當用戶提到「桌面 / 文檔 / 下載」卻沒給絕對路徑時，使用上面這些真實路徑拼接，再交給文件類工具；不要寫 `~/Desktop` 或硬編碼盤符。",
+    "当用户提到「桌面 / 文档 / 下载」却没给绝对路径时，使用上面这些真实路径拼接，再交给文件类工具；不要写 `~/Desktop` 或硬编码盘符。",
   );
 
   const text = lines.join("\n");
@@ -177,3 +229,4 @@ export function buildEnvironmentContext(modelInfo?: ModelInfo, userInfo?: UserIn
 
   return text;
 }
+

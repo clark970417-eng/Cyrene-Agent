@@ -199,6 +199,7 @@ async function sendLark(channel: LarkChannel, targetId: string, part: OutgoingPa
       // 我們 TTS 輸出 mp3 → 必須先解析 mp3 時長再傳 duration, 否則 SDK 報
       // "duration could not be determined for audio; pass it explicitly"
       const duration = await getAudioDurationMs(part.filePath);
+      console.log("[Feishu audio] send file:", part.filePath, "duration:", duration, "mime:", part.mime);
       if (!duration) {
         throw new Error(`無法解析音頻時長: ${part.filePath}`);
       }

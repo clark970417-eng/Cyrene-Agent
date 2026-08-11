@@ -12,6 +12,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { app } from "electron";
 import { toolRegistry } from "./tool-registry";
+import { currentUserTimezone } from "./built-in-tools";
 
 const LOG_PREFIX = "[LifeTools]";
 
@@ -122,42 +123,42 @@ function registerExpenseTools(): void {
         for (const r of records) {
           byCat[r.category] = (byCat[r.category] || 0) + r.amount;
         }
-        return `[query_expense] 最近 ${days} 天共 ${records.length} 筆，合計 ${total.toFixed(2)} 元\n分類：${JSON.stringify(byCat)}`;
+        return `[query_expense] 最近 ${days} 天共 ${records.length} 笔，合计 ${total.toFixed(2)} 元\n分类：${JSON.stringify(byCat)}`;
       }
       const lines = records.map(r => {
-        const d = new Date(r.ts).toLocaleDateString("zh-CN");
+        const d = new Date(r.ts).toLocaleDateString("zh-CN", { timeZone: currentUserTimezone() });
         return `${d} ${r.amount}元 ${r.category} ${r.note}`;
       });
-      return `[query_expense] 最近 ${days} 天 ${records.length} 筆：\n${lines.join("\n")}`;
+      return `[query_expense] 最近 ${days} 天 ${records.length} 笔：\n${lines.join("\n")}`;
     },
   });
 }
 
 // ══════════════════════════════════════════════════════════
-// 匯率
+// 汇率
 // ══════════════════════════════════════════════════════════
 
 function registerExchangeRateTool(): void {
   toolRegistry.register({
     id: "exchange_rate",
-    name: "匯率查詢",
+    name: "汇率查询",
     description:
-      "查詢貨幣匯率並換算。\n\n" +
-      "何時用：\n" +
-      "- 用戶問「X 美元等於多少人民幣」「100 日元換多少人民幣」\n" +
-      "- 用戶提到貨幣換算\n\n" +
-      "不要用於：\n" +
-      "- 加密貨幣（不支持）\n" +
-      "- 歷史匯率（只支持最新）\n\n" +
-      "參數：from（源貨幣代碼，如 USD/EUR/JPY/CNY），to（目標貨幣），amount（金額，默認 1）。",
+      "查询货币汇率并换算。\n\n" +
+      "何时用：\n" +
+      "- 用户问「X 美元等于多少人民币」「100 日元换多少人民币」\n" +
+      "- 用户提到货币换算\n\n" +
+      "不要用于：\n" +
+      "- 加密货币（不支持）\n" +
+      "- 历史汇率（只支持最新）\n\n" +
+      "参数：from（源货币代码，如 USD/EUR/JPY/CNY），to（目标货币），amount（金额，默认 1）。",
     enabled: true,
     risk: "network",
     inputSchema: {
       type: "object",
       properties: {
-        from:   { type: "string", description: "源貨幣代碼，如 USD/EUR/JPY/CNY" },
-        to:     { type: "string", description: "目標貨幣代碼" },
-        amount: { type: "number", description: "金額，默認 1" },
+        from:   { type: "string", description: "源货币代码，如 USD/EUR/JPY/CNY" },
+        to:     { type: "string", description: "目标货币代码" },
+        amount: { type: "number", description: "金额，默认 1" },
       },
       required: ["from", "to"],
     },
@@ -166,33 +167,33 @@ function registerExchangeRateTool(): void {
       const to = String(args.to || "CNY").toUpperCase();
       const amount = Number(args.amount) || 1;
       if (from === to) {
-        return `[exchange_rate] ${amount} ${from} = ${amount} ${to}（同幣種）`;
+        return `[exchange_rate] ${amount} ${from} = ${amount} ${to}（同币种）`;
       }
-      // frankfurter.app 免費、無 key、支持主要貨幣
+      // frankfurter.app 免费、无 key、支持主要货币
       const url = `https://api.frankfurter.app/latest?from=${from}&to=${to}`;
       const resp = await fetch(url);
       if (!resp.ok) {
-        return `[錯誤] 匯率查詢失敗：HTTP ${resp.status}`;
+        return `[错误] 汇率查询失败：HTTP ${resp.status}`;
       }
       const data = await resp.json() as { rates?: Record<string, number> };
       const rate = data.rates?.[to];
       if (!rate) {
-        return `[exchange_rate] 查不到 ${from} → ${to}，可能是不支持的幣種`;
+        return `[exchange_rate] 查不到 ${from} → ${to}，可能是不支持的币种`;
       }
       const result = (amount * rate).toFixed(2);
-      return `[exchange_rate] ${amount} ${from} = ${result} ${to}（匯率 ${rate}，更新於 ${new Date().toLocaleDateString("zh-CN")}）`;
+      return `[exchange_rate] ${amount} ${from} = ${result} ${to}（汇率 ${rate}，更新于 ${new Date().toLocaleDateString("zh-CN", { timeZone: currentUserTimezone() })}）`;
     },
   });
 }
 
 // ══════════════════════════════════════════════════════════
-// 翻譯
+// 翻译
 // ══════════════════════════════════════════════════════════
 
-// 翻譯需要調主模型，注入由 index.ts 完成
+// 翻译需要调主模型，注入由 index.ts 完成
 let modelSettingsGetter: (() => { provider: string; baseUrl: string; model: string; apiKey: string } | null) | null = null;
 
-/** index.ts 啟動時注入模型設置讀取器。 */
+/** index.ts 启动时注入模型设置读取器。 */
 export function setTranslateConfig(getter: () => { provider: string; baseUrl: string; model: string; apiKey: string } | null): void {
   modelSettingsGetter = getter;
 }

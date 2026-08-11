@@ -27,120 +27,48 @@ import { channelManager, type ChannelManager } from "./manager";
 import { getDefaultChannelsSettings, loadChannelsSettings, type ChannelsSettings } from "./settings-store";
 import { appendLog, reloadLogFromDisk } from "./message-log";
 import { appendHistory as appendChannelHistory } from "./history-log";
-import { toTraditionalTaiwan } from "../utils/opencc";
+import { resolveLocalStickerPath } from "../sticker-protocol";
+import { getStickersDir, loadUserStickerManifest } from "../sticker-storage";
+import { BUILT_IN_STICKER_FILES } from "../sticker-descriptions";
+import { BUILT_IN_STICKER_IDS } from "../../shared/sticker-types";
+import { splitTextBySentenceBreaks } from "../../shared/message-segmentation";
 import {
-  extractDiscordExactVoiceText,
-  extractDiscordVoiceRequestTopic,
-  inferDiscordVoiceTone,
-  isDiscordTextVoiceRequestText,
-  type DiscordVoiceTone,
-} from "./adapters/discord/text-voice-request";
+  normalizeMobileMessageSegmentationMode,
+  type MobileMessageSegmentationMode,
+} from "../../shared/preferences";
+import { rememberProactiveChannelRecipient } from "./proactive-delivery";
+import { toTraditionalTaiwan } from "../utils/opencc";
 
-export {
-  extractDiscordExactVoiceText,
-  extractDiscordVoiceRequestTopic,
-  inferDiscordVoiceTone,
-  type DiscordVoiceTone,
-} from "./adapters/discord/text-voice-request";
-
-/** Phase A：用於拼接歷史對話的輕量 ChatMessage 形狀（與 orchestrator ChatMessage 兼容）。 */
+/** Phase A：用于拼接历史对话的轻量 ChatMessage 形状（与 orchestrator ChatMessage 兼容）。 */
 interface ChatMessage {
   role: "user" | "assistant" | "system" | "tool";
   content?: string;
 }
 
-/** Agent 可以在文字之外附帶一張已匹配完成的表情包。 */
-export interface ChannelAgentReply {
-  text: string;
-  sticker?: {
-    id: string;
-    imagePath: string;
-  };
+type TtsAudioFormat = "mp3" | "wav" | "pcm";
+
+interface DispatcherTtsContext {
+  channel: ChannelId;
 }
 
-export interface SynthesizedChannelAudio {
+interface DispatcherTtsResult {
   audio: Buffer;
-  format: "wav" | "mp3";
-}
-
-export interface ChannelTtsContext {
-  stylePrompt?: string;
-  speedMultiplier?: number;
-}
-
-export function isDiscordTextVoiceRequest(msg: IncomingMessage): boolean {
-  return msg.channel === "discord" && isDiscordTextVoiceRequestText(msg.text);
-}
-
-/** 把能力詢問改寫成朗讀稿任務，避免模型誤以為平台不能附加音訊。 */
-export function prepareDiscordVoiceAgentMessage(msg: IncomingMessage): IncomingMessage {
-  if (msg.channel !== "discord") return msg;
-  const topic = extractDiscordVoiceRequestTopic(msg.text);
-  if (topic === null) return msg;
-  const exactText = extractDiscordExactVoiceText(msg.text);
-  const tone = inferDiscordVoiceTone(msg.text);
-  return {
-    ...msg,
-    text: [
-      exactText
-        ? `請只輸出以下指定台詞，文字必須逐字一致，不可增加前言、後話或動作描寫：「${exactText}」`
-        : `請直接寫出一段關於「${topic}」、適合用昔漣口吻朗讀的自然口語內容。`,
-      `朗讀語氣：${tone.stylePrompt}`,
-      "【系統提示】昔漣（你）完全具備在 Discord 傳送語音訊息（語音檔附件）的能力。本次回答會由系統自動合成語音音訊附件並發送給夥伴。",
-      "【極重要】絕對禁止輸出『我無法傳語音』、『Discord不支援發語音』或拒絕傳送語音！只輸出要被朗讀的台詞或講話內容，不要解釋傳送方式，也不要討論是否能傳語音。",
-    ].join("\n"),
-  };
-}
-
-/** Discord 一般文字聊天只回文字；語音輪次或明確語音請求才合成音訊。 */
-export function shouldSynthesizeChannelTts(msg: IncomingMessage, ttsEnabled: boolean): boolean {
-  if (!ttsEnabled) return false;
-  if (msg.channel !== "discord") return true;
-  if (isDiscordTextVoiceRequest(msg)) return true;
-  const raw = msg._raw;
-  return !!raw && typeof raw === "object"
-    && (raw as { source?: unknown }).source === "discord-voice";
-}
-
-/** 強制屋主稱呼一致，避免模型把人格提示中的英文別名直接輸出。 */
-export function normalizeCompanionAddress(text: string): string {
-  return text
-    .replace(/\bpartner(?:'s|’s)\s+friend\b/gi, "夥伴的朋友")
-    .replace(/\bmy\s+partner\b/gi, "我的夥伴")
-    .replace(/\byu[\s_-]*ying\b/gi, "夥伴")
-    .replace(/\bpartner\b/gi, "夥伴");
-}
-
-export function cleanChannelThinkingText(text: string): string {
-  let cleaned = text
-    .replace(/(?:^|\n)\s*<think>[\s\S]*?<\/think>/gi, "")
-    .replace(/(?:^|\n)\s*•?\s*Draft\s*\d+\s*\([^)]*internal\s*thoughts[^)]*\):?[^\n]*/gi, "")
-    .replace(/^(?:嗯[，,])?\s*用戶(?:最近|反覆|在|想要|要求)[^。\n]*[。\n]*/gi, "")
-    .replace(/^(?:翻看|查看|回看)之前的對話[^。\n]*[。\n]*/gi, "")
-    .replace(/^根據系統設定[^。\n]*[。\n]*/gi, "")
-    .replace(/\([\u4e00-\u9fa5\s，,！!？?♪·…—–-]{2,60}\)/g, "")
-    .replace(/[\u0400-\u04FF]+/g, "")
-    .replace(/\bshipped!°[✧✦]?/gi, "");
-
-  return cleaned.trim() || text;
-}
-
-/** 所有外部渠道的 AI 顯示文字都統一為台灣繁體與「夥伴」稱呼；不改動使用者原始輸入。 */
-export function normalizeChannelReplyText(text: string): string {
-  return normalizeCompanionAddress(toTraditionalTaiwan(cleanChannelThinkingText(text)));
+  format: TtsAudioFormat;
+  mime: string;
+  extension: ".mp3" | ".wav" | ".pcm";
 }
 
 const LOG = "[ChannelDispatcher]";
 
-/** sessionId 緩存（用於查重 / 調試 / 上限管理） */
+/** sessionId 缓存（用于查重 / 调试 / 上限管理） */
 const sessionIndex = new Map<string, { channel: ChannelId; senderId: string; lastAt: number }>();
 
-/** 限速：單用戶每分鐘最多 N 條 */
+/** 限速：单用户每分钟最多 N 条 */
 class RateLimiter {
   private buckets = new Map<string, number[]>(); // key = channel:senderId → timestamp[]
   constructor(private settings: ChannelsSettings) {}
 
-  /** 檢查並記錄一次命中。返回 true = 通過；false = 超限。 */
+  /** 检查并记录一次命中。返回 true = 通过；false = 超限。 */
   hit(channel: ChannelId, senderId: string): boolean {
     const key = `${channel}:${senderId}`;
     const now = Date.now();
@@ -183,38 +111,73 @@ export function makeSessionId(channel: ChannelId, senderId: string): string {
   return `channel:${channel}:${hash}`;
 }
 
-/** 記錄 sessionId → 原始 senderId（用於調試 / 反查；不影響正常運行） */
+/** 记录 sessionId → 原始 senderId（用于调试 / 反查；不影响正常运行） */
 function recordSession(channel: ChannelId, senderId: string, sessionId: string): void {
   sessionIndex.set(sessionId, { channel, senderId, lastAt: Date.now() });
-  // 上限管理：超過 5000 個 sessionId 就丟棄最老的（LRU 近似）
+  // 上限管理：超过 5000 个 sessionId 就丢弃最老的（LRU 近似）
   if (sessionIndex.size > 5000) {
     const oldest = [...sessionIndex.entries()].sort((a, b) => a[1].lastAt - b[1].lastAt)[0];
     if (oldest) sessionIndex.delete(oldest[0]);
   }
 }
 
-/** 把原始 senderId 反查回 sessionId。調試用，不依賴也能跑。 */
+/** 把原始 senderId 反查回 sessionId。调试用，不依赖也能跑。 */
 export function lookupOriginalSender(sessionId: string): { channel: ChannelId; senderId: string } | null {
   const entry = sessionIndex.get(sessionId);
   return entry ? { channel: entry.channel, senderId: entry.senderId } : null;
 }
 
-/** Dispatcher 配置（依賴注入）。 */
+/**
+ * 把 sticker id 解析成本地绝对路径（用于 OutgoingPart sticker.imagePath）。
+ *
+ * - 内置 sticker（BUILT_IN_STICKER_IDS）：从 app.getAppPath() 下找 public/stickers/<file>
+ *   - dev 模式：<appPath>/src/renderer/public/stickers
+ *   - built 模式：<appPath>/dist/renderer/stickers
+ *   两个路径都尝试，第一个命中即返回。
+ * - 用户 sticker：从 userData/stickers/<file>（通过 manifest 拿到 file 字段）。
+ * - 解析失败（文件不存在、路径穿越、未知 id）→ 返回 null，调用方跳过此 part。
+ */
+export function resolveStickerImagePath(stickerId: string): string | null {
+  if (!stickerId) return null;
+
+  // 内置 sticker：直接用 BUILT_IN_STICKER_FILES 映射到 public 目录
+  if ((BUILT_IN_STICKER_IDS as readonly string[]).includes(stickerId)) {
+    const file = BUILT_IN_STICKER_FILES[stickerId];
+    if (!file) return null;
+    const appPath = app.getAppPath();
+    // 优先 built 路径（生产），其次 dev 路径（开发模式）
+    const candidates = [
+      path.join(appPath, "dist", "renderer", "stickers", file),
+      path.join(appPath, "src", "renderer", "public", "stickers", file),
+    ];
+    for (const candidate of candidates) {
+      if (fs.existsSync(candidate)) return candidate;
+    }
+    return null;
+  }
+
+  // 用户 sticker：从 manifest 拿 file 字段，再走 sticker-protocol 的安全解析
+  // （resolveLocalStickerPath 已做路径穿越防护）
+  const manifest = loadUserStickerManifest();
+  const meta = manifest[stickerId];
+  if (!meta) return null;
+  return resolveLocalStickerPath(getStickersDir(), meta.file);
+}
+
+/** Dispatcher 配置（依赖注入）。 */
 export interface DispatcherDeps {
   manager: ChannelManager;
-  /** 渲染端 chatWindow 用於鏡像顯示（可選） */
+  /** 渲染端 chatWindow 用于镜像显示（可选） */
   getChatWindow?: () => { webContents: { isDestroyed(): boolean; send: (channel: string, ...args: unknown[]) => void }; isDestroyed(): boolean } | null;
-  /** Phase 1+：完整 agent 調用。Phase 0 留空，返回純 echo。 */
-  buildAndRunAgent?: (
-    msg: IncomingMessage,
-    sessionId: string,
-    priorMessages?: ChatMessage[],
-  ) => Promise<string | ChannelAgentReply>;
-  /** Phase A：讀這個 sessionId 最近 N 條對話歷史（按時間順序）。不提供時不拼歷史，行為同 Phase 0。 */
+  /** Phase 1+：完整 agent 调用。Phase 0 留空，返回纯 echo。
+   *  返回 text（必填）+ sticker（可选 sticker id，由 dispatcher 解析成本地路径后纳入 OutgoingMessage.parts）。
+   *  sticker 解析失败的会静默跳过（不会把坏数据塞进 parts）。 */
+  buildAndRunAgent?: (msg: IncomingMessage, sessionId: string, priorMessages?: ChatMessage[]) => Promise<{ text: string; sticker: string | null }>;
+  /** Phase A：读这个 sessionId 最近 N 条对话历史（按时间顺序）。不提供时不拼历史，行为同 Phase 0。 */
   loadRecentChannelHistory?: (sessionId: string, limit: number) => Promise<ChatMessage[]>;
-  /** Phase 3：可選 — 把文本合成成音頻。失敗返回 null，dispatcher 會跳過 audio。 */
-  synthesizeTts?: (text: string, context?: ChannelTtsContext) => Promise<SynthesizedChannelAudio | null>;
-  /** Phase 3：可選 — 桌面端鏡像廣播：bot 入站/出站消息通知給 chatWindow。 */
+  /** Phase 3：可选 — 把文本合成成音频。失败返回 null，dispatcher 会跳过 audio。 */
+  synthesizeTts?: (text: string, context: DispatcherTtsContext) => Promise<Buffer | DispatcherTtsResult | null>;
+  /** Phase 3：可选 — 桌面端镜像广播：bot 入站/出站消息通知给 chatWindow。 */
   broadcastChat?: (event: {
     type: "bot:incoming" | "bot:outgoing";
     channel: string;
@@ -224,6 +187,61 @@ export interface DispatcherDeps {
     text: string;
     at: number;
   }) => void;
+  /** 读取通用设置中与渠道发送有关的偏好。 */
+  loadGeneralSettings?: () => { mobileMessageSegmentation?: MobileMessageSegmentationMode };
+}
+
+export function buildTextOutgoingParts(
+  replyText: string,
+  mobileMessageSegmentation: MobileMessageSegmentationMode,
+): OutgoingPart[] {
+  const mode = normalizeMobileMessageSegmentationMode(mobileMessageSegmentation);
+  const texts = mode === "on" ? splitTextBySentenceBreaks(replyText) : [replyText];
+  return texts.map((text) => ({ kind: "text", text }));
+}
+
+export function shouldAppendChannelTtsAudio(
+  channel: ChannelId,
+  ttsEnabled: boolean,
+  hasSynthesizeTts: boolean,
+  adapterSupportsAudio: boolean | undefined,
+): boolean {
+  if (channel === "wechat") return false;
+  return ttsEnabled && hasSynthesizeTts && adapterSupportsAudio === true;
+}
+
+export function extractDiscordVoiceRequestTopic(text: string): string | null {
+  const cleaned = text.replace(/<@!?\d+>/g, " ").replace(/\s+/g, " ").trim();
+  const match = cleaned.match(/能傳一段(?:(.+?)的)?語音(?:嗎)?[？?]?\s*$/u);
+  if (!match) return null;
+  return match[1]?.trim() || "自由發揮一段自然、親切的內容";
+}
+
+export function isDiscordTextVoiceRequest(msg: IncomingMessage): boolean {
+  return msg.channel === "discord" && extractDiscordVoiceRequestTopic(msg.text) !== null;
+}
+
+export function prepareDiscordVoiceAgentMessage(msg: IncomingMessage): IncomingMessage {
+  if (msg.channel !== "discord") return msg;
+  const topic = extractDiscordVoiceRequestTopic(msg.text);
+  if (topic === null) return msg;
+  return { ...msg, text: [
+    `請直接寫出一段關於「${topic}」、適合用昔漣口吻朗讀的自然口語內容。`,
+    "本次回答會由 Discord 語音附件功能自動合成並成功發送。",
+    "只輸出要被朗讀的內容，不要解釋傳送方式，也不要討論是否能傳語音。",
+  ].join("\n") };
+}
+
+export function shouldSynthesizeChannelTts(msg: IncomingMessage, ttsEnabled: boolean): boolean {
+  if (!ttsEnabled) return false;
+  if (msg.channel !== "discord") return true;
+  if (isDiscordTextVoiceRequest(msg)) return true;
+  const raw = msg._raw;
+  return !!raw && typeof raw === "object" && (raw as { source?: unknown }).source === "discord-voice";
+}
+
+export function normalizeChannelReplyText(text: string): string {
+  return toTraditionalTaiwan(text);
 }
 
 export class ChannelDispatcher {
@@ -260,8 +278,9 @@ export class ChannelDispatcher {
 
     const sessionId = makeSessionId(msg.channel, msg.senderId);
     recordSession(msg.channel, msg.senderId, sessionId);
+    rememberProactiveChannelRecipient(msg, sessionId);
 
-    // Phase 3：入站消息廣播到桌面端 chatWindow（讓用戶看到 bot 在和誰聊天）
+    // Phase 3：入站消息广播到桌面端 chatWindow（让用户看到 bot 在和谁聊天）
     if (this.settings.mirrorToDesktop) {
       try {
         this.deps.broadcastChat?.({
@@ -290,96 +309,92 @@ export class ChannelDispatcher {
         hasAttachments: (msg.attachments?.length ?? 0) > 0,
       });
     } catch (err) {
-      console.warn(LOG, "appendLog (incoming) 失敗:", err);
+      console.warn(LOG, "appendLog (incoming) 失败:", err);
     }
 
-    // Phase A2：入站消息落對話歷史（下一步 LLM 取的滑窗數據源）
+    // Phase A2：入站消息落对话历史（下一步 LLM 取的滑窗数据源）
     try {
       appendChannelHistory(sessionId, "user", msg.text);
     } catch (err) {
-      console.warn(LOG, "appendHistory (incoming) 失敗:", err);
+      console.warn(LOG, "appendHistory (incoming) 失败:", err);
     }
 
-    // Phase 1 實裝的 agent 調用；Phase 0 沒有 → echo
+    // Phase 1 实装的 agent 调用；Phase 0 没有 → echo
     let replyText: string;
-    let sticker: ChannelAgentReply["sticker"];
+    let sticker: string | null = null;
     if (this.deps.buildAndRunAgent) {
-      // Phase A：拼接最近 16 條歷史 (同桌面端 buildModelMessages 行為).
-      // 加載失敗/未注入 → 不拼歷史 (兼容舊實現).
+      // Phase A：拼接最近 16 条历史 (同桌面端 buildModelMessages 行为).
+      // 加载失败/未注入 → 不拼历史 (兼容旧实现).
       let priorMessages: ChatMessage[] | undefined;
       if (this.deps.loadRecentChannelHistory) {
         try {
           priorMessages = await this.deps.loadRecentChannelHistory(sessionId, 16);
         } catch (err) {
-          console.warn(LOG, "loadRecentChannelHistory 失敗 (繼續不帶歷史):", err);
+          console.warn(LOG, "loadRecentChannelHistory 失败 (继续不带历史):", err);
           priorMessages = undefined;
         }
       }
       try {
-        const agentReply = await this.deps.buildAndRunAgent(prepareDiscordVoiceAgentMessage(msg), sessionId, priorMessages);
-        if (typeof agentReply === "string") {
-          replyText = agentReply;
-        } else {
-          replyText = agentReply.text;
-          sticker = agentReply.sticker;
-        }
+        const result = await this.deps.buildAndRunAgent(prepareDiscordVoiceAgentMessage(msg), sessionId, priorMessages);
+        replyText = normalizeChannelReplyText(result.text);
+        sticker = result.sticker;
       } catch (err) {
-        console.error(LOG, "agent 調用失敗:", err instanceof Error ? err.message : err);
+        console.error(LOG, "agent 调用失败:", err instanceof Error ? err.message : err);
         return null;
       }
     } else {
       replyText = `[echo][${msg.channel}][${msg.senderId}] ${msg.text}`;
-      console.log(LOG, "Phase 0 echo (無 buildAndRunAgent):", replyText);
+      console.log(LOG, "Phase 0 echo (无 buildAndRunAgent):", replyText);
     }
 
-    replyText = normalizeChannelReplyText(replyText);
-    const exactVoiceText = extractDiscordExactVoiceText(msg.text);
-    if (exactVoiceText !== null) replyText = exactVoiceText;
-    if (!replyText.trim() && !sticker) return null;
+    // 构造 OutgoingMessage parts
+    const mobileMessageSegmentation = normalizeMobileMessageSegmentationMode(
+      this.deps.loadGeneralSettings?.().mobileMessageSegmentation,
+    );
+    const parts: OutgoingPart[] = buildTextOutgoingParts(replyText, mobileMessageSegmentation);
 
-    // 構造 OutgoingMessage parts
-    const parts: OutgoingPart[] = [{ kind: "text", text: replyText }];
-    if (sticker) {
-      parts.push({
-        kind: "sticker",
-        stickerId: sticker.id,
-        imagePath: sticker.imagePath,
-      });
-    }
-
-    // Phase 3：TTS 音頻自動追加（如果啟用且適配器支持 audio）
-    const shouldSynthesizeTts = shouldSynthesizeChannelTts(msg, this.settings.ttsEnabled);
-    const audioOnlyRequested = isDiscordTextVoiceRequest(msg);
-    console.log(LOG, `TTS 決策: enabled=${shouldSynthesizeTts} hasFn=${!!this.deps.synthesizeTts}`);
-    if (shouldSynthesizeTts && this.deps.synthesizeTts) {
-      const adapterCap = this.deps.manager.getAdapter(msg.channel)?.capability;
-      console.log(LOG, `TTS 決策: adapterCap.audio=${adapterCap?.audio}`);
-      if (adapterCap?.audio) {
+    // Phase 3：TTS 音频自动追加（如果启用且适配器支持 audio）
+    console.log(LOG, `TTS 决策: ttsEnabled=${this.settings.ttsEnabled} hasFn=${!!this.deps.synthesizeTts}`);
+    const adapterCap = this.deps.manager.getAdapter(msg.channel)?.capability;
+    console.log(LOG, `TTS 决策: adapterCap.audio=${adapterCap?.audio}`);
+    const discordVoiceRequest = isDiscordTextVoiceRequest(msg);
+    if (shouldAppendChannelTtsAudio(msg.channel, shouldSynthesizeChannelTts(msg, this.settings.ttsEnabled), !!this.deps.synthesizeTts, adapterCap?.audio)) {
+      if (this.deps.synthesizeTts) {
         try {
-          const synthesized = await this.deps.synthesizeTts(replyText, inferDiscordVoiceTone(msg.text));
-          console.log(LOG, `TTS 決策: 合成結果 length=${synthesized?.audio.length ?? "null"}`);
-          if (synthesized && synthesized.audio.length > 0) {
-            // 按引擎真實格式寫入，避免 WAV 內容被錯標成 MP3。
+          const audioResult = normalizeTtsResult(await this.deps.synthesizeTts(replyText, { channel: msg.channel }));
+          console.log(LOG, `TTS 决策: 合成结果 length=${audioResult?.audio.length ?? "null"} format=${audioResult?.format ?? "null"}`);
+          if (audioResult && audioResult.audio.length > 0) {
+            // 写到 userData/channels/audio/<messageId>.<ext> 缓存
             const audioDir = path.join(app.getPath("userData"), "channels", "audio");
             fs.mkdirSync(audioDir, { recursive: true });
-            const audioPath = path.join(audioDir, `${msg.channel}-${Date.now()}.${synthesized.format}`);
-            fs.writeFileSync(audioPath, synthesized.audio);
-            const audioPart: OutgoingPart = { kind: "audio", filePath: audioPath, mime: synthesized.format === "wav" ? "audio/wav" : "audio/mpeg" };
-            if (audioOnlyRequested) {
-              // 語音請求隱藏文字，但保留 agent 已匹配的貼圖；Discord 會依序發送音訊、貼圖。
-              const stickerParts = parts.filter((part) => part.kind === "sticker");
-              parts.splice(0, parts.length, audioPart, ...stickerParts);
-            }
-            else parts.push(audioPart);
-            console.log(LOG, `TTS 合成完成: ${synthesized.audio.length} bytes → ${audioPath}`);
+            const audioPath = path.join(audioDir, `${msg.channel}-${Date.now()}${audioResult.extension}`);
+            fs.writeFileSync(audioPath, audioResult.audio);
+            console.log(LOG, `TTS verify: written path=${audioPath} ext=${audioResult.extension} mime=${audioResult.mime}`);
+            parts.push({ kind: "audio", filePath: audioPath, mime: audioResult.mime });
+            if (discordVoiceRequest) parts.splice(0, parts.length - 1);
+            console.log(LOG, `TTS 合成完成: ${audioResult.audio.length} bytes → ${audioPath}`);
           }
         } catch (err) {
-          console.warn(LOG, "TTS 合成失敗（跳過音頻）:", err instanceof Error ? err.message : err);
+          console.warn(LOG, "TTS 合成失败（跳过音频）:", err instanceof Error ? err.message : err);
         }
       }
     }
 
-    // Phase 3：出站消息廣播到桌面端
+    // Phase 4：sticker 决定纳入 OutgoingMessage.parts（统一消息模型）。
+    // 由 onAgentRunFinished 计算（同一个 embedding 匹配结果，避免重复计算），
+    // dispatcher 只负责解析本地路径 + 按 cap 降级。
+    // 桌面聊天窗的 sticker 由 onAgentRunFinished 内部 IPC 广播承担，此处不重复。
+    if (sticker && this.settings.stickerEnabled) {
+      const stickerPath = resolveStickerImagePath(sticker);
+      if (stickerPath) {
+        parts.push({ kind: "sticker", stickerId: sticker, imagePath: stickerPath });
+        console.log(LOG, `sticker 决定: id=${sticker} → ${stickerPath}`);
+      } else {
+        console.warn(LOG, `sticker 解析失败（跳过）: id=${sticker}`);
+      }
+    }
+
+    // Phase 3：出站消息广播到桌面端
     if (this.settings.mirrorToDesktop) {
       try {
         this.deps.broadcastChat?.({
@@ -424,7 +439,6 @@ export class ChannelDispatcher {
       targetId: msg.chatId,
       threadId: msg.threadId,
       parts,
-      replyToMessageId: msg.messageId,
     };
     return this.downgradeToCapability(outgoing, this.deps.manager.getAdapter(msg.channel)?.capability);
   }
@@ -438,7 +452,7 @@ export class ChannelDispatcher {
         if (cap.maxTextLength > 0 && p.text.length > cap.maxTextLength) {
           parts.push({
             kind: "text",
-            text: p.text.slice(0, Math.max(0, cap.maxTextLength - 20)) + "\n...(過長已截斷)",
+            text: p.text.slice(0, Math.max(0, cap.maxTextLength - 20)) + "\n…(過長已截斷)",
           });
         } else {
           parts.push(p);
@@ -446,7 +460,11 @@ export class ChannelDispatcher {
       } else if (p.kind === "image" && !cap.image) {
         parts.push({ kind: "text", text: `[圖片] ${p.caption ?? p.url ?? p.filePath ?? ""}` });
       } else if (p.kind === "audio" && !cap.audio) {
-        parts.push({ kind: "text", text: `[語音消息 ${p.mime}, 見桌面端]` });
+        parts.push({ kind: "text", text: `[語音消息 ${p.mime}，見桌面端]` });
+      } else if (p.kind === "file" && !cap.file) {
+        parts.push({ kind: "text", text: `[文件] ${p.name ?? p.filePath}` });
+      } else if (p.kind === "video" && !cap.video) {
+        parts.push({ kind: "text", text: `[视频] ${p.name ?? p.filePath}` });
       } else if (p.kind === "card" && !cap.card) {
         const lines: string[] = [p.title];
         if (p.markdown) lines.push(p.markdown);
@@ -464,35 +482,47 @@ export class ChannelDispatcher {
   }
 }
 
-/** 進程級單例 —— Phase 1 注入 buildAndRunAgent 後才會真正幹活。 */
+function normalizeTtsResult(result: Buffer | DispatcherTtsResult | null): DispatcherTtsResult | null {
+  if (!result) return null;
+  if (Buffer.isBuffer(result)) {
+    return {
+      audio: result,
+      format: "mp3",
+      mime: "audio/mpeg",
+      extension: ".mp3",
+    };
+  }
+  return result;
+}
+
+/** 进程级单例 —— Phase 1 注入 buildAndRunAgent 后才会真正干活。 */
 export const channelDispatcher = new ChannelDispatcher({
   manager: channelManager,
 });
 
-/** 給 index.ts 調：注入 buildAndRunAgent（讓 dispatcher 真正跑 agent） */
+/** 给 index.ts 调：注入 buildAndRunAgent（让 dispatcher 真正跑 agent）
+ *  返回 text + sticker：text 直接做 reply；sticker 由 dispatcher 解析成本地路径后纳入 OutgoingMessage.parts。 */
 export function setDispatcherBuildAndRunAgent(
-  fn: (
-    msg: IncomingMessage,
-    sessionId: string,
-    priorMessages?: { role: "user" | "assistant" | "system"; content?: string }[],
-  ) => Promise<string | ChannelAgentReply>,
+  fn: (msg: IncomingMessage, sessionId: string, priorMessages?: ChatMessage[]) => Promise<{ text: string; sticker: string | null }>,
 ): void {
-  channelDispatcher.deps.buildAndRunAgent = fn as never;
+  channelDispatcher.deps.buildAndRunAgent = fn;
 }
 
-/** Phase 3.1：注入 TTS 合成（返回 mp3 Buffer 或 null） */
-export function setDispatcherSynthesizeTts(fn: (text: string, context?: ChannelTtsContext) => Promise<SynthesizedChannelAudio | null>): void {
+/** Phase 3.1：注入 TTS 合成（返回音频或 null） */
+export function setDispatcherSynthesizeTts(
+  fn: (text: string, context: DispatcherTtsContext) => Promise<Buffer | DispatcherTtsResult | null>,
+): void {
   channelDispatcher.deps.synthesizeTts = fn;
 }
 
-/** Phase A：注入最近對話歷史讀取（index.ts 注入一個用 history-log 實現的閉包） */
+/** Phase A：注入最近对话历史读取（index.ts 注入一个用 history-log 实现的闭包） */
 export function setDispatcherLoadRecentHistory(
   fn: (sessionId: string, limit: number) => Promise<{ role: "user" | "assistant"; content?: string }[]>,
 ): void {
   channelDispatcher.deps.loadRecentChannelHistory = fn;
 }
 
-/** Phase 3.2：注入桌面端鏡像廣播（chatWindow 推送 bot 入站/出站消息） */
+/** Phase 3.2：注入桌面端镜像广播（chatWindow 推送 bot 入站/出站消息） */
 export function setDispatcherBroadcastChat(
   fn: (event: {
     type: "bot:incoming" | "bot:outgoing";
@@ -505,4 +535,11 @@ export function setDispatcherBroadcastChat(
   }) => void,
 ): void {
   channelDispatcher.deps.broadcastChat = fn;
+}
+
+/** 注入通用设置读取器（渠道发送时实时读取偏好）。 */
+export function setDispatcherLoadGeneralSettings(
+  fn: () => { mobileMessageSegmentation?: MobileMessageSegmentationMode },
+): void {
+  channelDispatcher.deps.loadGeneralSettings = fn;
 }

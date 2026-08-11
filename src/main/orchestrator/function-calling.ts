@@ -158,61 +158,63 @@ export async function runFunctionCallingLoop(
 
     if (!response.ok) {
       const errorText = await response.text().catch(() => "");
-      console.error(LOG_PREFIX, "LLM 請求失敗 HTTP " + response.status + ":", errorText.slice(0, 300));
-      throw new Error("模型請求失敗：HTTP " + response.status + (errorText ? " — " + errorText.slice(0, 200) : ""));
+      console.error(LOG_PREFIX, "LLM 请求失败 HTTP " + response.status + ":", errorText.slice(0, 300));
+      throw new Error("模型请求失败：HTTP " + response.status + (errorText ? " — " + errorText.slice(0, 200) : ""));
     }
 
     const data = await response.json();
     const chat = adapter.parseResponse(data);
 
-    // 累加 token 用量（每輪都記）
+    // 累加 token 用量（每轮都记）
     if (chat.usage) {
       accInput += chat.usage.input;
       accOutput += chat.usage.output;
-      recordUsage(chat.usage.input, chat.usage.output, 1, settings.model);
+      recordUsage(chat.usage.input, chat.usage.output, 1);
     }
 
     console.log(
       LOG_PREFIX,
-      "第 " + (round + 1) + " 輪完成 finish=" + chat.finishReason +
-      " toolCalls=" + chat.toolCalls.length + " thinking=" + (chat.thinking ? "有" : "無") +
-      " 耗時=" + (Date.now() - roundStart) + "ms",
+      "第 " + (round + 1) + " 轮完成 finish=" + chat.finishReason +
+      " toolCalls=" + chat.toolCalls.length + " thinking=" + (chat.thinking ? "有" : "无") +
+      " 耗时=" + (Date.now() - roundStart) + "ms",
     );
 
-    // 請求成功，重置連續超時計數
+    // 请求成功，重置连续超时计数
     consecutiveTimeouts = 0;
 
-    // 把 assistant 消息加入對話（adapter 已保留 thinking / rawAssistant 供下輪迴傳）
+    // 把 assistant 消息加入对话（adapter 已保留 thinking / rawAssistant 供下轮回传）
     conversation.push(chat.assistantMessage);
 
-    // 情況1：模型要調工具（按 toolCalls 數量判斷，與 transport 無關）
+    // 情况1：模型要调工具（按 toolCalls 数量判断，与 transport 无关）
     if (chat.toolCalls.length > 0) {
       console.log(
         LOG_PREFIX,
-        "模型請求調用 " + chat.toolCalls.length + " 個工具:",
+        "模型请求调用 " + chat.toolCalls.length + " 个工具:",
         chat.toolCalls.map(tc => tc.name).join(", "),
       );
 
       const execResults: ToolExecutionResult[] = [];
       for (const tc of chat.toolCalls) {
-        const toolStartedAt = Date.now();
         const tool = toolRegistry.getById(tc.name);
 
         let args: Record<string, unknown> = {};
         try {
           args = JSON.parse(tc.arguments || "{}");
         } catch {
-          console.warn(LOG_PREFIX, "工具參數 JSON 解析失敗:", tc.arguments?.slice(0, 100));
+          console.warn(LOG_PREFIX, "工具参数 JSON 解析失败:", tc.arguments?.slice(0, 100));
         }
 
-        console.log(LOG_PREFIX, "執行工具:", tc.name, JSON.stringify(args).slice(0, 200));
+        console.log(LOG_PREFIX, "执行工具:", tc.name, JSON.stringify(args).slice(0, 200));
 
         let output: string;
+        let status: ToolCallResult["status"] = "failed";
+        let errorCode: string | undefined;
         if (!tool || !tool.enabled) {
-          output = "[錯誤] 工具不可用: " + tc.name;
+          output = "[错误] 工具不可用: " + tc.name;
+          errorCode = "E_TOOL_UNAVAILABLE";
           console.warn(LOG_PREFIX, output);
         } else {
-          // 權限網關：內置工具默認 safe，MCP 工具按其 risk 字段判定
+          // 权限网关：内置工具默认 safe，MCP 工具按其 risk 字段判定
           const risk: ToolRiskLevel = (tool as ToolDefinition & { risk?: ToolRiskLevel }).risk || "safe";
           const perm = await checkPermission({
             toolId: tc.name,
@@ -222,77 +224,70 @@ export async function runFunctionCallingLoop(
             risk,
           });
           if (!perm.allowed) {
-            output = "[已拒絕] " + (perm.reason || "權限不足");
-            console.warn(LOG_PREFIX, "權限拒絕 [" + tc.name + "]:", perm.reason);
+            output = "[已拒绝] " + (perm.reason || "权限不足");
+            errorCode = "E_PERMISSION_DENIED";
+            console.warn(LOG_PREFIX, "权限拒绝 [" + tc.name + "]:", perm.reason);
           } else {
-            // ToolContext 注入：聲明 needsContext 的工具拿到用戶當前問題。
-            // 能力判斷交給工具內部（read_image 自己查視覺配置），調度層不再提前門控。
+            // ToolContext 注入：声明 needsContext 的工具拿到用户当前问题。
+            // 能力判断交给工具内部（read_image 自己查视觉配置），调度层不再提前门控。
             const ctx: ToolContext | undefined = tool.needsContext
-              ? { userQuery: extractLastUserQuery(conversation) }
+              ? { userQuery: extractLastUserQuery(conversation), conversationId: "default" }
               : undefined;
             try {
               output = await tool.execute(args, ctx);
+              status = "succeeded";
               console.log(LOG_PREFIX, "工具返回 [" + tc.name + "]:", output.slice(0, 200));
             } catch (err) {
               const errMsg = err instanceof Error ? err.message : String(err);
-              output = "[工具執行失敗] " + errMsg;
-              console.error(LOG_PREFIX, "工具執行失敗 [" + tc.name + "]:", errMsg);
+              output = "[工具执行失败] " + errMsg;
+              errorCode = "E_TOOL_EXECUTION_FAILED";
+              console.error(LOG_PREFIX, "工具执行失败 [" + tc.name + "]:", errMsg);
             }
           }
         }
 
-        recordAgentActivity({
-          kind: output.startsWith("[已拒絕]") ? "permission" : "tool",
-          name: tc.name,
-          status: output.startsWith("[已拒絕]") ? "denied" : output.startsWith("[錯誤]") || output.startsWith("[工具執行失敗]") ? "failed" : "success",
-          durationMs: Date.now() - toolStartedAt,
-          args,
-          result: output,
-          ...(output.startsWith("[錯誤]") || output.startsWith("[工具執行失敗]") ? { error: output } : {}),
-        });
-
-        allToolResults.push({ toolId: tc.name, args, output });
-        // execResults 進 conversation，截斷防單條大結果爆窗
+        allToolResults.push({ toolId: tc.name, args, output, status, ...(errorCode ? { errorCode } : {}) });
+        // execResults 进 conversation，截断防单条大结果爆窗
         execResults.push({ toolCall: tc, output: truncateToolResult(output) });
       }
 
-      // adapter 負責把 tool result 按各自協議回灌
-      // （OpenAI: 多條 role:tool；Anthropic: 合併進 user 的 tool_result block）
+      // adapter 负责把 tool result 按各自协议回灌
+      // （OpenAI: 多条 role:tool；Anthropic: 合并进 user 的 tool_result block）
       conversation = adapter.appendToolResults(conversation, execResults);
 
-      // 防線②：窗口級壓縮——conversation 累積超閾值時摘要化舊輪次
+      // 防线②：窗口级压缩——conversation 累积超阈值时摘要化旧轮次
       conversation = compressConversation(conversation);
 
       continue;
     }
 
-    // 情況2：模型正常返回文本
+    // 情况2：模型正常返回文本
     const content = chat.text || "";
-    console.log(LOG_PREFIX, "Function Calling 完成，最終回覆長度=" + content.length);
+    console.log(LOG_PREFIX, "Function Calling 完成，最终回复长度=" + content.length);
     const totalUsage = (accInput > 0 || accOutput > 0) ? { input: accInput, output: accOutput } : undefined;
     return { reply: content, toolResults: allToolResults, totalUsage };
   }
 
-  // 超過最大輪數，強制要求模型總結（不帶 tools）
-  console.warn(LOG_PREFIX, "達到最大輪數 " + MAX_TOOL_ROUNDS + "，強制要求模型回覆");
+  // 超过最大轮数，强制要求模型总结（不带 tools）
+  console.warn(LOG_PREFIX, "达到最大轮数 " + MAX_TOOL_ROUNDS + "，强制要求模型回复");
   conversation.push({
     role: "user",
-    content: "請基於以上所有工具返回的信息，給出最終回覆。不要繼續調用工具。",
+    content: "请基于以上所有工具返回的信息，给出最终回复。不要继续调用工具。",
   });
 
   let finalReq: ChatRequest = {
     model: settings.model,
     messages: conversation,
-    // 不傳 temperature：不同型號約束不同，讓廠商用默認值
+    // 不传 temperature：不同型号约束不同，让厂商用默认值
     stream: false,
   };
   if (adapter.applyCacheHints) finalReq = adapter.applyCacheHints(finalReq, settings);
   const http = adapter.buildRequest(finalReq, settings);
-  console.log(LOG_PREFIX, "請求:", http.url);
+  console.log(LOG_PREFIX, "请求:", http.url);
 
   const controller = new AbortController();
-  // 強制總結是最後兜底：對話歷史此時往往已很長，30s 不夠模型生成完會被 abort，
-  // 導致整個 run 拋錯用戶徹底沒回復。放寬到 90s，且失敗時降級返回已有工具結果。
+  // 强制总结是最后兜底：对话历史此时往往已很长，30s 不够模型生成完会被 abort，
+  // 导致整个 run 抛错用户彻底没回复。放宽到 90s，且失败时降级返回已有工具结果。
   const timer = setTimeout(() => controller.abort(), FORCE_SUMMARY_TIMEOUT_MS);
   try {
     const response = await fetch(http.url, {

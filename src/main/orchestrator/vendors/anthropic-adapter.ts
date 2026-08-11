@@ -1,11 +1,18 @@
 // Anthropic transport —— MiniMax（主推）/ Claude
-// 請求體協議：POST {baseUrl}/v1/messages（baseUrl 已含 /v1 時只加 /messages）
-// system 頂層 + messages[].content 為 content block 數組 + tools[].input_schema
+// 请求体协议：POST {baseUrl}/v1/messages（baseUrl 已含 /v1 时只加 /messages）
+// system 顶层 + messages[].content 为 content block 数组 + tools[].input_schema
+//
+// 鉴权由 authHeaderFor 根据 capability.authStyle 决定——Anthropic transport
+// 也可以配 bearer（如 MiMo /anthropic 端点）。
 import {
   ChatMessage, ChatRequest, ChatResponse, ChatVendorAdapter,
   HttpRequest, ProviderCapability, StreamChunk, StreamEvent,
   TestConnectionResult, ToolCall, ToolExecutionResult, VendorConfig,
 } from "./types";
+import { authHeaderFor } from "./auth";
+import { resolveReasoningCapability } from "../../../shared/reasoning";
+import { applyReasoningPreference } from "./reasoning";
+import { resolveAutomaticToolChoicePolicy, resolveToolChoicePolicy } from "./tool-choice-policy";
 
 const ANTHROPIC_VERSION = "2023-06-01";
 const DEFAULT_MAX_TOKENS = 4096;
@@ -93,9 +100,10 @@ export class AnthropicAdapter implements ChatVendorAdapter {
       messages,
       stream: req.stream ?? false,
     };
-    // temperature 只在調用方顯式傳時才塞進 body，讓廠商用默認值避免型號約束衝突
+    // temperature 只在调用方显式传时才塞进 body，让厂商用默认值避免型号约束冲突
     if (req.temperature !== undefined) body.temperature = req.temperature;
-    // system + 主動緩存（MiniMax/Claude：cache_control: ephemeral 打在 system block 上）
+    if (req.topP !== undefined) body.top_p = req.topP;
+    // system + 主动缓存（MiniMax/Claude：cache_control: ephemeral 打在 system block 上）
     if (system) {
       if (this.capability.cacheStrategy === "cache_control") {
         body.system = [{ type: "text", text: system, cache_control: { type: "ephemeral" } }];
@@ -109,18 +117,84 @@ export class AnthropicAdapter implements ChatVendorAdapter {
         description: t.description,
         input_schema: t.parameters,
       }));
-      body.tool_choice = { type: "auto" };
+      if (req.toolChoiceOverride) {
+        // Action Gate 专用：直接指定 tool_choice wire 值，绕过 resolveToolChoicePolicy
+        switch (req.toolChoiceOverride.kind) {
+          case "named":
+            body.tool_choice = { type: "tool", name: req.toolChoiceOverride.toolName };
+            break;
+          case "required":
+            body.tool_choice = { type: "any" };
+            break;
+          case "auto":
+            body.tool_choice = { type: "auto" };
+            break;
+          case "none":
+            body.tool_choice = { type: "none" };
+            break;
+          case "omit":
+            // 不发 tool_choice 字段
+            break;
+        }
+      } else if (req.toolChoiceIntent) {
+        const policy = resolveToolChoicePolicy({
+          providerId: this.capability.id,
+          model: cfg.model,
+          transport: this.transport,
+          reasoning: cfg.reasoning ?? { mode: "auto" },
+          requestedToolName: req.toolChoiceIntent.toolName,
+          supportedModes: this.capability.toolChoiceModes,
+        });
+        if (policy.kind === "named") body.tool_choice = { type: "tool", name: policy.name };
+        else if (policy.kind === "required") body.tool_choice = { type: "any" };
+        else if (policy.kind === "auto") body.tool_choice = { type: "auto" };
+      } else if (resolveAutomaticToolChoicePolicy({
+        providerId: this.capability.id,
+        model: cfg.model,
+        transport: this.transport,
+        reasoning: cfg.reasoning ?? { mode: "auto" },
+        supportedModes: this.capability.toolChoiceModes,
+      }) === "auto") {
+        body.tool_choice = { type: "auto" };
+      }
     }
     if (req.extraBody) Object.assign(body, req.extraBody);
+    if (req.structuredOutput?.mode === "json_schema") {
+      body.output_config = {
+        ...(
+          body.output_config
+          && typeof body.output_config === "object"
+          && !Array.isArray(body.output_config)
+            ? body.output_config as Record<string, unknown>
+            : {}
+        ),
+        format: {
+          type: "json_schema",
+          schema: req.structuredOutput.schema,
+        },
+      };
+    }
+    // 推理控制：按 (providerId, model) 解析 capability，调用 applyReasoningPreference 转换 body。
+    const reasoningCap = resolveReasoningCapability(this.capability.id, cfg.model);
+    const finalBody = applyReasoningPreference(
+      body,
+      cfg.reasoning ?? { mode: "auto" },
+      reasoningCap,
+      {
+        hasTools: Boolean(req.tools?.length),
+        providerId: this.capability.id,
+        model: cfg.model,
+      },
+    );
     return {
       url: buildUrl(cfg.baseUrl),
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "x-api-key": cfg.apiKey,
+        ...authHeaderFor(this.capability, cfg.apiKey),
         "anthropic-version": ANTHROPIC_VERSION,
       },
-      body: JSON.stringify(body),
+      body: JSON.stringify(finalBody),
     };
   }
 

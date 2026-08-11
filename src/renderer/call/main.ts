@@ -323,481 +323,110 @@ function animateMicWave(): void {
   requestAnimationFrame(animateMicWave);
 }
 
-// ── 麥克風採集 + VAD ──
+// ── 麦克风采集 + VAD ──
 let audioContext: AudioContext | null = null;
 let analyser: AnalyserNode | null = null;
-let analyserTimeData: Uint8Array | null = null;
 let workletNode: AudioWorkletNode | null = null;
 let micStream: MediaStream | null = null;
 let vadSilenceTimer: ReturnType<typeof setTimeout> | null = null;
-let vadInterval: ReturnType<typeof setInterval> | null = null;
 let vadSilenceMs = 1000;
-let noiseFloor = 0.015; // 初始噪音底噪估計
-let vadThreshold = 0.035; // 初始判斷閾值
-let hasSpoken = false; // 用戶是否已開始說話（VAD 只在說過話後檢測靜默）
-let pcmPreroll: ArrayBuffer[] = [];
-let asrEngine = "local"; // local, aliyun, web-speech, off
-let recognition: any = null;
-let recognitionText = "";
-let webSpeechTurnPending = false;
-let webSpeechTurnFallback: ReturnType<typeof setTimeout> | null = null;
-let webSpeechFatalError = false;
-let webSpeechStarting = false;
-let isMuted = false;
-let pushToTalk = false;
-let pttActive = false;
-let displayStream: MediaStream | null = null;
+let vadThreshold = 0.01; // 音量阈值，默认调低照顾安静环境/小声麦克风
+let hasSpoken = false; // 用户是否已开始说话（VAD 只在说过话后检测静默）
 
 async function startMicrophone(): Promise<void> {
   try {
-    // 先列出所有音訊輸入設備，列印在 Console 中方便診斷
-    try {
-      const devices = await navigator.mediaDevices.enumerateDevices();
-      const audioInputs = devices.filter(d => d.kind === "audioinput");
-      console.log("[Call] 偵測到的麥克風輸入設備列表:", audioInputs.map(d => ({ label: d.label || "（未授權，請先允許錄音權限）", id: d.deviceId })));
-    } catch (e) {
-      console.warn("[Call] 無法列出麥克風設備:", e);
-    }
-
     micStream = await navigator.mediaDevices.getUserMedia({
       audio: {
+        sampleRate: 16000,
+        channelCount: 1,
         echoCancellation: true,
         noiseSuppression: true,
       },
     });
 
     audioContext = new AudioContext({ sampleRate: 16000 });
-    const pcmProcessorUrl = import.meta.env.DEV
-      ? "/pcm-processor.js"
-      : new URL(/* @vite-ignore */ "../pcm-processor.js", import.meta.url).toString();
-    await audioContext.audioWorklet.addModule(pcmProcessorUrl);
+    await audioContext.audioWorklet.addModule(new URL("./pcm-processor.js", import.meta.url));
 
     const source = audioContext.createMediaStreamSource(micStream);
 
-    // AnalyserNode 用於 VAD + 波形顯示
+    // AnalyserNode 用于 VAD + 波形显示
     analyser = audioContext.createAnalyser();
     analyser.fftSize = 256;
     analyserData = new Uint8Array(analyser.frequencyBinCount);
-    analyserTimeData = new Uint8Array(analyser.fftSize);
     source.connect(analyser);
 
-    // AudioWorkletNode 用於 PCM 採集
+    // AudioWorkletNode 用于 PCM 采集
     workletNode = new AudioWorkletNode(audioContext, "pcm-processor");
     workletNode.port.onmessage = (e: MessageEvent) => {
       const frame = e.data as ArrayBuffer;
-      if (!isMuted && asrEngine !== "off") {
-        if (pushToTalk) {
-          if (pttActive) window.call?.sendAudioFrame(frame);
-        } else if (hasSpoken) {
-          window.call?.sendAudioFrame(frame);
-        } else {
-          // 等確認是人聲才送出；保留約 600ms 預錄，避免吃掉第一個字。
-          pcmPreroll.push(frame);
-          if (pcmPreroll.length > 60) pcmPreroll.shift();
-        }
-      }
+      window.call?.sendAudioFrame(frame);
     };
     source.connect(workletNode);
-    // Web Audio 圖是由 destination 向上游拉取的；未連接輸出時 Chromium
-    // 可能剪掉 Worklet，導致 port.onmessage 永遠收不到 PCM。
-    // PCMProcessor 沒有寫入 outputs，因此連到 destination 仍是靜音，不會麥克風回放。
-    keepPcmWorkletAlive(workletNode, audioContext.destination);
+    // workletNode 不连 destination（不需要本地回放）
 
-    // 確保恢復 AudioContext 運行狀態，避免 Chromium 默認的 suspended 策略攔截音訊處理
-    if (audioContext.state === "suspended") {
-      await audioContext.resume();
-    }
-
-    console.log("[Call] 麥克風已啟動");
+    console.log("[Call] 麦克风已启动");
     startVAD();
   } catch (err) {
-    console.error("[Call] 麥克風啟動失敗:", err);
-    statusEl.textContent = "無法訪問麥克風，請檢查權限";
+    console.error("[Call] 麦克风启动失败:", err);
+    statusEl.textContent = "无法访问麦克风，请检查权限";
     statusEl.className = "call__status call__status--error";
   }
 }
 
-/** VAD 靜默檢測：連續 N ms 低於閾值判定說完（採用自適應底噪演算法） */
+/** VAD 静默检测：连续 N ms 低于阈值判定说完 */
 function startVAD(): void {
   let logCounter = 0;
-  let speechCandidateFrames = 0;
-  const calibrationSamples: number[] = [];
-  const calibrationFrameCount = 12; // 前 1.2 秒只校準，不觸發說話
-  const requiredSpeechFrames = 3; // 連續 300ms 才視為開始說話
-  hasSpoken = false;
-  pcmPreroll = [];
-  statusEl.textContent = "正在校準麥克風...";
-
-  if (vadInterval) clearInterval(vadInterval);
-  vadInterval = setInterval(() => {
-    if (!analyser || !analyserTimeData) return;
+  const checkInterval = setInterval(() => {
+    if (!analyser || !analyserData) return;
     if (currentState !== "LISTENING") return;
-    if (isMuted) return;
-    if (pushToTalk) return;
-    if (asrEngine === "web-speech" && (webSpeechFatalError || webSpeechStarting)) return;
 
-    if (analyserData) analyser.getByteFrequencyData(analyserData);
-    analyser.getByteTimeDomainData(analyserTimeData);
-    const level = timeDomainRms(analyserTimeData);
+    analyser.getByteFrequencyData(analyserData);
+    // 计算平均音量
+    let sum = 0;
+    for (let i = 0; i < analyserData.length; i++) sum += analyserData[i];
+    const avg = sum / analyserData.length / 255;
 
-    if (calibrationSamples.length < calibrationFrameCount) {
-      calibrationSamples.push(level);
-      noiseFloor = calibratedNoiseFloor(calibrationSamples);
-      vadThreshold = speechOnsetThreshold(noiseFloor);
-      if (calibrationSamples.length === calibrationFrameCount) {
-        console.log(`[VAD] 校準完成 | 底噪 RMS: ${noiseFloor.toFixed(4)} | 啟動閾值: ${vadThreshold.toFixed(4)}`);
-        if (asrEngine !== "web-speech" || (!webSpeechStarting && !webSpeechFatalError)) {
-          statusEl.textContent = "等待你說話...";
-        }
-      }
-      return;
-    }
-
-    const onsetThreshold = speechOnsetThreshold(noiseFloor);
-    const releaseThreshold = speechReleaseThreshold(noiseFloor);
-    vadThreshold = hasSpoken ? releaseThreshold : onsetThreshold;
-
-    // 每秒在 Console 印一次 VAD 診斷日誌，方便直接觀察
     logCounter++;
-    if (logCounter >= 10) {
-      logCounter = 0;
-      console.log(`[VAD] RMS: ${level.toFixed(4)} | 底噪: ${noiseFloor.toFixed(4)} | 閾值: ${vadThreshold.toFixed(4)} | 說話狀態: ${hasSpoken}`);
+    if (logCounter % 10 === 0) {
+      console.log("[Call VAD] volume=", avg.toFixed(4), "threshold=", vadThreshold, "hasSpoken=", hasSpoken);
     }
 
-    if (!hasSpoken) {
-      if (level >= onsetThreshold) {
-        speechCandidateFrames += 1;
-      } else {
-        speechCandidateFrames = 0;
-        // 只用低於啟動閾值的樣本緩慢追蹤環境底噪，避免把人聲學成底噪。
-        noiseFloor = Math.max(0.003, Math.min(0.12, noiseFloor * 0.97 + level * 0.03));
-      }
-
-      if (speechCandidateFrames >= requiredSpeechFrames) {
-        hasSpoken = true;
-        speechCandidateFrames = 0;
-        for (const frame of pcmPreroll) window.call?.sendAudioFrame(frame);
-        pcmPreroll = [];
-        statusEl.textContent = "正在聆聽...";
-        console.log("[VAD] 已確認連續人聲，開始本輪");
-      }
-      return;
-    }
-
-    if (level >= releaseThreshold) {
+    if (avg >= vadThreshold) {
+      // 有声音：标记已开始说话，重置静默计时
+      if (!hasSpoken) console.log("[Call VAD] 开始说话 detected, volume=", avg.toFixed(4));
+      hasSpoken = true;
       if (vadSilenceTimer) {
         clearTimeout(vadSilenceTimer);
         vadSilenceTimer = null;
       }
     } else if (hasSpoken) {
-      // 靜默且之前說過話：開始靜默計時
+      // 静默且之前说过话：开始静默计时
       if (!vadSilenceTimer) {
+        console.log("[Call VAD] 静默开始，准备结束本轮");
         vadSilenceTimer = setTimeout(() => {
-          console.log("[Call] VAD 靜默檢測觸發，結束本輪");
-          sendSharedScreenFrame();
+          console.log("[Call] VAD 静默检测触发，结束本轮");
           window.call?.turnEnd();
           vadSilenceTimer = null;
           hasSpoken = false;
-          pcmPreroll = [];
         }, vadSilenceMs);
       }
     }
   }, 100);
 }
 
-// ── 靜音與畫面分享 ──
-function resetVadTurn(): void {
-  if (vadSilenceTimer) {
-    clearTimeout(vadSilenceTimer);
-    vadSilenceTimer = null;
-  }
-  hasSpoken = false;
-  pcmPreroll = [];
-}
-
-function toggleMute(): void {
-  isMuted = !isMuted;
-  micStream?.getAudioTracks().forEach((track) => { track.enabled = !isMuted; });
-  muteBtn.classList.toggle("is-active", isMuted);
-  muteBtn.setAttribute("aria-pressed", String(isMuted));
-  muteBtn.title = isMuted ? "取消靜音" : "麥克風靜音";
-  muteLabel.textContent = isMuted ? "取消靜音" : "靜音";
-
-  if (isMuted) {
-    resetVadTurn();
-    statusEl.textContent = "麥克風已靜音";
-    micWaveEl.classList.remove("is-active");
-  } else if (currentState === "LISTENING") {
-    statusEl.textContent = "等待你說話...";
-    micWaveEl.classList.add("is-active");
-  }
-}
-
-function beginPushToTalk(): void {
-  if (!pushToTalk || pttActive || isMuted || currentState !== "LISTENING") return;
-  pttActive = true;
-  resetVadTurn();
-  hasSpoken = true;
-  pttBtn.classList.add("is-active");
-  pttBtn.setAttribute("aria-pressed", "true");
-  pttLabel.textContent = "放開送出";
-  statusEl.textContent = "正在收音…";
-}
-
-function endPushToTalk(): void {
-  if (!pttActive) return;
-  pttActive = false;
-  pttBtn.classList.remove("is-active");
-  pttBtn.setAttribute("aria-pressed", "false");
-  pttLabel.textContent = "按住說話";
-  hasSpoken = false;
-  sendSharedScreenFrame();
-  window.call?.turnEnd();
-}
-
-function captureSharedScreenFrame(): string | null {
-  if (!displayStream || shareVideo.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) return null;
-  const sourceWidth = shareVideo.videoWidth;
-  const sourceHeight = shareVideo.videoHeight;
-  if (!sourceWidth || !sourceHeight) return null;
-
-  const maxWidth = 1280;
-  const scale = Math.min(1, maxWidth / sourceWidth);
-  const frame = document.createElement("canvas");
-  frame.width = Math.max(1, Math.round(sourceWidth * scale));
-  frame.height = Math.max(1, Math.round(sourceHeight * scale));
-  frame.getContext("2d")?.drawImage(shareVideo, 0, 0, frame.width, frame.height);
-  return frame.toDataURL("image/jpeg", 0.72);
-}
-
-function sendSharedScreenFrame(): void {
-  const frame = captureSharedScreenFrame();
-  if (frame) window.call?.sendScreenFrame(frame);
-}
-
-function stopScreenShare(): void {
-  // 先清空參照再 stop；track.stop() 可能同步觸發 ended，避免清理流程重入。
-  const stream = displayStream;
-  displayStream = null;
-  if (stream) stream.getTracks().forEach((track) => track.stop());
-  shareVideo.srcObject = null;
-  sharePreview.hidden = true;
-  shareBtn.classList.remove("is-active");
-  shareBtn.setAttribute("aria-pressed", "false");
-  shareBtn.title = "分享畫面";
-  shareLabel.textContent = "分享畫面";
-  signalLabel.textContent = "語音連線已加密";
-  window.call?.sendScreenFrame(null);
-}
-
-async function toggleScreenShare(): Promise<void> {
-  if (displayStream) {
-    stopScreenShare();
-    return;
-  }
-
-  try {
-    const stream = await navigator.mediaDevices.getDisplayMedia({
-      video: { frameRate: { ideal: 5, max: 10 } },
-      audio: false,
-    });
-    const track = stream.getVideoTracks()[0];
-    if (!track) {
-      stream.getTracks().forEach((item) => item.stop());
-      return;
-    }
-    displayStream = stream;
-    shareVideo.srcObject = stream;
-    await shareVideo.play().catch(() => undefined);
-    sharePreview.hidden = false;
-    shareBtn.classList.add("is-active");
-    shareBtn.setAttribute("aria-pressed", "true");
-    shareBtn.title = "停止分享";
-    shareLabel.textContent = "停止分享";
-    signalLabel.textContent = "畫面已連結 · 提到畫面時昔漣可以看見";
-    track.addEventListener("ended", stopScreenShare, { once: true });
-    sendSharedScreenFrame();
-  } catch (error) {
-    const name = error instanceof DOMException ? error.name : "unknown";
-    if (name !== "NotAllowedError") console.error("[Call] 畫面分享失敗:", error);
-    statusEl.textContent = name === "NotAllowedError" ? "已取消畫面分享" : "無法分享畫面，請檢查系統權限";
-  }
-}
-
 function stopMicrophone(): void {
   if (vadSilenceTimer) { clearTimeout(vadSilenceTimer); vadSilenceTimer = null; }
-  if (vadInterval) { clearInterval(vadInterval); vadInterval = null; }
-  pcmPreroll = [];
-  hasSpoken = false;
   if (workletNode) { try { workletNode.disconnect(); } catch { /* ignore */ } workletNode = null; }
   if (analyser) { try { analyser.disconnect(); } catch { /* ignore */ } analyser = null; }
-  analyserTimeData = null;
   if (audioContext) { try { audioContext.close(); } catch { /* ignore */ } audioContext = null; }
   if (micStream) { micStream.getTracks().forEach(t => t.stop()); micStream = null; }
-  webSpeechTurnPending = false;
-  webSpeechFatalError = false;
-  webSpeechStarting = false;
-  if (webSpeechTurnFallback) {
-    clearTimeout(webSpeechTurnFallback);
-    webSpeechTurnFallback = null;
-  }
-  if (asrEngine === "web-speech" && recognition) {
-    try { recognition.abort(); } catch { /* ignore */ }
-    recognition = null;
-  }
 }
 
-function submitWebSpeechTurn(): void {
-  if (!webSpeechTurnPending) return;
-  webSpeechTurnPending = false;
-  if (webSpeechTurnFallback) {
-    clearTimeout(webSpeechTurnFallback);
-    webSpeechTurnFallback = null;
-  }
-  const text = recognitionText.trim();
-  recognitionText = "";
-  window.call?.turnEnd(text);
-}
-
-function finishWebSpeechTurn(): void {
-  if (webSpeechFatalError) return;
-  if (webSpeechTurnPending) return;
-  webSpeechTurnPending = true;
-  // stop() 會要求瀏覽器先產生最後一個 result，再觸發 onend。
-  // 逾時保險處理某些 Chromium 版本不觸發 onend 的情況。
-  webSpeechTurnFallback = setTimeout(submitWebSpeechTurn, 500);
-  try {
-    recognition?.stop();
-  } catch {
-    submitWebSpeechTurn();
-  }
-}
-
-async function ensureOnDeviceSpeech(SpeechRecognition: any): Promise<string | null> {
-  if (typeof SpeechRecognition.available !== "function" || typeof SpeechRecognition.install !== "function") {
-    return null;
-  }
-
-  for (const lang of ["zh-TW", "zh-CN"]) {
-    try {
-      const options = { langs: [lang], processLocally: true };
-      const availability = await SpeechRecognition.available(options);
-      console.log(`[WebSpeech] ${lang} 本機語言包狀態:`, availability);
-      if (availability === "available") return lang;
-      if (availability === "downloadable" || availability === "downloading") {
-        statusEl.textContent = `正在安裝 ${lang} 離線語音包...`;
-        const installed = await SpeechRecognition.install(options);
-        if (installed) return lang;
-      }
-    } catch (error) {
-      console.warn(`[WebSpeech] ${lang} 本機語言包檢查失敗:`, error);
-    }
-  }
-  return null;
-}
-
-function showWebSpeechFatalError(error: string): void {
-  webSpeechFatalError = true;
-  webSpeechTurnPending = false;
-  hasSpoken = false;
-  if (vadSilenceTimer) {
-    clearTimeout(vadSilenceTimer);
-    vadSilenceTimer = null;
-  }
-  const message = error === "network"
-    ? "此版 Electron 無法連接 Web Speech；本機語音包也不可用"
-    : error === "language-not-supported"
-      ? "此版 Electron 沒有可用的中文離線語音包"
-      : "Web Speech 無法使用：" + error;
-  statusEl.textContent = message;
-  statusEl.className = "call__status call__status--error";
-  console.error("[WebSpeech] 已停止自動重試:", message);
-  try { recognition?.abort(); } catch { /* ignore */ }
-}
-
-async function startWebSpeech(): Promise<void> {
-  if (webSpeechStarting || webSpeechFatalError) return;
-  const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-  if (!SpeechRecognition) {
-    console.error("[Call] 瀏覽器不支援 Web Speech API");
-    statusEl.textContent = "瀏覽器不支援 Web Speech API";
-    return;
-  }
-  webSpeechStarting = true;
-  if (!recognition) {
-    recognition = new SpeechRecognition();
-    recognition.continuous = true;
-    recognition.interimResults = true;
-
-    statusEl.textContent = "正在檢查離線語音包...";
-    const localLanguage = await ensureOnDeviceSpeech(SpeechRecognition);
-    if (!localLanguage) {
-      webSpeechStarting = false;
-      showWebSpeechFatalError("language-not-supported");
-      return;
-    }
-    recognition.lang = localLanguage;
-    recognition.processLocally = true;
-    console.log(`[WebSpeech] 使用本機辨識: ${localLanguage}`);
-
-    recognition.onresult = (event: any) => {
-      // 每次由完整 results 重建文字；continuous 模式的 resultIndex 只指向
-      // 本次變更位置，只從那裡讀會把前面已確認的句子覆蓋掉。
-      const { combined } = collectRecognitionText(event.results);
-      const currentResult = combined;
-      if (currentResult) {
-        recognitionText = combined;
-        console.log("[WebSpeech] 識別結果:", recognitionText);
-        currentUserText = recognitionText;
-        renderTranscript(currentUserText, "");
-
-        // 收到識別字，代表正在說話：標記 hasSpoken，重置靜默計時
-        hasSpoken = true;
-        if (vadSilenceTimer) {
-          clearTimeout(vadSilenceTimer);
-          vadSilenceTimer = null;
-        }
-      }
-    };
-
-    recognition.onerror = (event: any) => {
-      console.error("[WebSpeech] 語音識別錯誤:", event.error);
-      if (isFatalSpeechRecognitionError(String(event.error))) {
-        showWebSpeechFatalError(String(event.error));
-      }
-    };
-
-    recognition.onend = () => {
-      if (webSpeechTurnPending) {
-        submitWebSpeechTurn();
-        return;
-      }
-      // 若依然在 LISTENING 狀態，自動重啟以防止 Web Speech API 逾時關閉
-      if (currentState === "LISTENING" && asrEngine === "web-speech" && recognition && !webSpeechFatalError) {
-        try { recognition.start(); } catch { /* ignore */ }
-      }
-    };
-  }
-
-  try {
-    recognition.start();
-    statusEl.textContent = "等待你說話...";
-    console.log("[WebSpeech] 本機 Web Speech 語音識別已啟動");
-  } catch (e) {
-    console.error("[WebSpeech] 啟動失敗:", e);
-    showWebSpeechFatalError("start-failed");
-  } finally {
-    webSpeechStarting = false;
-  }
-}
-
-// ── TTS 播放 + Live2D 嘴型聯動 ──
-// 複用聊天窗口的邏輯：音頻播放時通過 live2dSpeech IPC 讓寵物窗口小人嘴巴張合。
+// ── TTS 播放 + Live2D 嘴型联动 ──
+// 复用聊天窗口的逻辑：音频播放时通过 live2dSpeech IPC 让宠物窗口小人嘴巴张合。
 const AUDIO_MOUTH_DELAY_MS = 800;
 
 let currentAudio: HTMLAudioElement | null = null;
-let currentAudioUrl: string | null = null;
-const ttsAudioQueue: Array<{ base64: string; format: CallAudioFormat; isFinal: boolean }> = [];
 let speechToken = 0;
 
 function nextSpeechToken(): number {
@@ -956,44 +585,19 @@ function hangup(): void {
 
 hangupBtn.addEventListener("click", hangup);
 closeBtn.addEventListener("click", hangup);
-muteBtn.addEventListener("click", toggleMute);
-shareBtn.addEventListener("click", () => { void toggleScreenShare(); });
-pttBtn.addEventListener("pointerdown", (event) => { event.preventDefault(); beginPushToTalk(); });
-for (const eventName of ["pointerup", "pointercancel", "pointerleave"] as const) pttBtn.addEventListener(eventName, endPushToTalk);
-window.addEventListener("keydown", (event) => {
-  if (event.code !== "Space" || event.repeat || document.activeElement === textBackupInput) return;
-  event.preventDefault();
-  beginPushToTalk();
-});
-window.addEventListener("keyup", (event) => {
-  if (event.code !== "Space" || document.activeElement === textBackupInput) return;
-  event.preventDefault();
-  endPushToTalk();
-});
-textBackupForm.addEventListener("submit", (event) => {
-  event.preventDefault();
-  const text = textBackupInput.value.trim();
-  if (!text || currentState !== "LISTENING") return;
-  currentUserText = text;
-  renderTranscript(text, "");
-  textBackupInput.value = "";
-  sendSharedScreenFrame();
-  window.call?.turnEnd(text);
-});
 
 // ── 初始化 ──
 async function init(): Promise<void> {
-  // 讀 ASR 設置（VAD 閾值 + 轉寫開關）
+  // 读 ASR 设置（VAD 阈值 + 转写开关）
   try {
     const cfg = await window.tts?.loadSettings();
     if (cfg) {
       vadSilenceMs = typeof cfg.asrVadSilenceMs === "number" ? cfg.asrVadSilenceMs : 1000;
+      vadThreshold = typeof cfg.asrVadThreshold === "number" ? cfg.asrVadThreshold : 0.01;
       showTranscript = Boolean(cfg.asrShowTranscript);
-      asrEngine = typeof cfg.asrEngine === "string" ? cfg.asrEngine : "local";
-      pushToTalk = Boolean(cfg.asrPushToTalk);
     }
+    console.log("[Call] VAD config: threshold=", vadThreshold, "silenceMs=", vadSilenceMs);
   } catch { /* ignore */ }
-  pttBtn.hidden = !pushToTalk;
 
   // 粒子背景
   if (canvas && ctx) {

@@ -19,9 +19,6 @@ import { splitForEarlySpeech } from "./tts-segmentation";
 import { captionImage } from "../orchestrator/vision-captioner";
 import { parseSharedScreenFrame, shouldUseSharedScreen, type SharedScreenFrame } from "./screen-context";
 import { startCallUsage, stopCallUsage } from "../call-usage-store";
-import { indexConversationTurn } from "../orchestrator/history-tools";
-import { scheduleMemoryWrite } from "../orchestrator/context-builder";
-import { appendConversationEntry } from "../memory/conversation-archive";
 
 const LOG_PREFIX = "[CallManager]";
 
@@ -32,7 +29,6 @@ let asrStream: VolcanoAsrStream | null = null;
 let currentState: CallState = "IDLE";
 let finalText = "";
 let active = false;
-let activeCallSessionId: string | null = null;
 let latestScreenFrame: SharedScreenFrame | null = null;
 
 /** 通話上下文：保留最近 N 輪對話歷史（每輪 = user + assistant 一對）。
@@ -230,75 +226,31 @@ function sendAsrResult(partial: string | undefined, final: string | undefined): 
   }
 }
 
-function sendTtsAudio(base64: string, format: "wav" | "mp3", isFinal: boolean): void {
+function sendTtsAudio(base64: string, format: "wav" | "mp3" | "pcm" = "wav", isFinal = true): void {
   if (callWindow && !callWindow.isDestroyed()) {
     callWindow.webContents.send(IPC.CALL_TTS_AUDIO, { base64, format, isFinal });
   }
 }
 
-/** 開始通話：初始化 ASR 流，進入 LISTENING。 */
+/** 开始通话：初始化 ASR 流，进入 LISTENING。 */
 export function startCall(): void {
   if (active) return;
-
-  if (process.platform === "darwin") {
-    try {
-      const status = systemPreferences.getMediaAccessStatus("microphone");
-      console.log(LOG_PREFIX, "macOS microphone access status:", status);
-      if (status !== "granted") {
-        void systemPreferences.askForMediaAccess("microphone").then((granted) => {
-          console.log(LOG_PREFIX, "macOS microphone access request result:", granted);
-        });
-      }
-    } catch (e) {
-      console.warn(LOG_PREFIX, "Failed to check macOS microphone permission:", e);
-    }
-  }
-
   const cfg = getAsrConfig();
-  if (!cfg) {
-    sendError("ASR 未配置");
-    sendState("ERROR");
-    return;
-  }
-
-  if (cfg.engine === "aliyun") {
-    if (!cfg.appKey || !cfg.accessKeyId || !cfg.accessKeySecret) {
-      if (!cfg.fallbackToLocal) {
-        sendError("ASR 未配置：請在設置→ASR 中配置阿里雲 AppKey 和 AccessKey");
-        sendState("ERROR");
-        return;
-      }
-    }
-  } else if (cfg.engine === "local") {
-    const settings = modelSettingsGetter?.();
-    const groqKey = findGroqApiKey(settings);
-    if (!groqKey && !cfg.fallbackToLocal) {
-      sendError("語音識別需要 Groq API 金鑰，請先在「設置 → 模型」中填入 Groq 的 API Key（或 MiniMax 處填寫的 gsk_ 格式金鑰）");
-      sendState("ERROR");
-      return;
-    }
-  } else if (cfg.engine === "web-speech") {
-    // 免費本機 Whisper，不需要驗證金鑰
-  } else {
-    sendError("不支持的 ASR 引擎");
+  if (!cfg || cfg.engine !== "aliyun" || !cfg.appKey || !cfg.accessKeyId || !cfg.accessKeySecret) {
+    sendError("ASR 未配置：请在设置→ASR 中配置阿里云 AppKey 和 AccessKey");
     sendState("ERROR");
     return;
   }
 
   active = true;
-  activeCallSessionId = `call:desktop:${Date.now()}`;
-  startCallUsage("desktop");
   finalText = "";
-  localAudioBuffer = Buffer.alloc(0);
   callHistory.length = 0;
-  latestScreenFrame = null;
-  if (cfg.engine === "aliyun" && cfg.appKey && cfg.accessKeyId && cfg.accessKeySecret) {
-    startAsrStream(cfg);
-  }
+  console.log(LOG_PREFIX, "startCall 重置: finalText 清空, history 清空");
+  startAsrStream(cfg);
   sendState("LISTENING");
 }
 
-/** 創建並啟動一個 ASR 流。 */
+/** 创建并启动一个 ASR 流。 */
 function startAsrStream(cfg: { appKey: string; accessKeyId: string; accessKeySecret: string; language: string }): void {
   asrStream = new VolcanoAsrStream(
     (text) => sendAsrResult(text, undefined),
@@ -307,112 +259,67 @@ function startAsrStream(cfg: { appKey: string; accessKeyId: string; accessKeySec
   asrStream.start(cfg.appKey, cfg.accessKeyId, cfg.accessKeySecret, cfg.language);
 }
 
-/** 結束本輪（VAD 靜默）：停 ASR → 跑 agent → TTS → 播放。 */
-export async function endTurn(passedText?: string): Promise<void> {
+/** 结束本轮（VAD 静默）：停 ASR → 跑 agent → TTS → 播放。 */
+export async function endTurn(): Promise<void> {
+  console.log(LOG_PREFIX, "endTurn 入口: active=", active, "state=", currentState, "finalText.length=", finalText.length);
   if (!active || currentState !== "LISTENING") return;
 
-  const cfg = getAsrConfig();
-  if (!cfg) return;
-
-  if (passedText !== undefined) {
-    finalText = passedText;
-  } else if (cfg.engine === "aliyun") {
-    if (asrStream) await asrStream.stopAndWaitFinal();
-    if (!active) return;
-    if (!finalText.trim() && cfg.fallbackToLocal && localAudioBuffer.length) {
-      sendAsrResult("雲端沒有回傳結果，已切換本機 Whisper", undefined);
-      finalText = await transcribeOfflineWhisper(localAudioBuffer, cfg.language);
-      sendAsrResult(undefined, finalText);
-    }
-  } else if (cfg.engine === "local" || cfg.engine === "web-speech") {
-    if (localAudioBuffer.length === 0) {
-      restartAsr();
-      return;
-    }
-    sendState("THINKING");
-    try {
-      finalText = await transcribeCallPcm(localAudioBuffer);
-      sendAsrResult(undefined, finalText);
-    } catch (err: any) {
-      console.error(LOG_PREFIX, "語音識別失敗:", err);
-      sendState("LISTENING");
-      restartAsr();
-      // 最後送出具體錯誤，避免緊接著的 LISTENING 狀態把它覆蓋掉。
-      sendError("語音識別失敗，請重試: " + err.message);
-      return;
-    }
-  }
+  if (asrStream) asrStream.stop();
 
   const text = finalText.trim();
   finalText = "";
 
   if (!text) {
-    // 空文本，直接重啟 ASR 回 LISTENING
+    // 空文本，直接重启 ASR 回 LISTENING
+    console.log(LOG_PREFIX, "endTurn 空文本，直接重启 ASR");
     restartAsr();
     return;
   }
 
   sendState("THINKING");
 
-  const callSessionId = activeCallSessionId || `call:desktop:${Date.now()}`;
-  const archiveTurnId = `${callSessionId}:${Date.now()}`;
-  // ASR 一產出最終文字就永久保存，不依賴後續 LLM/TTS 是否成功。
-  appendConversationEntry({
-    id: `${archiveTurnId}:user`,
-    sessionId: callSessionId,
-    channel: "call",
-    role: "user",
-    content: text,
-    at: Date.now(),
-  });
-
   try {
-    // 調 agent 獲取回覆
+    // 调 agent 获取回复
+    console.log(LOG_PREFIX, "runAgentTurn 开始, text.length=", text.length);
     const reply = await runAgentTurn(text);
+    console.log(LOG_PREFIX, "runAgentTurn 结果: reply.length=", reply?.length ?? "null");
     if (!reply) {
-      sendError("未收到 agent 回覆");
+      sendError("未收到 agent 回复");
       sendState("LISTENING");
       restartAsr();
       return;
     }
 
-    // ASR 原文與實際回覆同步寫入永久跨渠道檔案，並參與 L0/L1/L2 記憶提煉。
-    void indexConversationTurn(callSessionId, text, reply, {
-      channel: "call",
-      turnId: archiveTurnId,
-    });
-    scheduleMemoryWrite(text, reply);
-
-    // TTS 合成（按 ttsEngine 分發到對應引擎）
+    // TTS 合成（按 ttsEngine 分发到对应引擎）
     const tts = ttsSettingsGetter?.();
     if (!tts || tts.ttsEngine === "off") {
-      sendError("TTS 未配置：請在設置中啟用 TTS 引擎");
+      sendError("TTS 未配置：请在设置中启用 TTS 引擎");
       sendState("LISTENING");
       restartAsr();
       return;
     }
 
-    // 引擎配置完整性檢查
+    // 引擎配置完整性检查
     if (tts.ttsEngine === "minimax" && (!tts.ttsMinimaxKey || !tts.ttsMinimaxVoiceId)) {
-      sendError("TTS 未配置：請在設置中配置 MiniMax API Key 和音色 ID");
+      sendError("TTS 未配置：请在设置中配置 MiniMax API Key 和音色 ID");
       sendState("LISTENING");
       restartAsr();
       return;
     }
     if (tts.ttsEngine === "gptsovits" && (!tts.ttsGptsovitsBaseUrl || !tts.ttsGptsovitsRefAudioPath || !tts.ttsGptsovitsPromptText)) {
-      sendError("TTS 未配置：請在設置中配置 GPT-SoVITS baseUrl、參考音頻和文本");
+      sendError("TTS 未配置：请在设置中配置 GPT-SoVITS baseUrl、参考音频和文本");
       sendState("LISTENING");
       restartAsr();
       return;
     }
     if (tts.ttsEngine === "custom-cloud" && !tts.ttsCustomCloudEndpointUrl) {
-      sendError("TTS 未配置：請在設置中配置自定義雲端 Endpoint URL");
+      sendError("TTS 未配置：请在设置中配置自定义云端 Endpoint URL");
       sendState("LISTENING");
       restartAsr();
       return;
     }
     if (tts.ttsEngine === "mimo" && (!tts.ttsMimoKey || !tts.ttsMimoVoiceAudioPath)) {
-      sendError("TTS 未配置：請在設置中配置小米 MiMo API Key 和昔漣克隆音頻");
+      sendError("TTS 未配置：请在设置中配置小米 MiMo API Key 和昔涟克隆音频");
       sendState("LISTENING");
       restartAsr();
       return;
@@ -492,7 +399,6 @@ export function stopCall(): void {
   active = false;
   stopCallUsage("desktop");
   callHistory.length = 0;
-  activeCallSessionId = null;
   latestScreenFrame = null;
   localAudioBuffer = Buffer.alloc(0);
   if (asrStream) {
@@ -552,30 +458,16 @@ async function runAgentTurn(userText: string): Promise<string | null> {
       }
     }
 
-    // 2. 直接調 LLM（不走 FC loop）
+    // 2. 直接调 LLM（不走 FC loop）
     const ms = modelSettingsGetter?.();
-    if (!ms || !ms.apiKey) return null;
-
-    // 分享期間只在用戶真的提到畫面時取用最新幀，避免一般閒聊多一次視覺請求。
-    // 視覺模型已直接回答用戶問題，因此不再串第二次 LLM，維持通話反應速度。
-    if (latestScreenFrame && shouldUseSharedScreen(userText)) {
-      const visualReply = await captionImage(latestScreenFrame, userText, {
-        baseUrl: ms.baseUrl,
-        apiKey: ms.apiKey,
-        model: ms.model,
-      });
-      if (visualReply && !visualReply.startsWith("[錯誤·")) {
-        const reply = toTraditionalTaiwan(visualReply.trim());
-        callHistory.push({ role: "user", content: userText });
-        callHistory.push({ role: "assistant", content: reply });
-        trimCallHistory();
-        return reply;
-      }
-      console.warn(LOG_PREFIX, "分享畫面分析失敗，改以一般語音問題處理");
+    if (!ms || !ms.apiKey) {
+      throw new Error("模型配置缺失或未填写 API Key");
     }
 
     const adapter = getAdapter(ms.provider);
-    if (!adapter) return null;
+    if (!adapter) {
+      throw new Error(`不支持的模型 provider: ${ms.provider}`);
+    }
 
     const url = buildVendorUrlByProvider(ms.provider, ms.baseUrl);
     const systemPrompt = await systemPromptBuilder?.(userText) ?? "";
@@ -595,22 +487,19 @@ async function runAgentTurn(userText: string): Promise<string | null> {
       method: "POST",
       headers: { ...req.headers, "Content-Type": "application/json" },
       body: req.body,
+      signal: AbortSignal.timeout(30000),
     });
 
     if (!httpResp.ok) {
-      console.error(LOG_PREFIX, "LLM 請求失敗:", httpResp.status);
-      return null;
+      throw new Error(`LLM 请求失败: ${httpResp.status}`);
     }
 
     const raw = await httpResp.json();
     const resp = adapter.parseResponse(raw);
-    // 過濾掉表情包標記
-    let reply = (resp.text || "").replace(/\[sticker:[^\]]+\]/g, "").trim();
-    if (reply) {
-      reply = toTraditionalTaiwan(reply);
-    }
+    // 过滤掉表情包标记
+    const reply = (resp.text || "").replace(/\[sticker:[^\]]+\]/g, "").trim();
 
-    // 記入通話上下文
+    // 记入通话上下文
     if (reply) {
       callHistory.push({ role: "user", content: userText });
       callHistory.push({ role: "assistant", content: reply });
@@ -619,17 +508,17 @@ async function runAgentTurn(userText: string): Promise<string | null> {
 
     return reply || null;
   } catch (err) {
-    console.error(LOG_PREFIX, "LLM 調用失敗:", err);
-    return null;
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(LOG_PREFIX, "LLM 调用失败:", msg);
+    throw new Error(`LLM 调用失败: ${msg}`);
   }
 }
 
-/** 註冊通話 IPC handlers（main 啟動時調一次）。 */
+/** 注册通话 IPC handlers（main 启动时调一次）。 */
 export function registerCallIpc(): void {
   ipcMain.on(IPC.CALL_START, () => startCall());
   ipcMain.on(IPC.CALL_AUDIO_FRAME, (_event, frame: ArrayBuffer) => handleAudioFrame(Buffer.from(frame)));
-  ipcMain.on(IPC.CALL_SCREEN_FRAME, (_event, dataUrl: string | null) => handleScreenFrame(dataUrl));
-  ipcMain.on(IPC.CALL_TURN_END, (_event, text?: string) => void endTurn(text));
+  ipcMain.on(IPC.CALL_TURN_END, () => void endTurn());
   ipcMain.on(IPC.CALL_TTS_DONE, () => onTtsDone());
   ipcMain.on(IPC.CALL_STOP, () => stopCall());
 }

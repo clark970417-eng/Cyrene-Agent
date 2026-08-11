@@ -38,38 +38,54 @@ export function estimateTokens(text: string): number {
 }
 
 /**
- * 估算整個 conversation 數組的 token 總量。
+ * 估算整个 conversation 数组的 token 总量。
  */
-export function estimateConversationTokens(messages: Array<{ content: string }>): number {
+function contentToText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    return content
+      .map((block) => {
+        if (block && typeof block === "object" && (block as { type?: unknown }).type === "text") {
+          return String((block as { text?: unknown }).text ?? "");
+        }
+        return "";
+      })
+      .filter(Boolean)
+      .join("\n");
+  }
+  return String(content ?? "");
+}
+
+export function estimateConversationTokens(messages: Array<{ content: unknown }>): number {
   let total = 0;
   for (const m of messages) {
-    total += estimateTokens(m.content);
+    total += estimateTokens(contentToText(m.content));
   }
   return total;
 }
 
 /**
- * 窗口級壓縮：conversation 超閾值時，把舊的輪次摘要化。
+ * 窗口级压缩：conversation 超阈值时，把旧的轮次摘要化。
  *
  * 策略：
- *   - system 消息（role=system）：永遠保留
- *   - 最近 KEEP_RECENT_ROUNDS 輪：完整保留
- *   - 更早的輪次：
- *     - tool/assistant 消息內容超 500 字符 → 截斷到 200 字符 + "[compressed]"
- *     - 短消息原樣保留
- *   - 壓縮後仍超閾值 → 從最早的非 system 消息開始丟棄
+ *   - system 消息（role=system）：永远保留
+ *   - 最近 KEEP_RECENT_ROUNDS 轮：完整保留
+ *   - 更早的轮次：
+ *     - tool/assistant 消息内容超 500 字符 → 截断到 200 字符 + "[compressed]"
+ *     - 短消息原样保留
+ *   - 压缩后仍超阈值 → 从最早的非 system 消息开始丢弃
  *
- * 返回壓縮後的新數組（不修改原數組）。
+ * 返回压缩后的新数组（不修改原数组）。
  */
-export function compressConversation<T extends { role?: string; content?: string }>(
+export function compressConversation<T extends { role?: string; content?: unknown }>(
   messages: T[],
   thresholdChars: number = WINDOW_COMPRESS_THRESHOLD_CHARS,
   keepRecent: number = KEEP_RECENT_ROUNDS,
 ): T[] {
-  const totalChars = messages.reduce((sum, m) => sum + String(m.content ?? "").length, 0);
+  const totalChars = messages.reduce((sum, m) => sum + contentToText(m.content).length, 0);
   if (totalChars <= thresholdChars) return messages;
 
-  console.log(`[ContextManager] 觸發壓縮: ${totalChars} 字符 > 閾值 ${thresholdChars}`);
+  console.log(`[ContextManager] 触发压缩: ${totalChars} 字符 > 阈值 ${thresholdChars}`);
 
   const result: T[] = [...messages];
   const nonSystemIndices: number[] = [];
@@ -89,28 +105,28 @@ export function compressConversation<T extends { role?: string; content?: string
     for (let i = 0; i < compressFromIndex; i++) {
       if (result[i].role === "system") continue;
       const msg = result[i];
-      const content = String(msg.content ?? "");
+      const content = contentToText(msg.content);
       if (content.length > 500) {
         result[i] = {
           ...msg,
           content: content.slice(0, 200) + "\n[compressed: 原始 " + content.length + " 字符]",
-        };
+        } as T;
       }
     }
   }
 
-  // 壓縮後仍超閾值 → 從最早的非 system 消息開始丟棄
-  let compressedChars = result.reduce((sum, m) => sum + String(m.content ?? "").length, 0);
+  // 压缩后仍超阈值 → 从最早的非 system 消息开始丢弃
+  let compressedChars = result.reduce((sum, m) => sum + contentToText(m.content).length, 0);
   while (compressedChars > thresholdChars) {
     const firstNonSystem = result.findIndex(m => m.role !== "system");
     if (firstNonSystem === -1 || firstNonSystem >= result.length - keepRecent) break;
-    compressedChars -= String(result[firstNonSystem].content ?? "").length;
+    compressedChars -= contentToText(result[firstNonSystem].content).length;
     result.splice(firstNonSystem, 1);
-    console.log("[ContextManager] 丟棄最早一條消息，剩餘 " + compressedChars + " 字符");
+    console.log("[ContextManager] 丢弃最早一条消息，剩余 " + compressedChars + " 字符");
   }
 
-  const finalChars = result.reduce((sum, m) => sum + String(m.content ?? "").length, 0);
-  console.log(`[ContextManager] 壓縮完成: ${totalChars} → ${finalChars} 字符`);
+  const finalChars = result.reduce((sum, m) => sum + contentToText(m.content).length, 0);
+  console.log(`[ContextManager] 压缩完成: ${totalChars} → ${finalChars} 字符`);
 
   return result;
 }

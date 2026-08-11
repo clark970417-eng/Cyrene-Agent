@@ -74,42 +74,42 @@ export function registerSkillTools(): void {
     execute: async (args) => {
       const id = String(args.skill_id || "");
       const skill = skillRegistry.getById(id);
-      if (!skill || !skill.enabled) {
-        const available = skillRegistry.getEnabled().map(s => s.id).join(", ") || "(無)";
+      if (!skill || !skill.enabled || !skillRegistry.isAvailable(id)) {
+        const available = skillRegistry.getEnabled().map(s => s.id).join(", ") || "(无)";
         return `[invoke_skill] skill not found: ${id}。可用 skill: ${available}`;
       }
       const body = skillRegistry.getBody(id);
       if (body === null) {
-        return `[invoke_skill] 讀取 skill 正文失敗: ${id}`;
+        return `[invoke_skill] 读取 skill 正文失败: ${id}`;
       }
       const refList = skill.references.length > 0
-        ? `\n\n可用 references（需要詳情時調 read_skill_reference 讀取）：\n${skill.references.map(r => "- " + r).join("\n")}`
+        ? `\n\n可用 references（需要详情时调 read_skill_reference 读取）：\n${skill.references.map(r => "- " + r).join("\n")}`
         : "";
       console.log(LOG_PREFIX, "invoke_skill:", id, "bodyLen=" + body.length);
       const truncatedBody = truncateForContext(
         body,
         SKILL_BODY_MAX_CHARS,
-        "如需完整指令或特定部分，可用 read_skill_reference 精準讀取對應 reference 文件",
+        "如需完整指令或特定部分，可用 read_skill_reference 精准读取对应 reference 文件",
       );
-      return `[已加載 skill: ${id}]\n${truncatedBody}${refList}${EXECUTION_DISCIPLINE}`;
+      return `[已加载 skill: ${id}]\n${truncatedBody}${refList}${EXECUTION_DISCIPLINE}`;
     },
   });
 
   toolRegistry.register({
     id: "read_skill_reference",
-    name: "讀取 Skill 附件",
+    name: "读取 Skill 附件",
     description:
-      "讀取某 skill 的 references 附件內容。當 invoke_skill 返回的正文引用了 references/xxx 且你需要詳情時調用。\n\n" +
-      "何時用：invoke_skill 返回的正文提到 references/xxx 且需要該附件的詳細內容。\n\n" +
-      "不要用於：不在 invoke_skill 返回清單裡的 ref。\n\n" +
-      "參數：skill_id（必填），ref（必填，references 文件名，必須是 invoke_skill 返回清單裡的）。",
+      "读取某 skill 的 references 附件内容。当 invoke_skill 返回的正文引用了 references/xxx 且你需要详情时调用。\n\n" +
+      "何时用：invoke_skill 返回的正文提到 references/xxx 且需要该附件的详细内容。\n\n" +
+      "不要用于：不在 invoke_skill 返回清单里的 ref。\n\n" +
+      "参数：skill_id（必填），ref（必填，references 文件名，必须是 invoke_skill 返回清单里的）。",
     enabled: true,
     risk: "safe",
     inputSchema: {
       type: "object",
       properties: {
         skill_id: { type: "string", description: "skill 的 id" },
-        ref:      { type: "string", description: "references 文件名（必須命中 invoke_skill 返回的清單）" },
+        ref:      { type: "string", description: "references 文件名（必须命中 invoke_skill 返回的清单）" },
       },
       required: ["skill_id", "ref"],
     },
@@ -117,29 +117,29 @@ export function registerSkillTools(): void {
       const id = String(args.skill_id || "");
       const ref = String(args.ref || "");
       const skill = skillRegistry.getById(id);
-      if (!skill || !skill.enabled) {
+      if (!skill || !skill.enabled || !skillRegistry.isAvailable(id)) {
         return `[read_skill_reference] skill not found: ${id}`;
       }
-      // 去重：同一輪內同一 reference 不重複返回（內容已在對話歷史裡，再讀浪費輪數+token）
+      // 去重：同一轮内同一 reference 不重复返回（内容已在对话历史里，再读浪费轮数+token）
       const readKey = `${id}/${ref}`;
       if (readRefs.has(readKey)) {
-        return `[read_skill_reference] "${ref}" 已在本輪讀過，內容已在對話中，不要重複讀取。` +
-          `如需其他文件，可讀：${skill.references.filter(r => !readRefs.has(`${id}/${r}`)).join(", ") || "(全部已讀)"}`;
+        return `[read_skill_reference] "${ref}" 已在本轮读过，内容已在对话中，不要重复读取。` +
+          `如需其他文件，可读：${skill.references.filter(r => !readRefs.has(`${id}/${r}`)).join(", ") || "(全部已读)"}`;
       }
       const content = skillRegistry.getReference(id, ref);
       if (content === null) {
-        return `[read_skill_reference] 讀取失敗（ref 不在清單或文件不存在）: ${ref}。可用: ${skill.references.join(", ") || "(無)"}`;
+        return `[read_skill_reference] 读取失败（ref 不在清单或文件不存在）: ${ref}。可用: ${skill.references.join(", ") || "(无)"}`;
       }
       readRefs.add(readKey);
       console.log(LOG_PREFIX, "read_skill_reference:", id, ref, "len=" + content.length);
       const truncated = truncateForContext(
         content,
         SKILL_REF_MAX_CHARS,
-        "如需後半部分內容，請分段讀取或說明你需要的具體章節",
+        "如需后半部分内容，请分段读取或说明你需要的具体章节",
       );
       return truncated;
     },
   });
 
-  console.log(LOG_PREFIX, "已註冊：invoke_skill / read_skill_reference");
+  console.log(LOG_PREFIX, "已注册：invoke_skill / read_skill_reference");
 }
