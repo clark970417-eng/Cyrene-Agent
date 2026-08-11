@@ -1,5 +1,6 @@
 import "./window-corner-radius";
 import "./traditional-chinese";
+import "./custom-page-theme.css";
 import { normalizeUiTheme, type UiTheme } from "../../shared/ui-theme";
 import { DEFAULT_UI_FONT, normalizeUiFont, type UiFont } from "../../shared/ui-font";
 import type { ChatAppearanceSettings } from "../../shared/chat-appearance";
@@ -24,7 +25,10 @@ declare global {
 }
 
 function applyTheme(theme: unknown): void {
-  document.documentElement.dataset.uiTheme = normalizeUiTheme(theme);
+  const normalized = normalizeUiTheme(theme);
+  document.documentElement.dataset.uiTheme = normalized;
+  const themeColor = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]');
+  if (themeColor) themeColor.content = normalized === "pearl-white" ? "#f5f2f7" : "#0c0814";
 }
 
 function applyRadius(radius: boolean): void {
@@ -50,11 +54,11 @@ function applyFont(value: unknown): void {
   document.documentElement.dataset.uiFont = "custom";
 }
 
-applyTheme("pearl-white");
+applyTheme("cyrene-night");
 
 void window.cyreneTheme?.get()
   .then(applyTheme)
-  .catch(() => applyTheme("pearl-white"));
+  .catch(() => applyTheme("cyrene-night"));
 
 window.cyreneTheme?.onChanged((theme) => {
   applyTheme(theme);

@@ -1,4 +1,5 @@
 import { DiscordSDK, Events, patchUrlMappings, type Types } from "@discord/embedded-app-sdk";
+import "../ui/theme";
 import { isDiscordActivity, resolveActivityClientId } from "./activity-context";
 import {
   deriveRoomAssignment,

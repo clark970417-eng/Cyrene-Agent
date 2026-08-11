@@ -1,0 +1,278 @@
+/* Shared theme bridge for the unified workspace and custom embedded pages. */
+[data-ui-theme="cyrene-night"] {
+  color-scheme: dark;
+  --cy-page-bg: #0c0814;
+  --cy-page-bg-raised: #151021;
+  --cy-page-panel: rgba(27, 20, 43, 0.88);
+  --cy-page-panel-soft: rgba(35, 27, 53, 0.72);
+  --cy-page-border: rgba(255, 224, 244, 0.13);
+  --cy-page-text: #f7f1fb;
+  --cy-page-muted: #b9adc5;
+  --cy-page-shadow: 0 24px 70px rgba(3, 1, 8, 0.34);
+}
+
+[data-ui-theme="pearl-white"] {
+  color-scheme: light;
+  --cy-page-bg: #f5f2f7;
+  --cy-page-bg-raised: #ffffff;
+  --cy-page-panel: rgba(255, 255, 255, 0.92);
+  --cy-page-panel-soft: rgba(249, 246, 251, 0.88);
+  --cy-page-border: rgba(76, 54, 85, 0.14);
+  --cy-page-text: #241c29;
+  --cy-page-muted: #6c6072;
+  --cy-page-shadow: 0 18px 52px rgba(62, 41, 70, 0.12);
+}
+
+[data-ui-theme] body,
+[data-ui-theme] button,
+[data-ui-theme] input,
+[data-ui-theme] select,
+[data-ui-theme] textarea {
+  transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease, box-shadow 160ms ease;
+}
+
+[data-ui-theme="pearl-white"] body {
+  color: var(--cy-page-text);
+}
+
+/* React chat is authored from a light baseline; night mode remaps every shared
+   surface here so the embedded conversation and workspace shell stay coherent. */
+[data-ui-theme="cyrene-night"] {
+  --cy-bg-page: #100b17;
+  --cy-bg-workspace: #171020;
+  --cy-bg-hover: #27182f;
+  --cy-bg-active: #38203e;
+  --cy-border: rgba(255, 224, 244, 0.12);
+  --cy-text: #f5edf8;
+  --cy-text-muted: #b4a7bc;
+  --cy-pill-bg: rgba(42, 27, 51, 0.92);
+  --cy-pill-border: rgba(244, 142, 196, 0.42);
+  --cy-pill-status: #f2c2dc;
+  --cy-surface: rgba(31, 22, 41, 0.94);
+  --cy-text-primary: #f5edf8;
+  --cy-text-color: #f5edf8;
+  --cy-shadow-workspace: inset 0 1px 0 rgba(255, 255, 255, 0.035), 0 18px 48px rgba(2, 0, 6, 0.26);
+  --cy-shadow-bubble-neutral: 0 10px 28px rgba(2, 0, 6, 0.28);
+}
+
+[data-ui-theme="cyrene-night"] :is(
+  .cy-composer-shell,
+  .cy-composer.ant-sender,
+  .cy-composer__attachment,
+  .cy-compressing-context,
+  .cy-file-drop-overlay span,
+  .cy-conversation-list .ant-conversations-item-active,
+  .cy-project-popover .ant-popover-inner,
+  .cy-session-context-menu,
+  .cy-sticker-popover .ant-popover-inner,
+  .cy-style-popover .ant-popover-inner,
+  .cy-reasoning-popover .ant-popover-inner,
+  .cy-permission-popover .ant-popover-inner,
+  .cy-task-plan-card,
+  .cy-interaction-panel,
+  .cy-code-run-card,
+  .cy-todo
+) {
+  color: var(--cy-text);
+  background: var(--cy-surface);
+  border-color: var(--cy-border);
+}
+
+[data-ui-theme="cyrene-night"] :is(
+  .cy-composer__queue-item,
+  .cy-conversation-list .ant-conversations-item:hover,
+  .cy-style-panel__option:hover,
+  .cy-permission-panel__option:hover,
+  .cy-reasoning-popover .ant-segmented
+) {
+  color: var(--cy-text);
+  background: var(--cy-bg-hover);
+}
+
+[data-ui-theme="cyrene-night"] :is(
+  .cy-composer__icon-button,
+  .cy-composer__footer-button,
+  .cy-composer__agent-button,
+  .cy-composer .ant-sender-input,
+  .cy-conversation-list .ant-conversations-item,
+  .cy-conversation-list .ant-conversations-group-title,
+  .cy-style-panel__option,
+  .cy-reasoning-popover .ant-segmented-item
+) { color: var(--cy-text); }
+
+[data-ui-theme="cyrene-night"] .cy-composer__screenshot-icon { stroke: currentColor; }
+[data-ui-theme="cyrene-night"] .cy-composer .ant-sender-input::placeholder { color: var(--cy-text-muted); }
+[data-ui-theme="cyrene-night"] .cy-page { border-color: var(--cy-border); }
+[data-ui-theme="cyrene-night"] .cy-new-task-label { color: var(--cy-text); }
+[data-ui-theme="cyrene-night"] .cy-new-task:hover { background: var(--cy-bg-hover); }
+[data-ui-theme="cyrene-night"] .cy-segmented {
+  background: rgba(32, 23, 42, 0.94);
+  border-color: var(--cy-border);
+}
+[data-ui-theme="cyrene-night"] .cy-segment { color: var(--cy-text-muted); }
+[data-ui-theme="cyrene-night"] .cy-segment:hover:not(.is-active) { color: var(--cy-text); }
+[data-ui-theme="cyrene-night"] .cy-segment.is-active {
+  color: var(--cy-text);
+  background: #30203b;
+  border-color: rgba(255, 224, 244, 0.16);
+}
+[data-ui-theme="cyrene-night"] .cy-composer-welcome {
+  filter: drop-shadow(1px 0 rgba(255, 255, 255, 0.72)) drop-shadow(-1px 0 rgba(255, 255, 255, 0.72)) drop-shadow(0 1px rgba(255, 255, 255, 0.72));
+}
+[data-ui-theme="cyrene-night"] :is(.cy-todo, .cy-todo__hero-title, .cy-todo__workspace-path) {
+  color: var(--cy-text);
+}
+
+/* Unified workspace shell */
+[data-ui-theme="pearl-white"] {
+  --bg-gradient: radial-gradient(circle at 76% 2%, rgba(242, 186, 223, 0.24), transparent 30%), linear-gradient(135deg, #faf7fb 0%, #f1edf4 100%);
+  --panel-bg: rgba(255, 255, 255, 0.78);
+  --border-color: rgba(64, 43, 73, 0.12);
+  --text-primary: #241c29;
+  --text-muted: #756879;
+  --accent-color: #a43d82;
+  --accent-hover: #c04c98;
+}
+[data-ui-theme="pearl-white"] .workspace > .sidebar,
+[data-ui-theme="pearl-white"] .workspace > .info-panel,
+[data-ui-theme="pearl-white"] .workspace .topbar,
+[data-ui-theme="pearl-white"] .workspace .bottom-bar {
+  background: rgba(255, 255, 255, 0.86);
+  border-color: var(--cy-page-border);
+  box-shadow: none;
+}
+[data-ui-theme="pearl-white"] .nav-item:hover,
+[data-ui-theme="pearl-white"] .nav-item.is-active,
+[data-ui-theme="pearl-white"] .recent-item.is-active {
+  color: #7f2f68;
+  background: rgba(183, 74, 143, 0.10);
+}
+[data-ui-theme="pearl-white"] .workspace iframe { background: #f7f4f8; }
+
+/* Notebook */
+[data-ui-theme="pearl-white"] body:has(.notebook-container) {
+  background: radial-gradient(circle at 50% 0%, #fffafd 0%, #eee9f2 100%);
+  color: var(--cy-page-text);
+}
+[data-ui-theme="pearl-white"] .starfield { opacity: 0.08; filter: invert(1); }
+[data-ui-theme="pearl-white"] .notebook-header,
+[data-ui-theme="pearl-white"] .chapters-sidebar,
+[data-ui-theme="pearl-white"] .book-page,
+[data-ui-theme="pearl-white"] .modal-card {
+  color: var(--cy-page-text);
+  background: var(--cy-page-panel);
+  border-color: var(--cy-page-border);
+  box-shadow: var(--cy-page-shadow);
+}
+[data-ui-theme="pearl-white"] .notebook-container input,
+[data-ui-theme="pearl-white"] .notebook-container textarea {
+  color: var(--cy-page-text);
+  background: #fff;
+  border-color: var(--cy-page-border);
+}
+
+/* Exam */
+[data-ui-theme="pearl-white"] body:has(.exam-container) {
+  background: radial-gradient(circle at 50% -20%, #fff8fc 0%, #efebf3 80%);
+}
+[data-ui-theme="pearl-white"] .setup-card,
+[data-ui-theme="pearl-white"] .loading-card,
+[data-ui-theme="pearl-white"] .quiz-container,
+[data-ui-theme="pearl-white"] .result-card,
+[data-ui-theme="pearl-white"] .quiz-question-card,
+[data-ui-theme="pearl-white"] .feedback-card,
+[data-ui-theme="pearl-white"] .review-item {
+  color: var(--cy-page-text);
+  background: var(--cy-page-panel);
+  border-color: var(--cy-page-border);
+  box-shadow: var(--cy-page-shadow);
+}
+[data-ui-theme="pearl-white"] .exam-container input,
+[data-ui-theme="pearl-white"] .exam-container select,
+[data-ui-theme="pearl-white"] .exam-container textarea,
+[data-ui-theme="pearl-white"] .option-btn {
+  color: var(--cy-page-text);
+  background: #fff;
+  border-color: var(--cy-page-border);
+}
+
+/* Game room */
+[data-ui-theme="pearl-white"] body:has(.game-room) {
+  background: radial-gradient(circle at 78% 8%, rgba(184, 137, 210, 0.18), transparent 34%), #f5f1f7;
+}
+[data-ui-theme="pearl-white"] .game-room {
+  --room-ink: #2b2130;
+  --room-muted: #74667d;
+}
+[data-ui-theme="pearl-white"] .game-room .hero,
+[data-ui-theme="pearl-white"] .game-room .game-card,
+[data-ui-theme="pearl-white"] .game-room .stats,
+[data-ui-theme="pearl-white"] .game-room .play-stage {
+  background: var(--cy-page-panel);
+  border-color: var(--cy-page-border);
+  box-shadow: var(--cy-page-shadow);
+}
+
+/* Wuthering Waves utility */
+[data-ui-theme="pearl-white"] body:has(.waves-shell) {
+  --ww-panel: rgba(255, 255, 255, 0.88);
+  --ww-line: rgba(20, 107, 116, 0.18);
+  --ww-white: #18343a;
+  --ww-muted: #58777c;
+  background: radial-gradient(circle at 76% 12%, rgba(83, 193, 199, 0.17), transparent 32%), linear-gradient(145deg, #f5fbfb, #eaf3f4);
+}
+[data-ui-theme="pearl-white"] .service-state,
+[data-ui-theme="pearl-white"] .privacy-loop,
+[data-ui-theme="pearl-white"] .account-link,
+[data-ui-theme="pearl-white"] .command-card,
+[data-ui-theme="pearl-white"] .result-card {
+  color: var(--ww-white);
+  background: var(--cy-page-panel);
+  border-color: var(--ww-line);
+  box-shadow: var(--cy-page-shadow);
+}
+
+/* Painting studio */
+[data-ui-theme="pearl-white"] body:has(.paint-shell),
+[data-ui-theme="pearl-white"] .paint-shell {
+  --ink: #f5f1f7;
+  --ink-raised: #ffffff;
+  --panel: #ffffff;
+  --panel-2: #f8f4fa;
+  --field: #ffffff;
+  --line: rgba(90, 54, 106, 0.15);
+  --line-strong: rgba(164, 61, 130, 0.38);
+  --text: #271d2d;
+  --muted: #716578;
+  background: var(--ink);
+}
+[data-ui-theme="pearl-white"] .paint-header,
+[data-ui-theme="pearl-white"] .control-panel,
+[data-ui-theme="pearl-white"] .canvas-area,
+[data-ui-theme="pearl-white"] .tasks-panel,
+[data-ui-theme="pearl-white"] .character-card,
+[data-ui-theme="pearl-white"] .connection-card {
+  background: var(--cy-page-panel);
+  border-color: var(--cy-page-border);
+}
+
+/* Discord Activity lobby. The game canvas keeps its own authored palette. */
+[data-ui-theme="pearl-white"] body:has(.activity-shell),
+[data-ui-theme="pearl-white"] .activity-shell { background: #f3eff6; }
+[data-ui-theme="pearl-white"] .room-lobby {
+  color: var(--cy-page-text);
+  background: radial-gradient(circle at 78% 18%, rgba(105, 218, 246, .18), transparent 28%), linear-gradient(135deg, #faf6fc, #ece9f4);
+}
+[data-ui-theme="pearl-white"] .room-card {
+  background: var(--cy-page-panel);
+  border-color: rgba(164, 61, 130, 0.32);
+  box-shadow: var(--cy-page-shadow);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-ui-theme] body,
+  [data-ui-theme] button,
+  [data-ui-theme] input,
+  [data-ui-theme] select,
+  [data-ui-theme] textarea { transition: none; }
+}

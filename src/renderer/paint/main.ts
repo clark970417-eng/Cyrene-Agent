@@ -1,3 +1,5 @@
+import "../ui/theme";
+
 type PaintProvider = "openrouter" | "gemini";
 type TaskStatus = "loading" | "done" | "failed";
 

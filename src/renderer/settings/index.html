@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-TW" data-ui-theme="pearl-white">
+<html lang="zh-TW" data-ui-theme="cyrene-night">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -502,17 +502,29 @@
           <div class="appearance-section">
             <div class="appearance-section__heading">
               <h2>布局</h2>
-              <p>选择昔涟与聊天、状态和日程窗口的组织方式。</p>
+              <p>所有功能都固定整合在同一個工作台，小昔漣會留在右側陪伴區。</p>
             </div>
             <div class="appearance-options" aria-label="窗口布局">
               <button type="button" class="appearance-option is-active" aria-pressed="true">
                 <span class="appearance-option__icon">▦</span>
-                <span class="appearance-option__copy"><strong>多窗口</strong><small>各功能使用独立窗口</small></span>
+                <span class="appearance-option__copy"><strong>整合工作台</strong><small>聊天、任務、設定與工具共用一個視窗</small></span>
               </button>
-              <button type="button" class="appearance-option" disabled>
-                <span class="appearance-option__icon">▣</span>
-                <span class="appearance-option__copy"><strong>单窗口</strong><small>集中在一个主窗口中</small></span>
-                <span class="soon-badge">SOON</span>
+            </div>
+          </div>
+
+          <div class="appearance-section">
+            <div class="appearance-section__heading">
+              <h2>介面主題</h2>
+              <p>亮色與深色會同步套用到工作台、聊天、設定及所有內嵌功能。</p>
+            </div>
+            <div class="appearance-options" id="ui-theme-select" role="radiogroup" aria-label="介面主題">
+              <button type="button" class="appearance-option is-active" data-theme="cyrene-night" aria-pressed="true">
+                <span class="appearance-option__icon">☾</span>
+                <span class="appearance-option__copy"><strong>昔漣夜色</strong><small>深紫夜空與柔粉光暈</small></span>
+              </button>
+              <button type="button" class="appearance-option" data-theme="pearl-white" aria-pressed="false">
+                <span class="appearance-option__icon">☼</span>
+                <span class="appearance-option__copy"><strong>珍珠亮色</strong><small>柔白表面與清晰深色文字</small></span>
               </button>
             </div>
           </div>

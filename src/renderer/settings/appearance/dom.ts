@@ -3,6 +3,7 @@
 
 export const appearanceForm = document.getElementById("appearance-form") as HTMLFormElement;
 export const appearanceSaveStatus = document.getElementById("appearance-save-status") as HTMLElement;
+export const uiThemeSelect = document.getElementById("ui-theme-select") as HTMLElement;
 export const runtimeSyncSelect = document.getElementById("runtime-sync") as HTMLElement;
 export const runtimeSyncNote = document.getElementById("runtime-sync-note") as HTMLElement;
 export const windowCornerRadiusInput = document.getElementById("window-corner-radius") as HTMLInputElement;

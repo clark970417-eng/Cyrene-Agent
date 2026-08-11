@@ -16,7 +16,7 @@ import {
   type SegmentedOutputMode,
 } from "../../shared/preferences";
 import { isProactiveDeliveryTargetSelectable } from "../../shared/proactive-delivery";
-import type { UiTheme } from "../../shared/ui-theme";
+import { normalizeUiTheme, type UiTheme } from "../../shared/ui-theme";
 import { DEFAULT_UI_FONT, normalizeUiFont, type UiFont } from "../../shared/ui-font";
 import { normalizeUiIcon, type UiIcon } from "../../shared/ui-icon";
 import {
@@ -79,7 +79,7 @@ import { parsePositiveIntOrThrow, parseN1SecToMsOrThrow, parseCommandLine } from
 import { apiState } from "./api/state";
 import { apiForm, apiRuntimeForm, apiTimeoutForm, presetCards, presetWebsiteLink, displayNameInput, baseUrlInput, baseUrlResetBtn, modelInput, modelInputSuggestions, contextWindowInput, apiKeyInput, apiKeyLabel, apiKeyHint, testConnectionBtn, transportSelect, transportHint, endpointPreview, customEndpointControls, customEndpointOverrides, customEndpointSummary, customEndpointGuideBtn, workFlowAdaptBtn, apiNoteText, multimodalToggle, chatRequestTimeoutSecInput, maxIterationsInput, maxReplansInput, maxRefreshInput, perCallTimeoutSecInput, actionGateRepairBudgetSecInput, embeddingDimensionsInput, modelRequestTimeoutSecInput, modelRequestTimeoutSecReset, toggleEnableThinking, toggleDisableThinking, toggleDisableMaxToken } from "./api/dom";
 import { visionBaseUrlInput, visionApiKeyInput, visionModelInput, visionFieldsWrap, testVisionBtn, visionTestStatus } from "./vision/dom";
-import { appearanceForm, appearanceSaveStatus, runtimeSyncSelect, runtimeSyncNote, windowCornerRadiusInput, windowCornerRadiusVal, petAlwaysOnTopInput, petVisibleInput, petZoomInput, petZoomVal, chatLineHeightInput, chatLineHeightVal, assistantBubbleEnabledInput, chatParaSpacingInput, chatParaSpacingVal, launchAtLoginInput, uiFontCurrent, uiFontImportButton, uiFontResetButton, uiIconSelect, screenshotHotkeyInput, openChromeGpu, disableGpuInput, sidebarVisibleInput, tasksVisibleInput } from "./appearance/dom";
+import { appearanceForm, appearanceSaveStatus, uiThemeSelect, runtimeSyncSelect, runtimeSyncNote, windowCornerRadiusInput, windowCornerRadiusVal, petAlwaysOnTopInput, petVisibleInput, petZoomInput, petZoomVal, chatLineHeightInput, chatLineHeightVal, assistantBubbleEnabledInput, chatParaSpacingInput, chatParaSpacingVal, launchAtLoginInput, uiFontCurrent, uiFontImportButton, uiFontResetButton, uiIconSelect, screenshotHotkeyInput, openChromeGpu, disableGpuInput, sidebarVisibleInput, tasksVisibleInput } from "./appearance/dom";
 import { generalForm, generalSaveStatus, languageSelect, defaultChatModeSelect, segmentedOutputSelect, mobileMessageSegmentationSelect, proactiveChatSelect, proactiveDeliveryRow, proactiveDeliverySelect, chatSocialContextEnabledInput, citaEnabledInput, citaEngineSelect, clearChatHistoryBtn, customStyleSamplingBtn, customStylePromptBtn } from "./general/dom";
 import { minBtn, closeBtn, preferencesForm, sectionTitle, sectionHint, placeholderPanel, cyrenePanel, disclaimerPanel, pluginsPanel, placeholderIcon, placeholderTitle, placeholderCopy, saveStatus, runtimeSaveStatus, preferencesSaveStatus, cyreneSaveStatus, openStickerManagerBtn, addStickerBtn } from "./shared/shell";
 import { pluginAddBtn, neteaseDetailView, permissionBlocksWrap, permissionNote, lifeToggle, lifeCard, lifeBody } from "./plugins/dom";
@@ -205,7 +205,7 @@ if (!window.settings) {
       tasksVisible: true,
       launchAtLogin: false,
       language: "zh-TW",
-      uiTheme: "pearl-white",
+      uiTheme: "cyrene-night",
       windowCornerRadius: DEFAULT_WINDOW_CORNER_RADIUS,
       defaultChatMode: "chat",
       currentStyleId: "default",
@@ -219,10 +219,30 @@ if (!window.settings) {
     }),
     saveGeneral: (c) => Promise.resolve(c as GeneralSettings),
     openCustomStylePrompt: async () => ({ ok: false, error: "settings api unavailable" }),
+    channelsGetConfig: async () => ({ wechat: { enabled: false }, feishu: { enabled: false }, discord: { enabled: false } }),
+    channelsSaveConfig: async () => ({}),
+    channelsRestart: async () => ({}),
     channelsGetStatus: () => Promise.resolve({}),
+    channelsDiscordTestConnection: async () => ({ ok: false, error: "僅桌面版可用" }),
+    channelsDiscordGetProfile: async () => ({ connected: false }),
+    channelsDiscordUpdateProfile: async () => ({ ok: false, error: "僅桌面版可用" }),
+    channelsDiscordPickAvatar: async () => null,
+    channelsDiscordPickBanner: async () => null,
+    channelsDiscordCloudStatus: async () => ({ mode: "local" }),
+    channelsDiscordCloudControl: async () => ({}),
+    channelsSpotifyAuthorize: async () => ({ ok: false, error: "僅桌面版可用" }),
+    channelsSpotifyGetStatus: async () => ({ configured: false, connected: false }),
+    channelsSpotifyControl: async () => ({ ok: false, message: "僅桌面版可用" }),
+    channelsSpotifyDisconnect: async () => ({ ok: true }),
     channelsBilibiliConnect: async () => ({ ok: false, error: "僅桌面版可連接 Opera GX" }),
     channelsBilibiliGetStatus: async () => ({ connected: false, browser: "Opera GX", profilePath: "" }),
     channelsBilibiliDisconnect: async () => ({ ok: true, message: "尚未連接" }),
+    channelsLogGet: async () => [],
+    channelsLogClear: async () => ({}),
+    onChannelsInstallProgress: () => () => {},
+    onChannelsWechatQrcode: () => () => {},
+    onChannelsWechatLoginDone: () => () => {},
+    channelsWechatLoginStart: async () => ({ ok: false, error: "僅桌面版可用" }),
     onChannelsStatusChanged: () => () => {},
     beginScreenshotHotkeyCapture: () => Promise.resolve(true),
     endScreenshotHotkeyCapture: () => Promise.resolve(true),
@@ -360,6 +380,15 @@ function applyLanguageSelection(language: "zh-TW"): void {
     button.classList.toggle("is-active", active);
     button.setAttribute("aria-pressed", String(active));
   });
+}
+
+function applyUiThemeSelection(theme: UiTheme): void {
+  uiThemeSelect.querySelectorAll<HTMLButtonElement>("[data-theme]").forEach((button) => {
+    const active = button.dataset.theme === theme;
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-pressed", String(active));
+  });
+  document.documentElement.dataset.uiTheme = theme;
 }
 
 function applyOptionGroupValue(group: HTMLElement, value: string): void {
@@ -927,6 +956,7 @@ async function loadGeneralSettings(): Promise<void> {
     tasksVisibleInput.checked = cfg.tasksVisible ?? true;
     launchAtLoginInput.checked = cfg.launchAtLogin;
     renderUiFont(normalizeUiFont(cfg.uiFont));
+    applyUiThemeSelection(normalizeUiTheme(cfg.uiTheme));
     renderUiIcon(normalizeUiIcon(cfg.uiIcon));
     applyDefaultChatModeSelection(normalizeDefaultChatMode(cfg.defaultChatMode));
     preferencesState.currentCustomStyleConfig = normalizeCustomStyleConfig(cfg.customStyle);
@@ -1354,6 +1384,17 @@ apiTimeoutForm.addEventListener("submit", async (e) => {
 
 appearanceForm.addEventListener("submit", (e) => {
   e.preventDefault();
+});
+
+uiThemeSelect.querySelectorAll<HTMLButtonElement>("[data-theme]").forEach((button) => {
+  button.addEventListener("click", () => {
+    const theme = normalizeUiTheme(button.dataset.theme);
+    applyUiThemeSelection(theme);
+    setAppearanceSaveStatus("正在套用…");
+    void window.settings!.saveGeneral({ uiTheme: theme })
+      .then(() => setAppearanceSaveStatus("已同步到所有頁面", "is-ok"))
+      .catch(() => setAppearanceSaveStatus("主題儲存失敗", "is-error"));
+  });
 });
 
 generalForm.addEventListener("submit", async (e) => {

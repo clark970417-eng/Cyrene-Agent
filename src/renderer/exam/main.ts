@@ -1,3 +1,5 @@
+import "../ui/theme";
+
 interface MCQ {
   question: string;
   options: string[];

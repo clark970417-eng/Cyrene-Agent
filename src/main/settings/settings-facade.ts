@@ -36,7 +36,7 @@ const DEFAULT_GENERAL_SETTINGS: GeneralSettings = {
   tasksVisible: true,
   launchAtLogin: false,
   language: "zh-TW",
-  uiTheme: "pearl-white",
+  uiTheme: "cyrene-night",
   windowCornerRadius: DEFAULT_WINDOW_CORNER_RADIUS,
   uiThemeRadius: false,
   uiFont: DEFAULT_UI_FONT,

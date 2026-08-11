@@ -17,14 +17,14 @@ describe("appearance settings markup", () => {
 	    expect(html).toContain('通用设置</button>');
 	  });
 
-	  it("contains the white-theme appearance groups and disabled future options", () => {
+  it("describes the unified workspace without contradictory window modes", () => {
     const panel = form("appearance-form");
-    for (const heading of ["布局", "个性化", "昔涟桌宠"]) {
+    for (const heading of ["布局", "介面主題", "个性化", "昔涟桌宠"]) {
       expect(panel).toContain(heading);
     }
-    for (const label of ["单窗口", "聊天背景"]) {
-      expect(panel).toMatch(new RegExp(`<button[^>]+disabled[^>]*>[\\s\\S]*?${label}[\\s\\S]*?SOON`));
-    }
+    expect(panel).toContain("整合工作台");
+    expect(panel).not.toContain("多窗口");
+    expect(panel).not.toContain("单窗口");
   });
 
   it("offers the two supplied desktop icon presets", () => {
@@ -35,10 +35,12 @@ describe("appearance settings markup", () => {
     expect(panel).not.toContain('data-icon="classic"');
   });
 
-  it("does not expose unavailable theme choices", () => {
+  it("offers the two synchronized theme choices only", () => {
     const panel = form("appearance-form");
+    expect(panel).toContain('id="ui-theme-select"');
+    expect(panel).toContain('data-theme="cyrene-night"');
+    expect(panel).toContain('data-theme="pearl-white"');
     expect(panel).not.toContain('data-theme="classic"');
-    expect(panel).not.toContain('data-theme="pearl-white"');
     expect(panel).not.toContain('data-theme="polished-pink"');
   });
 
