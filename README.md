@@ -91,6 +91,18 @@ The following capabilities originated from the upstream `Cyrene-Agent` project a
 - Scheduled tasks, todos, and proactive messages
 - Lark and WeChat messaging integrations
 
+## Standalone Module Repositories
+
+To make the engineering work easier to review, several major subsystems were also separated into smaller public repositories. These modules are intended as focused, reusable examples rather than replacements for the complete desktop application:
+
+- [discord-cloud-agent](https://github.com/clark970417-eng/discord-cloud-agent) — cloud Discord agent runtime with chat, music, Spotify control, check-ins, health checks, and deployment examples.
+- [long-term-memory-engine](https://github.com/clark970417-eng/long-term-memory-engine) — reusable memory, retrieval, conflict resolution, scheduled compression, and RAG utilities for AI agents.
+- [mobile-agent-dashboard](https://github.com/clark970417-eng/mobile-agent-dashboard) — mobile web dashboard and local server bridge for controlling an agent from a phone.
+- [game-automation-tools](https://github.com/clark970417-eng/game-automation-tools) — scriptable TypeScript toolkit for game automation, screenshots, coordinate handling, and recipe-based workflows.
+- [wuthering-waves-agent-tools](https://github.com/clark970417-eng/wuthering-waves-agent-tools) — focused Wuthering Waves helper tools for agent workflows, including UID parsing and a lightweight renderer interface.
+- [realtime-discord-activity](https://github.com/clark970417-eng/realtime-discord-activity) — Discord activity layer with slash commands, voice, music, notebook, image queue, and shared activity features.
+- [ai-companion-desktop-system](https://github.com/clark970417-eng/ai-companion-desktop-system) — full Electron and TypeScript desktop AI companion system showing how the modules fit together.
+
 ## Architecture
 
 ```text
