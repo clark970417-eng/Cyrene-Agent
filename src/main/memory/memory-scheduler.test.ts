@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest"
 import { MemoryScheduler } from "./memory-scheduler"
 import type { MemorySchedulerDeps } from "./memory-scheduler"
+import type { MemoryJudgeResult } from "./memory-schemas"
 import type { MemoryCandidate, MemoryJudgeTurn } from "./memory-types"
 
 function createScheduler(overrides: Partial<MemorySchedulerDeps> = {}) {
@@ -9,8 +10,8 @@ function createScheduler(overrides: Partial<MemorySchedulerDeps> = {}) {
   let roundCount = 0
   let queue = Promise.resolve()
   const deps: MemorySchedulerDeps = {
-    ingestEntity: vi.fn((text: string) => {
-      calls.push(`ingest:${text}`)
+    ingestEntities: vi.fn((entities: unknown[]) => {
+      calls.push(`ingest:${entities.length}`)
     }),
     enqueueTask: <T>(label: string, task: () => Promise<T>) => {
       enqueueLabels.push(label)
@@ -19,7 +20,7 @@ function createScheduler(overrides: Partial<MemorySchedulerDeps> = {}) {
       queue = run.then(() => undefined, () => undefined)
       return run
     },
-    judgeMemory: vi.fn(async () => [] as MemoryCandidate[]),
+    judgeMemory: vi.fn(async () => ({ candidates: [], entities: [] }) as MemoryJudgeResult),
     writeMemory: vi.fn(async () => {
       calls.push("write")
     }),
@@ -40,6 +41,9 @@ function createScheduler(overrides: Partial<MemorySchedulerDeps> = {}) {
     runResolverQueueOnce: vi.fn(async () => {
       calls.push("resolver")
     }),
+    runDecay: vi.fn(async () => {
+      calls.push("decay")
+    }),
     ...overrides,
   }
 
@@ -55,7 +59,8 @@ describe("MemoryScheduler", () => {
     }
     await vi.waitFor(() => expect(deps.replaceL1Field).toHaveBeenCalledWith("roundCount", 5))
 
-    expect(deps.ingestEntity).toHaveBeenCalledTimes(10)
+    // 实体抽取改由 judge 顺手产出，非 judge 轮（5 < 6）不 ingest 实体
+    expect(deps.ingestEntities).not.toHaveBeenCalled()
     expect(enqueueLabels).toEqual(["MemoryMaintenance", "MemoryMaintenance", "MemoryMaintenance", "MemoryMaintenance", "MemoryMaintenance"])
     expect(deps.judgeMemory).not.toHaveBeenCalled()
     expect(deps.writeMemory).not.toHaveBeenCalled()
@@ -64,22 +69,24 @@ describe("MemoryScheduler", () => {
   it("runs MemoryJudge on the sixth round with turns 1 through 6", async () => {
     const candidate: MemoryCandidate = {
       layer: "L2",
-      summary: "用戶喜歡香菇",
-      content: "用戶喜歡香菇",
+      summary: "用户喜欢香菇",
+      content: "用户喜欢香菇",
       confidence: 0.9,
-      triggerText: "我喜歡香菇",
+      triggerText: "我喜欢香菇",
+      slug: "喜欢香菇",
+      sourceQuote: "我喜欢香菇，尤其爱吃鲜香菇",
       importance: "medium",
       stability: "situational",
       certainty: "explicit",
       attribution: "user_explicit",
-      evidenceQuotes: ["我喜歡香菇"],
-      contextSummary: "用戶表達食物偏好",
+      evidenceQuotes: ["我喜欢香菇"],
+      contextSummary: "用户表达食物偏好",
       shouldWrite: true,
-      reason: "用戶明確表達",
+      reason: "用户明确表达",
       forbiddenOverclaims: [],
     }
     const { scheduler, deps } = createScheduler({
-      judgeMemory: vi.fn(async () => [candidate]),
+      judgeMemory: vi.fn(async () => ({ candidates: [candidate], entities: [] }) as MemoryJudgeResult),
     })
 
     for (let i = 1; i <= 6; i++) {

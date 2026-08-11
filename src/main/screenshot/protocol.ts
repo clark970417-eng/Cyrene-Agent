@@ -109,10 +109,9 @@ export function resolveCompletedFile(outputDirectory: string, fileName: string):
   if (!UUID_V4_PNG_FILE_NAME.test(fileName)) {
     throw new Error("INVALID_SCREENSHOT_FILE_NAME");
   }
-  const paths = /^[A-Za-z]:[\\/]/.test(outputDirectory) ? path.win32 : path;
-  const directory = paths.resolve(outputDirectory);
-  const resolved = paths.resolve(directory, fileName);
-  if (paths.dirname(resolved) !== directory) {
+  const directory = path.resolve(outputDirectory);
+  const resolved = path.resolve(directory, fileName);
+  if (path.dirname(resolved) !== directory) {
     throw new Error("INVALID_SCREENSHOT_FILE_NAME");
   }
   return resolved;

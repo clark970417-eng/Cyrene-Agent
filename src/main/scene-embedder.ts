@@ -87,7 +87,7 @@ export interface SceneMatch {
   score: number;
 }
 
-// ── 餘弦相似度 ──
+// ── 余弦相似度 ──
 function cosineSimilarity(a: number[], b: number[]): number {
   let dot = 0, normA = 0, normB = 0;
   for (let i = 0; i < a.length; i++) {
@@ -100,18 +100,18 @@ function cosineSimilarity(a: number[], b: number[]): number {
 }
 
 /**
- * 去掉表情包描述標記（用戶發送表情包：xxx）。
- * 表情包描述是給 LLM 看的上下文，不該參與場景向量化——
- * 它的情緒語義會汙染場景匹配（比如"晚安"描述誤命中 farewell）。
+ * 去掉表情包描述标记（用户发送表情包：xxx）。
+ * 表情包描述是给 LLM 看的上下文，不该参与场景向量化——
+ * 它的情绪语义会污染场景匹配（比如"晚安"描述误命中 farewell）。
  */
 function stripStickerDesc(text: string): string {
-  return text.replace(/（用戶發送表情包：[^）]*）/g, "").trim();
+  return text.replace(/（用户发送表情包：[^）]*）/g, "").trim();
 }
 
 /**
- * 啟動時調用一次，建場景索引。
- * 每個場景的 6 句例句各自向量化，保留全部向量（不取平均），
- * 匹配時取 max——用戶輸入只要命中場景裡任一句就高分。
+ * 启动时调用一次，建场景索引。
+ * 每个场景的 6 句例句各自向量化，保留全部向量（不取平均），
+ * 匹配时取 max——用户输入只要命中场景里任一句就高分。
  */
 export async function buildSceneIndex(
   provider: EmbeddingProvider,
@@ -120,36 +120,36 @@ export async function buildSceneIndex(
   for (const [scene, examples] of Object.entries(SCENE_EXAMPLES)) {
     scenes[scene] = await provider.embedBatch(examples);
   }
-  console.log("[SceneEmbedder] 索引構建完成: " + Object.keys(scenes).join(", "));
+  console.log("[SceneEmbedder] 索引构建完成: " + Object.keys(scenes).join(", "));
   return { scenes };
 }
 
 /**
- * 加權向量求和：最近 3 輪 user 消息各自 embed，按權重合成一個向量。
- * 當前輪 0.75 絕對主導，前一輪 0.20 給參考，再前一輪 0.05 微調。
- * 只取 user 消息——場景識別判斷的是用戶處於什麼狀態，不該被 assistant 回覆汙染。
+ * 加权向量求和：最近 3 轮 user 消息各自 embed，按权重合成一个向量。
+ * 当前轮 0.75 绝对主导，前一轮 0.20 给参考，再前一轮 0.05 微调。
+ * 只取 user 消息——场景识别判断的是用户处于什么状态，不该被 assistant 回复污染。
  *
- * @param currentText   當前輪用戶輸入（已清洗）
- * @param recentMessages  最近幾輪消息（{ role, content }[]）
+ * @param currentText   当前轮用户输入（已清洗）
+ * @param recentMessages  最近几轮消息（{ role, content }[]）
  * @param provider      embedding provider
- * @returns  加權求和後的向量
+ * @returns  加权求和后的向量
  */
 async function buildWeightedVector(
   currentText: string,
   recentMessages: Array<{ role: string; content: string }>,
   provider: EmbeddingProvider,
 ): Promise<number[]> {
-  // 取最近 2 輪歷史 user 消息（不含當前輪），清洗表情包描述
+  // 取最近 2 轮历史 user 消息（不含当前轮），清洗表情包描述
   const recentUserTexts = recentMessages
     .filter(m => m.role === "user")
     .slice(-2)
     .map(m => stripStickerDesc(m.content))
     .filter(text => text.trim() !== "");
 
-  // 按時間順序排列：[再前一輪, 前一輪, 當前輪]
-  // recentUserTexts[-2] = 再前一輪（如果有）
-  // recentUserTexts[-1] = 前一輪（如果有）
-  // currentText = 當前輪
+  // 按时间顺序排列：[再前一轮, 前一轮, 当前轮]
+  // recentUserTexts[-2] = 再前一轮（如果有）
+  // recentUserTexts[-1] = 前一轮（如果有）
+  // currentText = 当前轮
   const texts: { text: string; weight: number }[] = [{ text: currentText, weight: WEIGHT_CURRENT }];
 
   if (recentUserTexts.length >= 1) {
@@ -159,10 +159,10 @@ async function buildWeightedVector(
     texts.unshift({ text: recentUserTexts[recentUserTexts.length - 2], weight: WEIGHT_PREV2 });
   }
 
-  // 各自 embed 成獨立向量
+  // 各自 embed 成独立向量
   const vectors = await provider.embedBatch(texts.map(t => t.text));
 
-  // 加權求和
+  // 加权求和
   const dims = vectors[0].length;
   const result = new Array(dims).fill(0);
   for (let i = 0; i < vectors.length; i++) {
@@ -176,14 +176,14 @@ async function buildWeightedVector(
 }
 
 /**
- * 每輪調用，返回 top1 場景和分數，低於閾值返回 null。
+ * 每轮调用，返回 top1 场景和分数，低于阈值返回 null。
  *
- * @param input  用戶當前輪輸入
+ * @param input  用户当前轮输入
  * @param provider  embedding provider
- * @param index  啟動時建好的場景索引
- * @param threshold  相似度閾值，默認 0.5（先寬鬆，跑數據後收緊）
- * @param recentMessages  可選，最近幾輪消息，傳入則拼上下文（方案 A）
- * @returns  { scene, score } 或 null（低於閾值）
+ * @param index  启动时建好的场景索引
+ * @param threshold  相似度阈值，默认 0.5（先宽松，跑数据后收紧）
+ * @param recentMessages  可选，最近几轮消息，传入则拼上下文（方案 A）
+ * @returns  { scene, score } 或 null（低于阈值）
  */
 export async function matchScene(
   input: string,
@@ -192,11 +192,11 @@ export async function matchScene(
   threshold = 0.72,
   recentMessages?: Array<{ role: string; content: string }>,
 ): Promise<SceneMatch | null> {
-  // 過濾表情包描述後，如果用戶輸入為空（純表情包消息），跳過場景匹配
+  // 过滤表情包描述后，如果用户输入为空（纯表情包消息），跳过场景匹配
   const cleanInput = stripStickerDesc(input);
-  if (!cleanInput) return null; // 純表情包，走兜底
+  if (!cleanInput) return null; // 纯表情包，走兜底
 
-  // 方案 A（加權向量）：最近 3 輪 user 消息各自 embed，按 0.75/0.20/0.05 加權求和
+  // 方案 A（加权向量）：最近 3 轮 user 消息各自 embed，按 0.75/0.20/0.05 加权求和
   const inputVec = recentMessages && recentMessages.length > 0
     ? await buildWeightedVector(cleanInput, recentMessages, provider)
     : await provider.embed(cleanInput);
@@ -205,7 +205,7 @@ export async function matchScene(
   let topScore = -1;
 
   for (const [scene, vectors] of Object.entries(index.scenes)) {
-    // max 策略：取該場景所有向量中相似度最高的
+    // max 策略：取该场景所有向量中相似度最高的
     const score = Math.max(
       ...vectors.map(v => cosineSimilarity(inputVec, v)),
     );

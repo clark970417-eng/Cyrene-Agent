@@ -1,4 +1,4 @@
-import type { ActionDecision } from "./agent-graph";
+import type { ActionDecision, GateFailureInfo } from "./agent-graph";
 import { buildToolExecutionContext } from "./tool-execution-context";
 import type { ToolCallResult } from "./types";
 import type {
@@ -14,6 +14,7 @@ import type {
   StructuredRepairContext,
 } from "./structured-output/runner";
 import { runStructuredOutput } from "./structured-output/runner";
+import { resolveMaxOutputTokens } from "../runtime-policy";
 import type { RecordStructuredOutputMetric } from "./structured-output/metrics";
 import type {
   AskFieldType,
@@ -69,6 +70,8 @@ export interface RunActionGateInput {
   toolResults: ToolCallResult[];
   profile: StructuredOutputProfile;
   actionGateSystemPrompt?: string;
+  /** 图级 refresh 节点传入的上一次 Action Gate 失败信息，供模型在重新决策时参考。 */
+  lastGateFailure?: GateFailureInfo;
   generate: (request: ChatRequest, signal: AbortSignal) => Promise<ChatResponse>;
   validateTargetRef: (ref: string) => boolean;
   signal?: AbortSignal;
@@ -187,23 +190,32 @@ function structuredOutputFor(
       strict: true,
     };
   }
-  if (profile.mode === "provider_json_object") return { mode: "json_object" };
+  if (profile.mode === "provider_json_object") {
+    return { mode: "json_object", name: "action_decision", schema };
+  }
   return {
     mode: "prompt_json",
+    name: "action_decision",
+    schema,
     sendJsonObjectHint: profile.requestHints.sendJsonObject,
   };
 }
 
 function fullMachineInput(input: BuildActionGateRequestInput): object {
+  const clarificationAnswers = input.clarificationAnswers ?? [];
+  if (clarificationAnswers.length > 0) {
+    console.log("[ActionGate] clarificationAnswers count=", clarificationAnswers.length, "answers=", JSON.stringify(clarificationAnswers).slice(0, 200));
+  }
   return {
     originalQuery: input.originalQuery,
     rewrittenQuery: input.contextualizedQuery,
     availableCapabilities: input.availableCapabilities,
     runtimeEnvironmentContext: input.runtimeEnvironmentContext ?? "",
-    clarificationAnswers: input.clarificationAnswers ?? [],
+    clarificationAnswers,
     trustedRefs: input.trustedRefs,
     citaContext: input.citaContextBlock,
     toolExecutionContext: buildToolExecutionContext(input.toolResults),
+    ...(input.lastGateFailure ? { previousGateFailure: input.lastGateFailure } : {}),
   };
 }
 
@@ -252,7 +264,10 @@ export function buildActionGateRequest(input: BuildActionGateRequestInput): Chat
     model: input.model,
     messages,
     stream: false,
-    maxTokens: input.repair.attempt > 0 ? 2_400 : 1_200,
+    maxTokens: resolveMaxOutputTokens({
+      stage: "action-gate",
+      override: input.repair.attempt > 0 ? 2_400 : undefined,
+    }),
     structuredOutput: structuredOutputFor(input.profile, schema),
     ...(input.profile.requestHints.reasoningSplit
       ? { extraBody: { reasoning_split: true } }
@@ -479,6 +494,7 @@ export async function runActionGate(input: RunActionGateInput): Promise<ActionGa
         text: response.text,
         finishReason: response.finishReason,
         refusal: response.refusal,
+        structuredValue: response.structuredValue,
       };
     },
     parseSchema: parseActionDecisionValue,

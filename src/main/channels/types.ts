@@ -1,43 +1,43 @@
-// channels 模塊的統一數據類型。
+// channels 模块的统一数据类型。
 //
-// 設計原則：所有外部入口（微信/飛書/Discord/...）都必須先把消息歸一化成
-// IncomingMessage / OutgoingMessage 兩種格式再交給 dispatcher。
-// 這樣 dispatcher 完全不知道任何具體平臺 —— 加新渠道零改動 dispatcher。
+// 设计原则：所有外部入口（微信/飞书/Discord/...）都必须先把消息归一化成
+// IncomingMessage / OutgoingMessage 两种格式再交给 dispatcher。
+// 这样 dispatcher 完全不知道任何具体平台 —— 加新渠道零改动 dispatcher。
 //
-// 命名規範：所有字段小駝峰、可空字段加 ?；時間戳統一 Date。
+// 命名规范：所有字段小驼峰、可空字段加 ?；时间戳统一 Date。
 import type { WebContents } from "electron";
 
-/** 渠道 id 聯合類型。新增渠道時在此擴展。 */
-export type ChannelId = "wechat" | "feishu" | "discord";
+/** 渠道 id 联合类型。新增渠道时在此扩展。 */
+export type ChannelId = "wechat" | "feishu";
 
-/** 渠道能力聲明。Dispatcher 按 cap 做降級。 */
+/** 渠道能力声明。Dispatcher 按 cap 做降级。 */
 export interface ChannelCapability {
-  /** 純文本消息 */
+  /** 纯文本消息 */
   text: boolean;
-  /** 圖片消息 */
+  /** 图片消息 */
   image: boolean;
-  /** TTS 音頻消息 */
+  /** TTS 音频消息 */
   audio: boolean;
   /** 文件附件 */
   file: boolean;
-  /** 視頻消息 */
+  /** 视频消息 */
   video: boolean;
   /** Markdown 富文本（部分渠道支持） */
   markdown: boolean;
-  /** 富卡片（飛書 interactive / Discord embed） */
+  /** 富卡片（飞书 interactive / Discord embed） */
   card: boolean;
-  /** 自定義表情包 */
+  /** 自定义表情包 */
   sticker: boolean;
-  /** 單條文本最大長度。超出按 cap 截斷 + 提示。 */
+  /** 单条文本最大长度。超出按 cap 截断 + 提示。 */
   maxTextLength: number;
 }
 
-/** 入站附件。adapters 負責下載到本地後填 filePath。 */
+/** 入站附件。adapters 负责下载到本地后填 filePath。 */
 export interface ChannelAttachment {
   kind: "image" | "audio" | "file" | "video";
-  /** 遠程 URL（adapter 已下載到本地時為空） */
+  /** 远程 URL（adapter 已下载到本地时为空） */
   url?: string;
-  /** 本地路徑（adapter 已下載時填這個） */
+  /** 本地路径（adapter 已下载时填这个） */
   filePath?: string;
   mime?: string;
   caption?: string;
@@ -46,25 +46,22 @@ export interface ChannelAttachment {
 /** 入站消息。adapters → dispatcher。 */
 export interface IncomingMessage {
   channel: ChannelId;
-  messageId?: string;
-  /** 平臺原始 sender id。dispatcher 會 sha256 截斷成 16 字符作為 sessionId。 */
+  /** 平台原始 sender id。dispatcher 会 sha256 截断成 16 字符作为 sessionId。 */
   senderId: string;
-  /** 顯示名（暱稱/open_id alias），用於日誌/UI。 */
+  /** 显示名（昵称/open_id alias），用于日志/UI。 */
   senderName?: string;
-  /** 會話 id。私聊時通常 = senderId。 */
+  /** 会话 id。私聊时通常 = senderId。 */
   chatId: string;
-  /** 群聊/話題 id。私聊時 undefined。 */
+  /** 群聊/话题 id。私聊时 undefined。 */
   threadId?: string;
   text: string;
-  /** Adapter-provided trusted runtime context, injected into the agent as a system message. */
-  agentContext?: string;
   attachments?: ChannelAttachment[];
   at: Date;
-  /** 原始 payload，調試用，不序列化。 */
+  /** 原始 payload，调试用，不序列化。 */
   _raw?: unknown;
 }
 
-/** 出站消息的單個片段。多模態按 parts 數組，capability 降級在 dispatcher 做。 */
+/** 出站消息的单个片段。多模态按 parts 数组，capability 降级在 dispatcher 做。 */
 export type OutgoingPart =
   | { kind: "text"; text: string }
   | { kind: "image"; url?: string; filePath?: string; caption?: string }
@@ -82,33 +79,32 @@ export type OutgoingPart =
 /** 出站消息。dispatcher → adapters。 */
 export interface OutgoingMessage {
   channel: ChannelId;
-  /** 回覆給誰（私聊 = senderId；群聊 = chatId） */
+  /** 回复给谁（私聊 = senderId；群聊 = chatId） */
   targetId: string;
   threadId?: string;
   parts: OutgoingPart[];
-  replyToMessageId?: string;
 }
 
-/** 渠道狀態（UI 展示用） */
+/** 渠道状态（UI 展示用） */
 export interface ChannelStatus {
   enabled: boolean;
   /** "running" / "offline" / "starting" / "config_missing" / "error" */
   phase: "running" | "offline" | "starting" | "config_missing" | "error";
   message?: string;
-  /** 渠道專屬的額外狀態字段（如微信賬號暱稱、飛書 token 是否過期） */
+  /** 渠道专属的额外状态字段（如微信账号昵称、飞书 token 是否过期） */
   detail?: Record<string, unknown>;
 }
 
-/** ChannelAdapter 內部 onMessage handler 的簽名。
- *  返回 null 表示該消息被忽略（權限/限速/不在 allow list），adapter 不會再回信。 */
+/** ChannelAdapter 内部 onMessage handler 的签名。
+ *  返回 null 表示该消息被忽略（权限/限速/不在 allow list），adapter 不会再回信。 */
 export type MessageHandler = (
   msg: IncomingMessage,
 ) => Promise<OutgoingMessage | null>;
 
-/** inbound-server 拿到入站請求後轉交給 manager 路由時的回調簽名 */
+/** inbound-server 拿到入站请求后转交给 manager 路由时的回调签名 */
 export interface InboundRouteContext {
-  /** 用於推送 AG-UI 事件到桌面端 chatWindow（可選）。 */
+  /** 用于推送 AG-UI 事件到桌面端 chatWindow（可选）。 */
   chatWindow?: WebContents | null;
-  /** 用於把出站消息廣播回桌面端鏡像顯示（可選）。 */
+  /** 用于把出站消息广播回桌面端镜像显示（可选）。 */
   broadcastChat?: (event: { type: "bot:message"; payload: unknown }) => void;
 }

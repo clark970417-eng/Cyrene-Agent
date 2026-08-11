@@ -1,17 +1,14 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-ui-theme="pearl-white">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>昔漣 · 今日日程</title>
-  <script>
-    // Mark embedded pages before stylesheets load so the inner titlebar never paints.
-    if (window.self !== window.top) document.documentElement.classList.add("is-embedded");
-  </script>
+  <title>昔涟 · 今日日程</title>
   <link rel="stylesheet" href="../ui/tokens.css" />
   <link rel="stylesheet" href="../ui/fonts.css" />
   <link rel="stylesheet" href="../ui/base.css" />
   <link rel="stylesheet" href="./tasks.css" />
+  <link rel="stylesheet" href="../ui/theme.css" />
 </head>
 <body>
   <div class="tasks">
@@ -19,13 +16,13 @@
       <div class="tasks__title">
         <span class="tasks__icon" aria-hidden="true">📋</span>
         <span class="tasks__name">今日日程</span>
-        <span class="tasks__hint">展示中 · 只讀</span>
+        <span class="tasks__hint">展示中 · 只读</span>
       </div>
       <div class="tasks__titlebar-actions">
         <button type="button" class="tasks__winbtn" id="min-btn" aria-label="最小化" title="最小化">
           <svg width="9" height="2" viewBox="0 0 9 2" aria-hidden="true"><rect width="9" height="2" rx="1" fill="currentColor"/></svg>
         </button>
-        <button type="button" class="tasks__winbtn tasks__winbtn--close" id="close-btn" aria-label="關閉" title="關閉">
+        <button type="button" class="tasks__winbtn tasks__winbtn--close" id="close-btn" aria-label="关闭" title="关闭">
           <svg width="9" height="9" viewBox="0 0 9 9" aria-hidden="true">
             <line x1="2" y1="2" x2="7" y2="7" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
             <line x1="7" y1="2" x2="2" y2="7" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
@@ -69,7 +66,7 @@
           <span>任务设置</span>
         </button>
         <hr class="schedule-footer__divider" />
-        <div class="schedule-footer__version">昔涟 v0.8.4</div>
+        <div class="schedule-footer__version"><span data-app-version></span></div>
       </footer>
     </main>
   </div>

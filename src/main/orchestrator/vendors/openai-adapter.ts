@@ -8,15 +8,12 @@ import {
 import { authHeaderFor } from "./auth";
 import { resolveReasoningCapability } from "../../../shared/reasoning";
 import { applyReasoningPreference } from "./reasoning";
+import { getTimeoutSettings } from "../../timeout-manager";
 import { resolveAutomaticToolChoicePolicy, resolveToolChoicePolicy } from "./tool-choice-policy";
+import { getVendorRuntimeSettings } from "./runtime-settings";
+import { resolveApiEndpoint } from "../../../shared/api-endpoint";
 
-function buildUrl(baseUrl: string): string {
-  const trimmed = baseUrl.trim().replace(/\/+$/, "");
-  if (trimmed.endsWith("/chat/completions")) return trimmed;
-  return `${trimmed}/chat/completions`;
-}
-
-/** 把統一消息翻譯成 OpenAI wire messages。 */
+/** 把统一消息翻译成 OpenAI wire messages。 */
 function toWireMessages(messages: ChatMessage[]): unknown[] {
   return messages.map(m => {
     if (m.role === "system") return { role: "system", content: m.content ?? "" };
@@ -30,14 +27,8 @@ function toWireMessages(messages: ChatMessage[]): unknown[] {
       if (m.name) wire.name = m.name;
       return wire;
     }
-    // assistant：回傳 content + tool_calls（OpenAI 多輪要求 assistant 消息帶 tool_calls）
-    if (m.rawAssistant) {
-      return m.rawAssistant;
-    }
+    // assistant：回传 content + tool_calls（OpenAI 多轮要求 assistant 消息带 tool_calls）
     const wire: Record<string, unknown> = { role: "assistant", content: m.content || null };
-    if (m.thinking) {
-      wire.reasoning_content = m.thinking;
-    }
     if (m.toolCalls && m.toolCalls.length > 0) {
       wire.tool_calls = m.toolCalls.map(tc => ({
         id: tc.id,
@@ -76,6 +67,7 @@ export class OpenAICompatAdapter implements ChatVendorAdapter {
     if (req.repetitionPenalty !== undefined) body.repetition_penalty = req.repetitionPenalty;
     // maxTokens：调用方显式传时才塞（流式场景下通常不传）
     if (req.maxTokens !== undefined) body.max_tokens = req.maxTokens;
+    if (getVendorRuntimeSettings().disableMaxToken) body.max_tokens = undefined;
     const tools = toWireTools(req.tools);
     if (tools) {
       body.tools = tools;
@@ -150,52 +142,56 @@ export class OpenAICompatAdapter implements ChatVendorAdapter {
       },
     );
     return {
-      url: buildUrl(cfg.baseUrl),
+      url: resolveApiEndpoint(cfg.baseUrl, "openai").url,
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        ...authHeaderFor(this.capability, cfg.apiKey),
+        ...authHeaderFor(this.capability, cfg.apiKey, "openai"),
       },
       body: JSON.stringify(finalBody),
     };
   }
 
   buildStreamRequest(req: ChatRequest, cfg: VendorConfig): HttpRequest {
-    // 複用 buildRequest：adapter 內部已按 req.stream 寫 body，強制 stream=true
+    // 复用 buildRequest：adapter 内部已按 req.stream 写 body，强制 stream=true
     return this.buildRequest({ ...req, stream: true }, cfg);
   }
 
   parseStreamEvent(event: StreamEvent): StreamChunk | null {
-    // OpenAI 流式：eventType 始終是 "data"（createSseReader 已統一）
+    // OpenAI 流式：eventType 始终是 "data"（createSseReader 已统一）
     const jsonStr = event.data.trim();
     if (!jsonStr) return null;
     if (jsonStr === "[DONE]") return { done: true };
-    let parsed: { choices?: Array<{ delta?: { content?: unknown; reasoning_content?: unknown; tool_calls?: unknown } }>; usage?: { prompt_tokens?: number; completion_tokens?: number } };
+    let parsed: {
+      choices?: Array<{ delta?: { content?: unknown; reasoning_content?: unknown; thinking?: unknown; reasoning?: unknown; tool_calls?: unknown }; finish_reason?: unknown }>;
+      usage?: { prompt_tokens?: number; completion_tokens?: number };
+      error?: { message?: unknown };
+    };
     try {
       parsed = JSON.parse(jsonStr);
     } catch {
       return null;
     }
-    const delta = parsed?.choices?.[0]?.delta;
-    if (!delta) {
-      // 流末尾的 usage 塊（choices 為空但帶 usage）
-      if (parsed?.usage) {
-        return {
-          usage: {
-            input: parsed.usage.prompt_tokens ?? 0,
-            output: parsed.usage.completion_tokens ?? 0,
-          },
-        };
-      }
-      return null;
+    if (parsed.error) {
+      return { error: typeof parsed.error.message === "string" ? parsed.error.message : "模型流式响应返回错误" };
     }
+    const choice = parsed?.choices?.[0];
+    const delta = choice?.delta;
     const chunk: StreamChunk = {};
-    if (typeof delta.content === "string") chunk.deltaText = delta.content;
-    if (typeof delta.reasoning_content === "string") chunk.deltaThinking = delta.reasoning_content;
-    // 暫不實現：if (Array.isArray(delta.tool_calls)) chunk.deltaToolCalls = ...
-    // 當前三個調用點（MemoryJudge / memory-compressor / 心情觀察器）都不帶 tools，
-    // 未來若需要流式 tool_call 增量，單獨實現 + 加測試即可。
-    return chunk;
+    if (typeof delta?.content === "string") chunk.deltaText = delta.content;
+    const thinking = delta?.reasoning_content ?? delta?.thinking ?? delta?.reasoning;
+    if (typeof thinking === "string") chunk.deltaThinking = thinking;
+    if (typeof choice?.finish_reason === "string") chunk.finishReason = choice.finish_reason;
+    if (parsed.usage) {
+      chunk.usage = {
+        input: parsed.usage.prompt_tokens ?? 0,
+        output: parsed.usage.completion_tokens ?? 0,
+      };
+    }
+    // 暂不实现：if (Array.isArray(delta.tool_calls)) chunk.deltaToolCalls = ...
+    // 当前三个调用点（MemoryJudge / memory-compressor / 心情观察器）都不带 tools，
+    // 未来若需要流式 tool_call 增量，单独实现 + 加测试即可。
+    return Object.keys(chunk).length > 0 ? chunk : null;
   }
 
   parseResponse(raw: unknown): ChatResponse {
@@ -230,10 +226,9 @@ export class OpenAICompatAdapter implements ChatVendorAdapter {
       content: text,
       ...(toolCalls.length > 0 ? { toolCalls } : {}),
       ...(thinking ? { thinking } : {}),
-      rawAssistant: msg,
     };
 
-    // 提取 token 用量（OpenAI 協議: prompt_tokens/completion_tokens）
+    // 提取 token 用量（OpenAI 协议: prompt_tokens/completion_tokens）
     const usage = data.usage
       ? { input: data.usage.prompt_tokens ?? 0, output: data.usage.completion_tokens ?? 0 }
       : undefined;
@@ -263,8 +258,8 @@ export class OpenAICompatAdapter implements ChatVendorAdapter {
     return next;
   }
 
-  // Kimi：多輪 Agent 強烈建議傳 prompt_cache_key（命中後 usage.cached_tokens 體現）。
-  // v1 用"廠商+模型"穩定 key 緩存 system/工具定義；v2 可換成會話級 key。
+  // Kimi：多轮 Agent 强烈建议传 prompt_cache_key（命中后 usage.cached_tokens 体现）。
+  // v1 用"厂商+模型"稳定 key 缓存 system/工具定义；v2 可换成会话级 key。
   applyCacheHints(req: ChatRequest, _cfg: VendorConfig): ChatRequest {
     if (this.capability.cacheStrategy !== "prompt_cache_key") return req;
     const extraBody = { ...(req.extraBody ?? {}), prompt_cache_key: `cyrene:${this.id}` };
@@ -274,12 +269,12 @@ export class OpenAICompatAdapter implements ChatVendorAdapter {
   async testConnection(cfg: VendorConfig): Promise<TestConnectionResult> {
     const start = Date.now();
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 15000);
+    const timer = setTimeout(() => controller.abort(), getTimeoutSettings().testTimeout);
     try {
       const req: ChatRequest = {
         model: cfg.model,
-        messages: [{ role: "user", content: "ping，請只回復兩個字符：ok" }],
-        // 不傳 temperature：某些模型（如 Kimi k2.6）只允許特定值，傳 0 會報錯
+        messages: [{ role: "user", content: "ping，请只回复两个字符：ok" }],
+        // 不传 temperature：某些模型（如 Kimi k2.6）只允许特定值，传 0 会报错
         stream: false,
       };
       const http = this.buildRequest(req, cfg);
@@ -296,7 +291,7 @@ export class OpenAICompatAdapter implements ChatVendorAdapter {
       }
       const data = await res.json();
       const parsed = this.parseResponse(data);
-      return { ok: true, latency, sample: parsed.text.slice(0, 80) || "(空回覆)" };
+      return { ok: true, latency, sample: parsed.text.slice(0, 80) || "(空回复)" };
     } catch (e) {
       return { ok: false, latency: Date.now() - start, error: e instanceof Error ? e.message : String(e) };
     } finally {

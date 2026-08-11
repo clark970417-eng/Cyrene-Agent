@@ -78,7 +78,7 @@ describe("buildActionGateRequest", () => {
   it("includes trusted runtime defaults and machine-derived required inputs", () => {
     const request = buildActionGateRequest(({
       ...baseInput(async () => response({ decision: "respond", reason: "done" })),
-      runtimeEnvironmentContext: "默认城市：淄博\n桌面：C:\\Users\\13575\\Desktop",
+      runtimeEnvironmentContext: "默认城市：淄博\n桌面：C:\\Users\\testuser\\Desktop",
       availableCapabilities: [{
         ...capabilities[0],
         requiredInputs: ["candidateRef"],
@@ -115,8 +115,10 @@ describe("buildActionGateRequest", () => {
       repair: { attempt: 0, minimal: false, errors: [] },
     });
 
-    expect(request.structuredOutput).toEqual({
+    expect(request.structuredOutput).toMatchObject({
       mode: "prompt_json",
+      name: "action_decision",
+      schema: expect.any(Object),
       sendJsonObjectHint: false,
     });
     expect(String(request.messages.at(-1)?.content)).toContain('"outputSchema"');
@@ -206,9 +208,9 @@ describe("runActionGate", () => {
       .toContain("AMBIGUOUS_MULTIPLE_VALID_OBJECTS");
   });
 
-  it("repairs a capability not present in the current available set", async () => {
+  it("does not allow the removed coding delegate when it is absent from Work capabilities", async () => {
     const generate = vi.fn()
-      .mockResolvedValueOnce(response(actDecision({ capability: "shell.execute" })))
+      .mockResolvedValueOnce(response(actDecision({ capability: "delegate_coding" })))
       .mockResolvedValueOnce(response({ decision: "respond", reason: "能力不可用" }));
 
     const result = await runActionGate(baseInput(generate));

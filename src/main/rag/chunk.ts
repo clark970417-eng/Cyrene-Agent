@@ -26,10 +26,10 @@ function estimateTokens(text: string): number {
   return chineseChars + otherTokens;
 }
 
-// ── 文本位置索引（防止 chars / tokens 不一致的問題） ──
-// 為了控制切分邊界在"字符"層級而不是 token 層級更精確，
-// 我們先把文本按"字符"切好，用 estimateTokens 算總 token 數，
-// 然後按比例在字符位置滑動。
+// ── 文本位置索引（防止 chars / tokens 不一致的问题） ──
+// 为了控制切分边界在"字符"层级而不是 token 层级更精确，
+// 我们先把文本按"字符"切好，用 estimateTokens 算总 token 数，
+// 然后按比例在字符位置滑动。
 
 interface CharSpan {
   start: number;   // 字符索引（包含）
@@ -37,12 +37,12 @@ interface CharSpan {
   text: string;
 }
 
-/** 找到 text 中從 pos 開始的下一個句子邊界位置（句號/問號/感嘆號/換行符）。找不到時返回 -1。 */
+/** 找到 text 中从 pos 开始的下一个句子边界位置（句号/问号/感叹号/换行符）。找不到时返回 -1。 */
 function findNextSentenceBoundary(text: string, pos: number): number {
   for (let i = pos; i < text.length; i++) {
     const c = text[i];
     if (c === "\u3002" || c === "\uff01" || c === "\uff1f" || c === "\n" || c === "." || c === "!" || c === "?") {
-      // 跳過連續標點
+      // 跳过连续标点
       let j = i + 1;
       while (j < text.length && "\u3002\uff01\uff1f\n.!?".includes(text[j])) j++;
       return j;
@@ -140,13 +140,13 @@ function extractTitles(text: string): TitleRecord[] {
   return titles;
 }
 
-/** 根據 token 位置和標題列表，生成該位置的標題前綴 */
+/** 根据 token 位置和标题列表，生成该位置的标题前缀 */
 function getTitlePrefix(tokenPos: number, titles: TitleRecord[]): string {
-  // 找距離當前位置最近且 tokenPos <= 當前位置的標題鏈
+  // 找距离当前位置最近且 tokenPos <= 当前位置的标题链
   const active: TitleRecord[] = [];
   for (const t of titles) {
     if (t.tokenPos > tokenPos) break;
-    // 同層級覆蓋
+    // 同层级覆盖
     while (active.length > 0 && active[active.length - 1].level >= t.level) {
       active.pop();
     }
@@ -183,9 +183,9 @@ export function* iterateDocumentChunks(
     let chunkTextContent = span.text.trim();
     if (!chunkTextContent) continue;
 
-    // 加上標題前綴（如果有標題的話）
+    // 加上标题前缀（如果有标题的话）
     if (hasTitles) {
-      // 用該 span 的起始 token 位置計算前綴
+      // 用该 span 的起始 token 位置计算前缀
       const startTokenPos = Math.round(estimateTokens(text.slice(0, span.start)));
       const prefix = getTitlePrefix(startTokenPos, titles);
       if (prefix) {

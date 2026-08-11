@@ -17,8 +17,7 @@ export interface VendorConfig {
   model: string;
   apiKey: string;
   /**
-   * 用户在 settings UI 显式指定的 transport；"auto" 走 baseUrl 启发式 + capabilities fallback。
-   * resolveTransport(cfg) 负责把 auto 解析为具体 transport。
+   * 用户在 settings UI 显式选择的协议。"auto" 仅作为旧配置兼容输入，运行时不按 URL 推断。
    */
   explicitTransport?: Transport | "auto";
   /**
@@ -76,10 +75,16 @@ export type StructuredOutputRequest =
     }
   | {
       mode: "json_object";
+      /** LangChain responseFormat schema; legacy wire adapters ignore it. */
+      name?: string;
+      schema?: object;
     }
   | {
       mode: "prompt_json";
       sendJsonObjectHint: boolean;
+      /** LangChain responseFormat schema; legacy wire adapters ignore it. */
+      name?: string;
+      schema?: object;
     };
 
 /**
@@ -136,24 +141,28 @@ export interface StreamEvent {
 }
 
 /**
- * 流式增量塊。接口設計比當前需求寬（保留 deltaToolCalls），
- * 但本次兩個 adapter 的 parseStreamEvent 實現只解析 deltaText + deltaThinking；
- * 遇到 tool delta 時靜默忽略（不報錯、不累積）。
+ * 流式增量块。接口设计比当前需求宽（保留 deltaToolCalls），
+ * 但本次两个 adapter 的 parseStreamEvent 实现只解析 deltaText + deltaThinking；
+ * 遇到 tool delta 时静默忽略（不报错、不累积）。
  *
- * 未來若 MemoryJudge / 心情觀察器想走工具調用，只改 adapter 實現，
- * 不改接口、不改調用方。
+ * 未来若 MemoryJudge / 心情观察器想走工具调用，只改 adapter 实现，
+ * 不改接口、不改调用方。
  */
 export interface StreamChunk {
   deltaText?: string;
   deltaThinking?: string;
+  /** Provider-side terminal reason. Usage may still arrive in a later SSE event. */
+  finishReason?: string;
+  /** A protocol-level error delivered inside an otherwise successful SSE response. */
+  error?: string;
   deltaToolCalls?: ToolCall[];
   done?: boolean;
   usage?: { input: number; output: number };
 }
 
-/** 適配器解析後的統一響應，調度層只看這個。 */
+/** 适配器解析后的统一响应，调度层只看这个。 */
 export interface ChatResponse {
-  /** 要追加進對話的 assistant 消息（保留 thinking / rawAssistant 供下輪迴傳）。 */
+  /** 要追加进对话的 assistant 消息（保留 thinking / rawAssistant 供下轮回传）。 */
   assistantMessage: ChatMessage;
   text: string;
   thinking?: string;
@@ -162,8 +171,10 @@ export interface ChatResponse {
   toolCalls: ToolCall[];
   finishReason: string;
   raw: unknown;
+  /** LangChain responseFormat result; absent on the legacy adapter path. */
+  structuredValue?: unknown;
   /** API 返回的 token 用量（OpenAI: prompt_tokens/completion_tokens；Anthropic: input_tokens/output_tokens）。
-   *  未上報時為 undefined，由調用方兜底。 */
+   *  未上报时为 undefined，由调用方兜底。 */
   usage?: { input: number; output: number };
 }
 
@@ -187,8 +198,8 @@ export interface TestConnectionResult {
 }
 
 /**
- * 廠商能力表的一條記錄。是 vendor adapter 的"事實來源"，
- * 避免 function-calling.ts 裡散落 if (provider === "kimi")。
+ * 厂商能力表的一条记录。是 vendor adapter 的"事实来源"，
+ * 避免 function-calling.ts 里散落 if (provider === "kimi")。
  */
 export interface ProviderCapability {
   id: string;
@@ -196,6 +207,8 @@ export interface ProviderCapability {
   transport: Transport;
   baseUrl: string;
   authStyle: AuthStyle;
+  /** Anthropic-compatible endpoints sometimes require a different auth header. */
+  anthropicAuthStyle?: AuthStyle;
   defaultModel: string;
   supportsTools: boolean;
   supportsThinking: boolean;
@@ -225,16 +238,16 @@ export interface ChatVendorAdapter {
   appendToolResults(messages: ChatMessage[], results: ToolExecutionResult[]): ChatMessage[];
   applyCacheHints?(req: ChatRequest, cfg: VendorConfig): ChatRequest;
   /**
-   * 流式 buildRequest：與 buildRequest 同形，但 stream=true 已寫進 body。
-   * 默認實現：複用 buildRequest（adapter 內部已經按 req.stream 寫 body）。
+   * 流式 buildRequest：与 buildRequest 同形，但 stream=true 已写进 body。
+   * 默认实现：复用 buildRequest（adapter 内部已经按 req.stream 写 body）。
    */
   buildStreamRequest(req: ChatRequest, cfg: VendorConfig): HttpRequest;
   /**
-   * 解析一個完整流式事件。純函數，無狀態——狀態由調用方持有的 buffer 維護。
-   * 返回 null 表示這一事件不產生增量（心跳、註釋行、未識別的 event type 等）。
+   * 解析一个完整流式事件。纯函数，无状态——状态由调用方持有的 buffer 维护。
+   * 返回 null 表示这一事件不产生增量（心跳、注释行、未识别的 event type 等）。
    *
-   * 命名嚴格對齊 StreamEvent：傳進來的是 Reader 切完的"一個完整的協議事件"，
-   * 不是字節片段（Chunk）。
+   * 命名严格对齐 StreamEvent：传进来的是 Reader 切完的"一个完整的协议事件"，
+   * 不是字节片段（Chunk）。
    */
   parseStreamEvent(event: StreamEvent): StreamChunk | null;
   testConnection(cfg: VendorConfig): Promise<TestConnectionResult>;

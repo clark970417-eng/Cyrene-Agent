@@ -1,51 +1,53 @@
-// vision-captioner —— 唯一接觸多模態協議的地方。
-// 通用視覺服務：給圖片+用戶問題→調視覺模型→返回文本。
-// 不關心圖片來源（read_image 只是調用者之一），不碰文件系統。
-// 永遠走 OpenAI 兼容 image_url 格式，不分 transport。
+// vision-captioner —— 唯一接触多模态协议的地方。
+// 通用视觉服务：给图片+用户问题→调视觉模型→返回文本。
+// 不关心图片来源（read_image 只是调用者之一），不碰文件系统。
+// 永远走 OpenAI 兼容 image_url 格式，不分 transport。
 //
-// 判斷全交給視覺模型：不本地判斷"具體vs泛泛"，把用戶原話+圖片一起發，
-// 配框架指令讓視覺模型自己理解任務。
+// 判断全交给视觉模型：不本地判断"具体vs泛泛"，把用户原话+图片一起发，
+// 用框架指令让视觉模型自己理解任务。
 
-/** 視覺模型配置（OpenAI 兼容）。 */
+import { resolveTimeoutPolicy } from "../runtime-policy";
+
+/** 视觉模型配置（OpenAI 兼容）。 */
 export interface VisionConfig {
   baseUrl: string;  // 如 https://api.openai.com/v1
   apiKey: string;
   model: string;    // 如 gpt-4o / glm-5v-turbo / qwen-vl-max
 }
 
-/** 圖片數據（不含 data: 前綴的純 base64）。 */
+/** 图片数据（不含 data: 前缀的纯 base64）。 */
 export interface VisionImage {
   base64: string;
   mime: string;  // 如 "image/png"
 }
 
-const VISION_TIMEOUT_MS = 30_000;
+const VISION_TIMEOUT_MS = resolveTimeoutPolicy({ stage: "vision-caption" }).totalMs;
 
 /**
- * 構造框架指令。判斷全交給視覺模型——它本身是語言模型，
- * 理解"幾隻貓"是要數數、"有沒有錯別字"是 OCR，比本地正則/分類都準。
- * 指令含簡潔約束，防止長文本回灌撐爆主模型上下文（連續看多圖時尤其關鍵）。
+ * 构造框架指令。判断全交给视觉模型——它本身是语言模型，
+ * 理解"几只猫"是要数数、"有没有错别字"是 OCR，比本地正则/分类都准。
+ * 指令含简洁约束，防止长文本回灌撑爆主模型上下文（连续看多图时尤其关键）。
  */
 function buildInstruction(userQuery: string): string {
   if (userQuery && userQuery.trim()) {
     return (
-      "你是圖片分析助手。用戶給你一張圖，用戶的問題如下：\n" +
+      "你是图片分析助手。用户给你一张图，用户的问题如下：\n" +
       '"' + userQuery + '"\n' +
-      "請先基於圖片直接回答用戶的問題，再補充足以供長期記憶的客觀畫面描述：人物外觀（不要猜真實身分）、物件、場景、動作、可見文字與重要細節。不要無依據猜測，總長控制在 350 字內。"
+      "请基于图片直接回答用户的问题。回答务必简洁，直接针对问题给出结论，不要过度展开无关细节。"
     );
   }
   return (
-    "你是圖片分析助手。用戶給你一張圖，但沒有提出具體問題。\n" +
-    "請客觀描述這張圖片並留下足以供長期記憶的內容：人物外觀（不要猜真實身分）、主要物體、場景、動作、可見文字和重要細節。不要無依據猜測，描述控制在 350 字以內。"
+    "你是图片分析助手。用户给你一张图，但没有提出具体问题。\n" +
+    "请客观描述这张图片：主要物体、场景、可见文字和重要细节，不要无依据猜测。描述控制在 200 字以内。"
   );
 }
 
 /**
- * 調視覺模型分析圖片。
- * @param image 圖片數據
- * @param userQuery 用戶當前問題；空串表示無明確問題（走通用描述）
- * @param config 視覺模型配置
- * @returns 視覺模型的文本回答；失敗返回 [錯誤·...] 字符串
+ * 调视觉模型分析图片。
+ * @param image 图片数据
+ * @param userQuery 用户当前问题；空串表示无明确问题（走通用描述）
+ * @param config 视觉模型配置
+ * @returns 视觉模型的文本回答；失败返回 [错误·...] 字符串
  */
 export async function captionImage(
   image: VisionImage,
@@ -55,7 +57,7 @@ export async function captionImage(
   const instruction = buildInstruction(userQuery);
   const dataUrl = "data:" + image.mime + ";base64," + image.base64;
 
-  // 永遠 OpenAI 兼容格式：image_url content block
+  // 永远 OpenAI 兼容格式：image_url content block
   const body = {
     model: config.model,
     messages: [
@@ -67,20 +69,20 @@ export async function captionImage(
         ],
       },
     ],
-    // 不傳 temperature：不同模型約束不同（如 Kimi k2.6 只允許 1），
-    // 傳固定值會在某些模型上報錯。讓各家用自己的默認值，可用性優先於確定性。
-    // 確定性由 buildInstruction 裡的"簡潔/直接"指令約束保證。
-    // 視覺描述用不到 4096 默認值，768 足以保留可搜尋細節且不致撐爆主模型上下文。
-    // 只傳 max_tokens（最通用）。不傳 max_completion_tokens——火山不允許兩者同時設，
-    // MiniMax 雖標 max_tokens 棄用但仍兼容（棄用≠刪除）。
-    max_tokens: 768,
+    // 不传 temperature：不同模型约束不同（如 Kimi k2.6 只允许 1），
+    // 传固定值会在某些模型上报错。让各家用自己的默认值，可用性优先于确定性。
+    // 确定性由 buildInstruction 里的"简洁/直接"指令约束保证。
+    // 视觉描述用不到 4096 默认值，512 够用且防回灌撑爆主模型上下文。
+    // 只传 max_tokens（最通用）。不传 max_completion_tokens——火山不允许两者同时设，
+    // MiniMax 虽标 max_tokens 弃用但仍兼容（弃用≠删除）。
+    max_tokens: 512,
     stream: false,
   };
 
   const url = buildChatCompletionsUrl(config.baseUrl);
 
-  // 進度信號（實現要求，非可選）：調用期間界面可能"卡住"30s，必須留日誌
-  console.log("[Vision] 調用視覺模型:", config.model, "url=" + url, "query.len=" + userQuery.length);
+  // 进度信号（实现要求，非可选）：调用期间界面可能"卡住"30s，必须留日志
+  console.log("[Vision] 调用视觉模型:", config.model, "url=" + url, "query.len=" + userQuery.length);
   const startMs = Date.now();
 
   const controller = new AbortController();
@@ -98,8 +100,8 @@ export async function captionImage(
 
     if (!resp.ok) {
       const errText = await resp.text().catch(() => "");
-      console.error("[Vision] 請求失敗 HTTP " + resp.status, errText.slice(0, 200));
-      return "[錯誤·運行時] 視覺模型請求失敗：HTTP " + resp.status + " " + errText.slice(0, 200);
+      console.error("[Vision] 请求失败 HTTP " + resp.status, errText.slice(0, 200));
+      return "[错误·运行时] 视觉模型请求失败：HTTP " + resp.status + " " + errText.slice(0, 200);
     }
 
     const data = await resp.json() as {
@@ -107,26 +109,26 @@ export async function captionImage(
     };
     const text = data.choices?.[0]?.message?.content ?? "";
     if (!text) {
-      console.error("[Vision] 視覺模型未返回有效內容");
-      return "[錯誤·運行時] 視覺模型未返回有效內容";
+      console.error("[Vision] 视觉模型未返回有效内容");
+      return "[错误·运行时] 视觉模型未返回有效内容";
     }
 
-    console.log("[Vision] 完成，耗時=" + (Date.now() - startMs) + "ms，返回長度=" + text.length);
+    console.log("[Vision] 完成，耗时=" + (Date.now() - startMs) + "ms，返回长度=" + text.length);
     return text;
   } catch (err) {
     if (err instanceof Error && err.name === "AbortError") {
-      console.error("[Vision] 請求超時");
-      return "[錯誤·運行時] 視覺模型請求超時";
+      console.error("[Vision] 请求超时");
+      return "[错误·运行时] 视觉模型请求超时";
     }
     const msg = err instanceof Error ? err.message : String(err);
-    console.error("[Vision] 請求異常:", msg);
-    return "[錯誤·運行時] 視覺模型請求異常：" + msg;
+    console.error("[Vision] 请求异常:", msg);
+    return "[错误·运行时] 视觉模型请求异常：" + msg;
   } finally {
     clearTimeout(timer);
   }
 }
 
-/** 拼接 baseUrl + /chat/completions，兼容用戶填的帶或不帶尾斜槓。 */
+/** 拼接 baseUrl + /chat/completions，兼容用户填的带或不带尾斜杠。 */
 function buildChatCompletionsUrl(baseUrl: string): string {
   const trimmed = baseUrl.trim().replace(/\/+$/, "");
   if (trimmed.endsWith("/chat/completions")) return trimmed;

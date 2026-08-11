@@ -1,6 +1,6 @@
-// Function Calling —— 廠商無關的 function calling 循環
-// 調度層只依賴 vendors adapter 的統一返回結構（buildRequest / parseResponse / appendToolResults），
-// 絕不出現 if (provider === "xxx")。新廠商擴展只需在 capabilities.ts + 對應 transport adapter 里加一條。
+// Function Calling —— 厂商无关的 function calling 循环
+// 调度层只依赖 vendors adapter 的统一返回结构（buildRequest / parseResponse / appendToolResults），
+// 绝不出现 if (provider === "xxx")。新厂商扩展只需在 capabilities.ts + 对应 transport adapter 里加一条。
 import { toolRegistry, ToolDefinition } from "./tool-registry";
 import { ToolCallResult } from "./types";
 import { checkPermission, ToolRiskLevel } from "../permission";
@@ -13,29 +13,37 @@ import {
 } from "./vendors";
 import { extractLastUserQuery, type ToolContext } from "./tool-context";
 import { recordUsage } from "../token-usage-store";
+import type { AgentLoopSettings } from "./two-phase-fc-loop";
 import { resetReadRefs } from "../skills/skill-tools";
 import { truncateToolResult, compressConversation } from "./context-manager";
-import { recordAgentActivity } from "../agent-activity-store";
+import { resolveTimeoutPolicy } from "../runtime-policy";
 
 const LOG_PREFIX = "[FunctionCalling]";
-const MAX_TOOL_ROUNDS = 20; // 多步任務（寫 Excel 多 sheet、生成圖片等）可能耗多輪；到頂強制無工具總結兜底
-const PER_ROUND_TIMEOUT_MS = 75000; // 推理模型帶 thinking，30s 偏緊，放寬到 75s
-const FORCE_SUMMARY_TIMEOUT_MS = 90000; // 強制總結兜底：對話歷史此時已很長，30s 不夠，放寬到 90s
-// 連續超時即退出：超時後重試只會讓上下文更長更慢，形成"超時→加消息→更慢→再超時"死循環。
-// 連續 MAX_CONSECUTIVE_TIMEOUTS 次超時直接跳出走強制總結，不再空轉浪費時間。
+const MAX_TOOL_ROUNDS = 20; // 多步任务（写 Excel 多 sheet、生成图片等）可能耗多轮；到顶强制无工具总结兜底
+const PER_ROUND_TIMEOUT_MS = resolveTimeoutPolicy({ stage: "native-function-calling" }).totalMs;
+const FORCE_SUMMARY_TIMEOUT_MS = resolveTimeoutPolicy({ stage: "native-function-calling", override: { totalMs: 90_000 } }).totalMs;
+// 连续超时即退出：超时后重试只会让上下文更长更慢，形成"超时→加消息→更慢→再超时"死循环。
+// 连续 MAX_CONSECUTIVE_TIMEOUTS 次超时直接跳出走强制总结，不再空转浪费时间。
 const MAX_CONSECUTIVE_TIMEOUTS = 2;
 
-/** 調度層傳入的廠商配置（結構兼容 main/index.ts 的 ModelSettings，避免循環依賴）。 */
+/** 调度层传入的厂商配置（结构兼容 main/index.ts 的 ModelSettings，避免循环依赖）。 */
 interface LoopSettings {
   provider: string;
   baseUrl: string;
   model: string;
   apiKey: string;
+  /** 用户设置的模型上下文窗口（Token），用于对话压缩触发阈值。 */
+  contextWindowTokens: number;
 }
 
-/** 把 ToolRegistry 裡的工具轉成統一 ToolSpec（與 wire 格式解耦）。 */
-function buildToolSpecs(): ToolSpec[] {
-  return toolRegistry.getEnabledTools().map(t => ({
+/** 把 ToolRegistry 里的工具转成统一 ToolSpec（与 wire 格式解耦）。
+ *  传入 allowedToolIds 时只暴露白名单内的工具，不修改全局 registry 状态。 */
+function buildToolSpecs(allowedToolIds?: string[]): ToolSpec[] {
+  const enabled = toolRegistry.getEnabledTools();
+  const filtered = allowedToolIds
+    ? enabled.filter(t => allowedToolIds.includes(t.id))
+    : enabled;
+  return filtered.map(t => ({
     name: t.id,
     description: t.description,
     parameters: {
@@ -47,35 +55,35 @@ function buildToolSpecs(): ToolSpec[] {
 }
 
 /**
- * 強制總結也失敗時的降級文案。用已收集的工具結果拼一個"任務中斷"回覆，
- * 避免整個 run 拋錯讓用戶徹底看不到任何回覆。
- * （與 cyrene-agent.ts 中的版本保持一致，但不引入其 AG-UI 依賴）
+ * 强制总结也失败时的降级文案。用已收集的工具结果拼一个"任务中断"回复，
+ * 避免整个 run 抛错让用户彻底看不到任何回复。
+ * （与 cyrene-agent.ts 中的版本保持一致，但不引入其 AG-UI 依赖）
  */
 function buildFallbackReply(toolResults: ToolCallResult[], reason: string): string {
   const lines: string[] = [
-    "抱歉，任務執行到一半被中斷了。",
+    "抱歉，任务执行到一半被中断了。",
     "",
-    "中斷原因：" + reason,
+    "中断原因：" + reason,
   ];
   if (toolResults.length > 0) {
-    lines.push("", "以下是中斷前已經完成的步驟：");
+    lines.push("", "以下是中断前已经完成的步骤：");
     for (const r of toolResults) {
       const preview = r.output.length > 200 ? r.output.slice(0, 200) + "…" : r.output;
       lines.push("- 「" + r.toolId + "」：" + preview);
     }
   } else {
-    lines.push("", "（暫無已完成的步驟信息）");
+    lines.push("", "（暂无已完成的步骤信息）");
   }
   return lines.join("\n");
 }
 
 /**
- * 執行一輪 function calling 循環（廠商無關）。
+ * 执行一轮 function calling 循环（厂商无关）。
  *
  * 流程：
- * 1. adapter.buildRequest(messages + tools) → 發到 LLM
- * 2. adapter.parseResponse → 若有 toolCalls → 執行工具 → adapter.appendToolResults → 回到 1
- * 3. 若無 toolCalls → 返回最終文本 + 所有工具執行結果
+ * 1. adapter.buildRequest(messages + tools) → 发到 LLM
+ * 2. adapter.parseResponse → 若有 toolCalls → 执行工具 → adapter.appendToolResults → 回到 1
+ * 3. 若无 toolCalls → 返回最终文本 + 所有工具执行结果
  *
  * @returns { reply, toolResults }
  */
@@ -83,53 +91,56 @@ export async function runFunctionCallingLoop(
   settings: LoopSettings,
   messages: ChatMessage[],
   timeoutMs: number = 60000,
+  allowedToolIds?: string[],
 ): Promise<{
   reply: string;
   toolResults: ToolCallResult[];
   totalUsage?: { input: number; output: number };
 }> {
   const adapter = getAdapter(settings.provider);
-  const tools = buildToolSpecs();
+  const allowedSet = allowedToolIds ? new Set(allowedToolIds) : undefined;
+  const tools = buildToolSpecs(allowedToolIds);
   const allToolResults: ToolCallResult[] = [];
   const startTime = Date.now();
-  // 累加所有輪次的 token 用量（工具循環可能多輪，每輪都有 usage）
+  // 累加所有轮次的 token 用量（工具循环可能多轮，每轮都有 usage）
   let accInput = 0;
   let accOutput = 0;
-  let consecutiveTimeouts = 0; // 連續超時計數：達到上限直接跳出走強制總結
+  let consecutiveTimeouts = 0; // 连续超时计数：达到上限直接跳出走强制总结
 
   console.log(LOG_PREFIX, `provider=${settings.provider} transport=${adapter.transport} model=${settings.model}`);
-  console.log(LOG_PREFIX, "可用工具:", tools.map(t => t.name).join(", ") || "(無)");
-  console.log(LOG_PREFIX, "消息數:", messages.length, "最後一角色:", messages[messages.length - 1]?.role);
+  console.log(LOG_PREFIX, "可用工具:", tools.map(t => t.name).join(", ") || "(无)");
+  console.log(LOG_PREFIX, "消息数:", messages.length, "最后一角色:", messages[messages.length - 1]?.role);
 
   let conversation: ChatMessage[] = messages.map(m => ({ ...m }));
 
-  // 清空本輪 skill reference 已讀記錄，防止跨對話汙染
+  // 清空本轮 skill reference 已读记录，防止跨对话污染
   resetReadRefs();
 
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
     const roundStart = Date.now();
 
     if (Date.now() - startTime > timeoutMs) {
-      console.warn(LOG_PREFIX, "Function Calling 超時，在第 " + (round + 1) + " 輪退出");
+      console.warn(LOG_PREFIX, "Function Calling 超时，在第 " + (round + 1) + " 轮退出");
       break;
     }
 
-    console.log(LOG_PREFIX, "第 " + (round + 1) + " 輪 LLM 調用...");
+    console.log(LOG_PREFIX, "第 " + (round + 1) + " 轮 LLM 调用...");
 
     let req: ChatRequest = {
       model: settings.model,
       messages: conversation,
       ...(tools.length > 0 ? { tools } : {}),
-      // 不傳 temperature：不同型號約束不同（如 Kimi k2.6 只允許 1），讓廠商用默認值
+      // 不传 temperature：不同型号约束不同（如 Kimi k2.6 只允许 1），让厂商用默认值
       stream: false,
     };
     if (adapter.applyCacheHints) req = adapter.applyCacheHints(req, settings);
 
     const http = adapter.buildRequest(req, settings);
-    console.log(LOG_PREFIX, "請求:", http.url);
+    console.log(LOG_PREFIX, "请求:", http.url);
 
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), PER_ROUND_TIMEOUT_MS);
+    const timeout = PER_ROUND_TIMEOUT_MS;
+    const timer = setTimeout(() => controller.abort(), timeout);
     let response: Response;
     try {
       response = await fetch(http.url, {
@@ -141,12 +152,12 @@ export async function runFunctionCallingLoop(
     } catch (err) {
       if (err instanceof Error && err.name === "AbortError") {
         consecutiveTimeouts++;
-        console.warn(LOG_PREFIX, "第 " + (round + 1) + " 輪 LLM 請求超時（" + PER_ROUND_TIMEOUT_MS + "ms），連續第 " + consecutiveTimeouts + " 次");
+        console.warn(LOG_PREFIX, "第 " + (round + 1) + " 轮 LLM 请求超时（" + timeout + "ms），连续第 " + consecutiveTimeouts + " 次");
         clearTimeout(timer);
-        // 連續超時即退出：再重試只會讓上下文更長更慢，註定超時。
-        // 不再往 conversation 塞"超時提示"消息（雪上加霜），直接跳出走強制總結。
+        // 连续超时即退出：再重试只会让上下文更长更慢，注定超时。
+        // 不再往 conversation 塞"超时提示"消息（雪上加霜），直接跳出走强制总结。
         if (consecutiveTimeouts >= MAX_CONSECUTIVE_TIMEOUTS) {
-          console.warn(LOG_PREFIX, "連續 " + MAX_CONSECUTIVE_TIMEOUTS + " 次超時，跳出 FC 循環走強制總結");
+          console.warn(LOG_PREFIX, "连续 " + MAX_CONSECUTIVE_TIMEOUTS + " 次超时，跳出 FC 循环走强制总结");
           break;
         }
         continue;
@@ -209,7 +220,7 @@ export async function runFunctionCallingLoop(
         let output: string;
         let status: ToolCallResult["status"] = "failed";
         let errorCode: string | undefined;
-        if (!tool || !tool.enabled) {
+        if (!tool || !tool.enabled || (allowedSet && !allowedSet.has(tc.name))) {
           output = "[错误] 工具不可用: " + tc.name;
           errorCode = "E_TOOL_UNAVAILABLE";
           console.warn(LOG_PREFIX, output);
@@ -256,7 +267,14 @@ export async function runFunctionCallingLoop(
       conversation = adapter.appendToolResults(conversation, execResults);
 
       // 防线②：窗口级压缩——conversation 累积超阈值时摘要化旧轮次
-      conversation = compressConversation(conversation);
+      conversation = await compressConversation({
+        messages: conversation,
+        adapter,
+        settings: settings as AgentLoopSettings,
+        systemContent: "",
+        mode: "work",
+        signal: controller.signal,
+      });
 
       continue;
     }
@@ -298,27 +316,27 @@ export async function runFunctionCallingLoop(
     });
 
     if (!response.ok) {
-      throw new Error("最終回覆請求失敗：HTTP " + response.status);
+      throw new Error("最终回复请求失败：HTTP " + response.status);
     }
 
     const data = await response.json();
     const chat = adapter.parseResponse(data);
-    console.log(LOG_PREFIX, "強制回覆完成，長度=" + chat.text.length);
-    // 最終回覆也記 usage
+    console.log(LOG_PREFIX, "强制回复完成，长度=" + chat.text.length);
+    // 最终回复也记 usage
     if (chat.usage) {
       accInput += chat.usage.input;
       accOutput += chat.usage.output;
-      recordUsage(chat.usage.input, chat.usage.output, 1, settings.model);
+      recordUsage(chat.usage.input, chat.usage.output, 1);
     }
     const totalUsage = (accInput > 0 || accOutput > 0) ? { input: accInput, output: accOutput } : undefined;
     return { reply: chat.text, toolResults: allToolResults, totalUsage };
   } catch (err) {
-    // 兜底再失敗也別讓整個 run 崩掉（拋錯會讓用戶徹底沒回復）。
-    // 用已收集的工具結果拼一個"任務中斷"文案降級返回。
+    // 兜底再失败也别让整个 run 崩掉（抛错会让用户彻底没回复）。
+    // 用已收集的工具结果拼一个"任务中断"文案降级返回。
     const reason = err instanceof Error && err.name === "AbortError"
-      ? "總結請求超時"
+      ? "总结请求超时"
       : (err instanceof Error ? err.message : String(err));
-    console.error(LOG_PREFIX, "強制總結也失敗，降級返回已有結果:", reason);
+    console.error(LOG_PREFIX, "强制总结也失败，降级返回已有结果:", reason);
     const fallback = buildFallbackReply(allToolResults, reason);
     const totalUsage = (accInput > 0 || accOutput > 0) ? { input: accInput, output: accOutput } : undefined;
     return { reply: fallback, toolResults: allToolResults, totalUsage };

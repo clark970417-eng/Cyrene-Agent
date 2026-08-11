@@ -1,13 +1,14 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-ui-theme="pearl-white">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>昔漣 · 狀態</title>
+  <title>昔涟 · 状态</title>
   <link rel="stylesheet" href="../ui/tokens.css" />
   <link rel="stylesheet" href="../ui/fonts.css" />
   <link rel="stylesheet" href="../ui/base.css" />
   <link rel="stylesheet" href="./sidebar.css" />
+  <link rel="stylesheet" href="../ui/theme.css" />
 </head>
 <body>
   <div class="sidebar">
@@ -35,11 +36,11 @@
 
     <main class="sidebar__body">
       <section class="profile">
-        <img class="profile__avatar" src="/avatars/cyrene-avatar.png" alt="昔漣" draggable="false" />
-        <div class="profile__name">昔漣</div>
+        <img class="profile__avatar" src="/avatars/cyrene-avatar.png" alt="昔涟" draggable="false" />
+        <div class="profile__name">昔涟</div>
         <div class="profile__online">
           <span class="profile__dot" aria-hidden="true"></span>
-          <span id="online-status-label">在線</span>
+          <span id="online-status-label">在线</span>
         </div>
       </section>
 
@@ -49,8 +50,8 @@
         <div class="indicator">
           <div class="indicator__emoji" id="status-emoji">✨</div>
           <div class="indicator__text">
-            <span class="indicator__prefix">狀態：</span>
-            <span class="indicator__label" id="status-label">元氣</span>
+            <span class="indicator__prefix">状态：</span>
+            <span class="indicator__label" id="status-label">元气</span>
           </div>
         </div>
       </section>
@@ -60,7 +61,7 @@
           <div class="indicator__emoji" id="feeling-emoji">🥰</div>
           <div class="indicator__text">
             <span class="indicator__prefix">心情：</span>
-            <span class="indicator__label" id="feeling-label">開心</span>
+            <span class="indicator__label" id="feeling-label">开心</span>
           </div>
         </div>
       </section>
@@ -94,7 +95,7 @@
 
       <hr class="sidebar__divider" />
 
-      <div class="sidebar__version">昔涟 v0.8.4</div>
+      <div class="sidebar__version"><span data-app-version></span></div>
     </main>
   </div>
   <script type="module" src="./sidebar.ts"></script>

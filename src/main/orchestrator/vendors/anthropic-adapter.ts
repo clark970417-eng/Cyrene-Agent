@@ -12,17 +12,13 @@ import {
 import { authHeaderFor } from "./auth";
 import { resolveReasoningCapability } from "../../../shared/reasoning";
 import { applyReasoningPreference } from "./reasoning";
+import { getTimeoutSettings } from "../../timeout-manager";
 import { resolveAutomaticToolChoicePolicy, resolveToolChoicePolicy } from "./tool-choice-policy";
+import { getVendorRuntimeSettings } from "./runtime-settings";
+import { resolveApiEndpoint } from "../../../shared/api-endpoint";
 
 const ANTHROPIC_VERSION = "2023-06-01";
 const DEFAULT_MAX_TOKENS = 4096;
-
-function buildUrl(baseUrl: string): string {
-  const trimmed = baseUrl.trim().replace(/\/+$/, "");
-  if (trimmed.endsWith("/messages")) return trimmed;
-  if (trimmed.endsWith("/v1")) return `${trimmed}/messages`;
-  return `${trimmed}/v1/messages`;
-}
 
 interface ContentBlock {
   type: string;
@@ -30,11 +26,11 @@ interface ContentBlock {
 }
 
 /**
- * 把統一消息翻譯成 Anthropic wire messages。
- * system 抽出來單獨返回（Anthropic system 是頂層字段）。
- * 關鍵：assistant 若帶 rawAssistant（上一輪原始 content block 數組）則原樣回傳，
- * 保證 thinking / tool_use block 完整回灌（MiniMax 多輪強制要求）。
- * tool 結果：Anthropic 用 user 角色的 tool_result block，同輪多個合併到同一條 user message。
+ * 把统一消息翻译成 Anthropic wire messages。
+ * system 抽出来单独返回（Anthropic system 是顶层字段）。
+ * 关键：assistant 若带 rawAssistant（上一轮原始 content block 数组）则原样回传，
+ * 保证 thinking / tool_use block 完整回灌（MiniMax 多轮强制要求）。
+ * tool 结果：Anthropic 用 user 角色的 tool_result block，同轮多个合并到同一条 user message。
  */
 function toWireMessages(messages: ChatMessage[]): {
   system: string | undefined;
@@ -96,7 +92,7 @@ export class AnthropicAdapter implements ChatVendorAdapter {
     const { system, messages } = toWireMessages(req.messages);
     const body: Record<string, unknown> = {
       model: req.model,
-      max_tokens: req.maxTokens ?? DEFAULT_MAX_TOKENS,
+      max_tokens: getVendorRuntimeSettings().disableMaxToken ? undefined : req.maxTokens ?? DEFAULT_MAX_TOKENS,
       messages,
       stream: req.stream ?? false,
     };
@@ -187,11 +183,11 @@ export class AnthropicAdapter implements ChatVendorAdapter {
       },
     );
     return {
-      url: buildUrl(cfg.baseUrl),
+      url: resolveApiEndpoint(cfg.baseUrl, "anthropic").url,
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        ...authHeaderFor(this.capability, cfg.apiKey),
+        ...authHeaderFor(this.capability, cfg.apiKey, "anthropic"),
         "anthropic-version": ANTHROPIC_VERSION,
       },
       body: JSON.stringify(finalBody),
@@ -227,7 +223,7 @@ export class AnthropicAdapter implements ChatVendorAdapter {
     }
 
     const stopReason = data.stop_reason ?? "end_turn";
-    // 調度層用 toolCalls.length>0 判斷是否繼續；finishReason 也映射成 OpenAI 習慣便於日誌統一
+    // 调度层用 toolCalls.length>0 判断是否继续；finishReason 也映射成 OpenAI 习惯便于日志统一
     const finishReason =
       stopReason === "tool_use" ? "tool_calls"
       : stopReason === "end_turn" ? "stop"
@@ -239,11 +235,11 @@ export class AnthropicAdapter implements ChatVendorAdapter {
       ...(text ? { content: text } : {}),
       ...(thinking ? { thinking } : {}),
       ...(toolCalls.length > 0 ? { toolCalls } : {}),
-      // 關鍵：原樣保留 content block 數組，下一輪 buildRequest 直接回傳給廠商
+      // 关键：原样保留 content block 数组，下一轮 buildRequest 直接回传给厂商
       rawAssistant: blocks,
     };
 
-    // 提取 token 用量（Anthropic 協議: input_tokens/output_tokens）
+    // 提取 token 用量（Anthropic 协议: input_tokens/output_tokens）
     const usage = data.usage
       ? { input: data.usage.input_tokens ?? 0, output: data.usage.output_tokens ?? 0 }
       : undefined;
@@ -252,44 +248,62 @@ export class AnthropicAdapter implements ChatVendorAdapter {
   }
 
   buildStreamRequest(req: ChatRequest, cfg: VendorConfig): HttpRequest {
-    // 複用 buildRequest：adapter 內部已按 req.stream 寫 body，強制 stream=true
+    // 复用 buildRequest：adapter 内部已按 req.stream 写 body，强制 stream=true
     return this.buildRequest({ ...req, stream: true }, cfg);
   }
 
   parseStreamEvent(event: StreamEvent): StreamChunk | null {
     // Anthropic 流式：eventType 是事件名，data 是 JSON
-    let parsed: { delta?: { type?: string; text?: string; thinking?: string; partial_json?: string }; usage?: { input_tokens?: number; output_tokens?: number } };
+    let parsed: {
+      type?: string;
+      error?: { message?: unknown };
+      message?: { usage?: { input_tokens?: number; output_tokens?: number } };
+      delta?: { type?: string; text?: string; thinking?: string; partial_json?: string; stop_reason?: string };
+      usage?: { input_tokens?: number; output_tokens?: number };
+    };
     try {
       parsed = JSON.parse(event.data);
     } catch {
       return null;
     }
 
-    switch (event.eventType) {
+    const eventType = event.eventType === "data" && typeof parsed.type === "string"
+      ? parsed.type
+      : event.eventType;
+    switch (eventType) {
+      case "error":
+        return { error: typeof parsed.error?.message === "string" ? parsed.error.message : "模型流式响应返回错误" };
+      case "message_start": {
+        const startUsage = parsed.message?.usage;
+        return startUsage ? {
+          usage: {
+            input: startUsage.input_tokens ?? 0,
+            output: startUsage.output_tokens ?? 0,
+          },
+        } : null;
+      }
       case "content_block_delta": {
         const d = parsed.delta;
         if (!d) return null;
         const chunk: StreamChunk = {};
         if (d.type === "text_delta" && typeof d.text === "string") chunk.deltaText = d.text;
         if (d.type === "thinking_delta" && typeof d.thinking === "string") chunk.deltaThinking = d.thinking;
-        // 暫不實現：d.type === "input_json_delta" → 累積到 deltaToolCalls
-        // 當前三個調用點都不帶 tools；未來若需要流式 tool_use 增量，單獨實現 + 加測試即可。
+        // 暂不实现：d.type === "input_json_delta" → 累积到 deltaToolCalls
+        // 当前三个调用点都不带 tools；未来若需要流式 tool_use 增量，单独实现 + 加测试即可。
         return Object.keys(chunk).length > 0 ? chunk : null;
       }
       case "message_delta": {
-        if (parsed.usage) {
-          return {
-            usage: {
-              input: parsed.usage.input_tokens ?? 0,
-              output: parsed.usage.output_tokens ?? 0,
-            },
-          };
-        }
-        return null;
+        const chunk: StreamChunk = {};
+        if (typeof parsed.delta?.stop_reason === "string") chunk.finishReason = parsed.delta.stop_reason;
+        if (parsed.usage) chunk.usage = {
+          input: parsed.usage.input_tokens ?? 0,
+          output: parsed.usage.output_tokens ?? 0,
+        };
+        return Object.keys(chunk).length > 0 ? chunk : null;
       }
       case "message_stop":
         return { done: true };
-      // 其他事件（message_start / content_block_start / content_block_stop / ping 等）靜默忽略
+      // 其他事件（message_start / content_block_start / content_block_stop / ping 等）静默忽略
       default:
         return null;
     }
@@ -298,8 +312,8 @@ export class AnthropicAdapter implements ChatVendorAdapter {
   appendToolResults(messages: ChatMessage[], results: ToolExecutionResult[]): ChatMessage[] {
     const next = messages.slice();
     for (const r of results) {
-      // 統一層一律 push role:"tool"；Anthropic 的合併（同輪 tool_result 進同一條 user message）
-      // 由 buildRequest 的 toWireMessages 負責，這裡保持 transport 無關。
+      // 统一层一律 push role:"tool"；Anthropic 的合并（同轮 tool_result 进同一条 user message）
+      // 由 buildRequest 的 toWireMessages 负责，这里保持 transport 无关。
       next.push({
         role: "tool",
         toolCallId: r.toolCall.id,
@@ -313,12 +327,12 @@ export class AnthropicAdapter implements ChatVendorAdapter {
   async testConnection(cfg: VendorConfig): Promise<TestConnectionResult> {
     const start = Date.now();
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 15000);
+    const timer = setTimeout(() => controller.abort(), getTimeoutSettings().testTimeout);
     try {
       const req: ChatRequest = {
         model: cfg.model,
-        messages: [{ role: "user", content: "ping，請只回復兩個字符：ok" }],
-        // 不傳 temperature：某些模型只允許特定值，傳 0 會報錯
+        messages: [{ role: "user", content: "ping，请只回复两个字符：ok" }],
+        // 不传 temperature：某些模型只允许特定值，传 0 会报错
         stream: false,
       };
       const http = this.buildRequest(req, cfg);
@@ -335,7 +349,7 @@ export class AnthropicAdapter implements ChatVendorAdapter {
       }
       const data = await res.json();
       const parsed = this.parseResponse(data);
-      return { ok: true, latency, sample: parsed.text.slice(0, 80) || "(空回覆)" };
+      return { ok: true, latency, sample: parsed.text.slice(0, 80) || "(空回复)" };
     } catch (e) {
       return { ok: false, latency: Date.now() - start, error: e instanceof Error ? e.message : String(e) };
     } finally {

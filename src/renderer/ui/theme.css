@@ -57,15 +57,33 @@
   --rb-scroll-thumb:   rgba(0, 0, 0, 0.18);
   --rb-scroll-thumb-hover: rgba(0, 0, 0, 0.32);
 
-  /* Weather card: light-pink surface on white UI, text kept dark for contrast */
-  --rb-weather-text-strong: #5a1f3a;
-  --rb-weather-text-default: #6b2745;
-  --rb-weather-text-muted: #8a3b5a;
-  --rb-weather-text-faint: #a85a7a;
-  --rb-weather-temp: #b84a7a;
-  --rb-weather-temp-hi: #c45a3a;
-  --rb-weather-temp-lo: #3a7ab0;
-  --rb-weather-accent: #9d2b5c;
+  /* Weather card: glass-morphism on white UI, dark text for contrast */
+  --rb-weather-bg:          rgba(255, 255, 255, 0.62);
+  --rb-weather-card-border: rgba(255, 255, 255, 0.85);
+  --rb-weather-border:      rgba(157, 139, 171, 0.16);
+  --rb-weather-text-strong: #5c4a66;
+  --rb-weather-text-default: #7a6888;
+  --rb-weather-text-muted:  #9d8bab;
+  --rb-weather-text-faint:  #bdaecf;
+  --rb-weather-accent:      #ff7fa8;
+  --rb-weather-detail-bg:   rgba(255, 255, 255, 0.55);
+  --rb-weather-detail-border: rgba(255, 255, 255, 0.9);
+  --rb-weather-icon-bg:     linear-gradient(135deg, #ffe4ee, #efe6ff);
+  --rb-weather-panel-bg:    rgba(255, 255, 255, 0.38);
+  --rb-weather-panel-border: rgba(255, 255, 255, 0.7);
+  --rb-weather-tag-bg:      linear-gradient(135deg, #ffd9e7, #e6ddff);
+
+  /* Weather illustration overrides for light theme */
+  --rb-weather-sun-core-1:  #ffe08a;
+  --rb-weather-sun-core-2:  #ffb14d;
+  --rb-weather-sun-ray:     #ffc95c;
+  --rb-weather-sun-glow:    rgba(255, 190, 90, 0.35);
+  --rb-weather-cloud:       #ffffff;
+  --rb-weather-cloud-shadow: rgba(160, 150, 190, 0.25);
+  --rb-weather-rain:        #7db4ff;
+  --rb-weather-snow:        #a8c8ff;
+  --rb-weather-bolt-1:      #ffe08a;
+  --rb-weather-bolt-2:      #ff9d4d;
 }
 
 /* NOTE: do NOT paint `body` here. The Live2D pet window keeps its
@@ -83,7 +101,6 @@
 [data-ui-theme="pearl-white"] .tasks {
   background: var(--rb-card-bg);
   border-color: var(--rb-border-soft);
-  box-shadow: var(--rb-shadow-card);
 }
 
 /* Subtle ambient gradient layer — keep very faint on white */
@@ -137,7 +154,7 @@
   color: var(--rb-text-faint);
 }
 
-/* Chat titlebar dropdowns (模式 / 風格 / 推理).
+/* Chat titlebar dropdowns (模式 / 风格 / 推理).
    Dark themes rely on their glass surfaces; pearl-white needs more
    contrast — bump label + arrow from --rb-text-faint to --rb-text-muted
    and value from --rb-pink-100 to --rb-pink-600 so the selected value
@@ -182,6 +199,8 @@
 [data-ui-theme="pearl-white"] .plugin-config .user-field-hint,
 [data-ui-theme="pearl-white"] .user-field-hint,
 [data-ui-theme="pearl-white"] .settings-nav__footer,
+[data-ui-theme="pearl-white"] .sidebar__version,
+[data-ui-theme="pearl-white"] .schedule-footer__version,
 [data-ui-theme="pearl-white"] .model-params-hint,
 [data-ui-theme="pearl-white"] .model-params-section .field small,
 [data-ui-theme="pearl-white"] .agent-setting-card p,
@@ -432,8 +451,8 @@
   box-shadow: none;
 }
 
-/* .msg__speak 單獨處理：默認透明背景，僅在 hover / .is-speaking 時填色。
-   這樣在淺色消息氣泡上不會多出一塊白方塊，但播放態仍能明顯高亮。 */
+/* .msg__speak 单独处理：默认透明背景，仅在 hover / .is-speaking 时填色。
+   这样在浅色消息气泡上不会多出一块白方块，但播放态仍能明显高亮。 */
 [data-ui-theme="pearl-white"] .msg__speak {
   color: var(--rb-text-muted);
   background: transparent;
@@ -446,7 +465,7 @@
   border-color: var(--rb-pink-300);
 }
 
-/* .msg__copy 同樣：默認透明背景，border 用更強的色讓淺色背景上仍可見 */
+/* .msg__copy 同样：默认透明背景，border 用更强的色让浅色背景上仍可见 */
 [data-ui-theme="pearl-white"] .msg__copy {
   color: var(--rb-text-muted);
   background: transparent;
@@ -477,8 +496,8 @@
   border-color: var(--rb-border-strong);
 }
 
-/* 今日日程：pearl-white 下保留品牌粉作為強調色。
-   dark 主題默認是 strong/default（參見 tasks.css）；這裡只覆蓋白調。 */
+/* 今日日程：pearl-white 下保留品牌粉作为强调色。
+   dark 主题默认是 strong/default（参见 tasks.css）；这里只覆盖白调。 */
 [data-ui-theme="pearl-white"] .schedule-count__unit {
   color: var(--rb-pink-600);
 }
@@ -594,7 +613,7 @@
   background: var(--rb-pink-50);
   border-color: var(--rb-pink-200);
 }
-/* .msg__speak:hover 在更上面單獨定義（border-color 用更深的 pink-300 強化可見） */
+/* .msg__speak:hover 在更上面单独定义（border-color 用更深的 pink-300 强化可见） */
 
 [data-ui-theme="pearl-white"] .chat__preset {
   color: var(--rb-text-default);

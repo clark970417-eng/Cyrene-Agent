@@ -1,51 +1,54 @@
-// 文檔生成工具 —— 讓昔漣能產出可交付物（Excel/Word/PDF/Markdown）。
+// 文档生成工具 —— 让昔涟能产出可交付物（Excel/Word/PDF/Markdown）。
 //
-// 設計要點：
-// - 所有文檔默認存到桌面（app.getPath("desktop")），用戶最容易找到
-// - 支持桌面子目錄（如 "test/report.xlsx"），自動創建父目錄
-// - 文件名由模型給，強制校驗擴展名（防 .exe 等危險後綴）
-// - 返回完整路徑給模型，模型可以轉述給用戶
-// - PDF 中文字體走系統微軟雅黑（Windows），找不到就降級
+// 设计要点：
+// - 绑定项目时文档存到该项目根目录；未绑定时才回退到桌面
+// - 支持桌面子目录（如 "test/report.xlsx"），自动创建父目录
+// - 文件名由模型给，强制校验扩展名（防 .exe 等危险后缀）
+// - 返回完整路径给模型，模型可以转述给用户
+// - PDF 中文字体走系统微软雅黑（Windows），找不到就降级
 
 import * as fs from "fs";
 import * as path from "path";
 import { app } from "electron";
 import { toolRegistry } from "./tool-registry";
+import type { ToolContext } from "./tool-context";
 
 const LOG_PREFIX = "[DocTools]";
 
-/** 校驗文件名：必須有合法擴展名，不能有危險字符。 */
+/** 校验文件名：必须有合法扩展名，不能有危险字符。 */
 function validateFilename(filename: string, ext: string): string | null {
   if (!filename || typeof filename !== "string") return null;
   if (!filename.toLowerCase().endsWith(ext)) return null;
-  // 防危險字符
+  // 防危险字符
   if (/[<>:"|?*]/.test(filename)) return null;
   return filename;
 }
 
 /**
- * 解析輸出路徑：filename 可含子目錄（如 "test/report.xlsx"），根始終是桌面。
- * 安全校驗：禁止 .. 穿越、禁止絕對路徑（不能寫到桌面之外）。
- * 返回絕對路徑，或 null 表示校驗失敗。
+ * 解析输出路径：filename 可含子目录（如 "test/report.xlsx"）。
+ * 有可信工作区绑定时根目录固定为工作区；否则兼容旧行为写入桌面。
+ * 安全校验：禁止 .. 穿越、禁止绝对路径（不能写到桌面之外）。
+ * 返回绝对路径，或 null 表示校验失败。
  */
-function resolveOutputPath(filename: string): string | null {
+function resolveOutputPath(filename: string, workspaceRoot?: string): string | null {
   const normalized = path.normalize(filename).replace(/\\/g, "/");
-  // 禁止目錄穿越和絕對路徑
+  // 禁止目录穿越和绝对路径
   if (normalized.includes("..") || path.isAbsolute(normalized)) return null;
-  const desktop = app.getPath("desktop");
-  const fullPath = path.join(desktop, normalized);
-  // 最終校驗：解析後必須仍在桌面下
-  if (!fullPath.startsWith(desktop)) return null;
+  const outputRoot = path.resolve(workspaceRoot || app.getPath("desktop"));
+  const fullPath = path.resolve(outputRoot, normalized);
+  const relative = path.relative(outputRoot, fullPath);
+  // 最终校验：必须仍在可信工作区/桌面根目录下，不能靠前缀碰撞绕过。
+  if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) return null;
   return fullPath;
 }
 
-/** 桌面路徑（舊接口，保持兼容）。 */
+/** 桌面路径（旧接口，保持兼容）。 */
 function desktopPath(filename: string): string {
   return path.join(app.getPath("desktop"), filename);
 }
 
-// ── 樣式加載器（Excel + Word 共用）──
-// 從 skills/{skillId}/styles/ 目錄加載 json 風格文件，帶緩存。
+// ── 样式加载器（Excel + Word 共用）──
+// 从 skills/{skillId}/styles/ 目录加载 json 风格文件，带缓存。
 interface StyleCacheEntry { [styleId: string]: Record<string, unknown> }
 const styleCache = new Map<string, StyleCacheEntry>();
 const styleLoaded = new Set<string>();
@@ -70,15 +73,15 @@ function loadStylesDir(skillId: string): StyleCacheEntry {
       const styleId = f.replace(/\.json$/, "");
       try {
         cache[styleId] = JSON.parse(fs.readFileSync(path.join(stylesDir, f), "utf8"));
-      } catch { /* 跳過壞文件 */ }
+      } catch { /* 跳过坏文件 */ }
     }
-    console.log(LOG_PREFIX, `已加載 ${skillId} 樣式:`, Object.keys(cache).join(", ") || "(無)");
-  } catch { /* 目錄不存在 */ }
+    console.log(LOG_PREFIX, `已加载 ${skillId} 样式:`, Object.keys(cache).join(", ") || "(无)");
+  } catch { /* 目录不存在 */ }
   styleCache.set(skillId, cache);
   return cache;
 }
 
-/** 把 hex 顏色轉成 ARGB（FF 前綴），docx 庫用 6 位 RRGGBB 不帶 FF 前綴。 */
+/** 把 hex 颜色转成 ARGB（FF 前缀），docx 库用 6 位 RRGGBB 不带 FF 前缀。 */
 function toHexColor(color: string): string {
   const c = color.replace("#", "").toUpperCase();
   if (c.length === 8) return c.slice(2);  // FFRRGGBB → RRGGBB
@@ -87,9 +90,9 @@ function toHexColor(color: string): string {
 }
 
 export function registerDocumentTools(): void {
-  // ── 樣式系統 ──
-  // 從 skills/xlsx/styles/ 目錄加載預設風格 json，取代硬編碼。
-  // 模型彈卡片前讀 catalog.md 選風格，用戶選完傳 style 名給 write_excel。
+  // ── 样式系统 ──
+  // 从 skills/xlsx/styles/ 目录加载预设风格 json，取代硬编码。
+  // 模型弹卡片前读 catalog.md 选风格，用户选完传 style 名给 write_excel。
   type ExcelFill = import("exceljs").Fill;
   type ExcelBorders = import("exceljs").Borders;
 
@@ -102,12 +105,12 @@ export function registerDocumentTools(): void {
     borderColor: string;    // ARGB
   }
 
-  /** 從 skills/xlsx/styles/ 加載所有風格 json（帶緩存）。 */
+  /** 从 skills/xlsx/styles/ 加载所有风格 json（带缓存）。 */
   const themeCache = new Map<string, Theme>();
   let themesLoaded = false;
 
   const DEFAULT_THEME: Theme = {
-    name: "默認深藍", headerFill: "FF1F4E79", headerFont: "FFFFFFFF",
+    name: "默认深蓝", headerFill: "FF1F4E79", headerFont: "FFFFFFFF",
     headerBorder: "FF1F4E79", zebraFill: "FFF2F2F2", borderColor: "FFBFBFBF",
   };
 
@@ -115,7 +118,7 @@ export function registerDocumentTools(): void {
     if (themesLoaded) return;
     themesLoaded = true;
     try {
-      // 嘗試多個可能的 skill 路徑
+      // 尝试多个可能的 skill 路径
       const candidates = [
         path.join(app.getAppPath(), "skills", "xlsx", "styles"),
         path.join(process.cwd(), "skills", "xlsx", "styles"),
@@ -139,11 +142,11 @@ export function registerDocumentTools(): void {
             zebraFill: String(raw.zebraFill || DEFAULT_THEME.zebraFill),
             borderColor: String(raw.borderColor || DEFAULT_THEME.borderColor),
           });
-        } catch { /* 跳過壞文件 */ }
+        } catch { /* 跳过坏文件 */ }
       }
-      console.log(LOG_PREFIX, "已加載樣式:", Array.from(themeCache.keys()).join(", ") || "(無)");
+      console.log(LOG_PREFIX, "已加载样式:", Array.from(themeCache.keys()).join(", ") || "(无)");
     } catch {
-      // 目錄不存在，用默認主題
+      // 目录不存在，用默认主题
     }
   }
 
@@ -153,7 +156,7 @@ export function registerDocumentTools(): void {
     return themeCache.get(style) ?? themeCache.get("default") ?? DEFAULT_THEME;
   }
 
-  /** 把 hex 顏色 (#RRGGBB 或 RRGGBB) 轉成 ARGB (FFRRGGBB)，已含 FF 前綴則原樣返回。 */
+  /** 把 hex 颜色 (#RRGGBB 或 RRGGBB) 转成 ARGB (FFRRGGBB)，已含 FF 前缀则原样返回。 */
   function toArgb(color: string): string {
     const c = color.replace("#", "").toUpperCase();
     if (c.length === 8) return c;
@@ -162,8 +165,8 @@ export function registerDocumentTools(): void {
   }
 
   /**
-   * 用自定義顏色覆蓋主題。colors 裡每個字段是可選的 ARGB hex 值。
-   * 模型能把用戶自然語言（"粉色""深灰"）翻譯成 hex 後傳進來。
+   * 用自定义颜色覆盖主题。colors 里每个字段是可选的 ARGB hex 值。
+   * 模型能把用户自然语言（"粉色""深灰"）翻译成 hex 后传进来。
    */
   function mergeTheme(base: Theme, colors?: {
     headerFill?: string; headerFont?: string; headerBorder?: string;
@@ -171,7 +174,7 @@ export function registerDocumentTools(): void {
   }): Theme {
     if (!colors) return base;
     return {
-      name: base.name + "(自定義)",
+      name: base.name + "(自定义)",
       headerFill: colors.headerFill ? toArgb(colors.headerFill) : base.headerFill,
       headerFont: colors.headerFont ? toArgb(colors.headerFont) : base.headerFont,
       headerBorder: colors.headerBorder ? toArgb(colors.headerBorder) : base.headerBorder,
@@ -183,77 +186,80 @@ export function registerDocumentTools(): void {
   // ── write_excel ──────────────────────────────────────
   toolRegistry.register({
     id: "write_excel",
-    name: "寫 Excel",
+    name: "写 Excel",
     description:
-      "生成一個美觀的 Excel 文件（.xlsx）。支持多種預設風格 + 自定義顏色。已內置：表頭加粗+背景、" +
-      "全表細邊框、隔行斑馬紋、列寬自適應、數字右對齊+千位分隔、凍結首行、自動篩選。\n" +
-      "【優先使用】簡單表格生成、數據整理、換算結果導出等場景應直接用此工具，不要走 invoke_skill(xlsx)。\n\n" +
-      "何時用：\n" +
-      "- 用戶要把數據整理成表格\n" +
-      "- 用戶要「做一張表」「導出 Excel」「整理成 Excel」\n" +
-      "- 用戶通過 ask_user_choice 選擇了風格 → 用對應 style 參數直接生成\n" +
-      "- 用戶給了自定義顏色要求 → 用 colors 參數傳 ARGB hex 值\n\n" +
-      "不要用於：\n" +
-      "- 需要 Excel 公式、編輯已有 xlsx → 才考慮 invoke_skill(xlsx)\n\n" +
-      "style：預設風格名（見 skills/xlsx/styles/catalog.md）。可選值含 default / dark / colorful / simple-business / financial。\n" +
-      "colors（可選）：自定義顏色覆蓋，每個是 ARGB hex 如 'FFF8BBD0'（粉色）。\n" +
-      "參數：filename（.xlsx 結尾，可含子目錄），sheets（工作表數組），style（可選），colors（可選）。",
+      "生成一个美观的 Excel 文件（.xlsx）。支持多种预设风格 + 自定义颜色。已内置：表头加粗+背景、" +
+      "全表细边框、隔行斑马纹、列宽自适应、数字右对齐+千位分隔、冻结首行、自动筛选。\n" +
+      "【优先使用】简单表格生成、数据整理、换算结果导出等场景应直接用此工具，不要走 invoke_skill(xlsx)。\n\n" +
+      "何时用：\n" +
+      "- 用户要把数据整理成表格\n" +
+      "- 用户要「做一张表」「导出 Excel」「整理成 Excel」\n" +
+      "- 用户通过 ask_user_choice 选择了风格 → 用对应 style 参数直接生成\n" +
+      "- 用户给了自定义颜色要求 → 用 colors 参数传 ARGB hex 值\n\n" +
+      "不要用于：\n" +
+      "- 需要 Excel 公式、编辑已有 xlsx → 才考虑 invoke_skill(xlsx)\n\n" +
+      "style：预设风格名（见 skills/xlsx/styles/catalog.md）。可选值含 default / dark / colorful / simple-business / financial。\n" +
+      "colors（可选）：自定义颜色覆盖，每个是 ARGB hex 如 'FFF8BBD0'（粉色）。\n" +
+      "参数：filename（.xlsx 结尾，可含子目录），sheets（工作表数组），style（可选），colors（可选）。",
     enabled: true,
     risk: "fs-write",
+    needsContext: true,
+    effectKind: "mutation" as const,
+    verificationPolicy: "artifact" as const,
     inputSchema: {
       type: "object",
       properties: {
-        filename: { type: "string", description: "文件名，可含子目錄如 'test/report.xlsx'（相對桌面，.xlsx 結尾）" },
+        filename: { type: "string", description: "文件名，可含子目录如 'test/report.xlsx'（相对桌面，.xlsx 结尾）" },
         sheets: {
           type: "array",
-          description: "工作表數組",
+          description: "工作表数组",
           items: {
             type: "object",
             properties: {
               name:    { type: "string", description: "工作表名" },
-              headers: { type: "array", description: "表頭字符串數組", items: { type: "string" } },
-              rows:    { type: "array", description: "數據行，每行是一個數組", items: { type: "string" } },
+              headers: { type: "array", description: "表头字符串数组", items: { type: "string" } },
+              rows:    { type: "array", description: "数据行，每行是一个数组", items: { type: "string" } },
             },
           },
         },
-        style: { type: "string", description: "預設主題：default(深藍,默認) / simple-business(簡潔商務) / dark(深色護眼) / colorful(彩色清晰) / financial(財務報表)" },
+        style: { type: "string", description: "预设主题：default(深蓝,默认) / simple-business(简洁商务) / dark(深色护眼) / colorful(彩色清晰) / financial(财务报表)" },
         colors: {
           type: "object",
-          description: "自定義顏色覆蓋（ARGB hex，如 'FFF8BBD0' 粉色 / 'FF2D2D2D' 深灰）。你負責把用戶的顏色描述翻譯成 hex。",
+          description: "自定义颜色覆盖（ARGB hex，如 'FFF8BBD0' 粉色 / 'FF2D2D2D' 深灰）。你负责把用户的颜色描述翻译成 hex。",
           properties: {
-            headerFill: { type: "string", description: "表頭背景色 ARGB hex，如 'FFF8BBD0'(粉)" },
-            headerFont: { type: "string", description: "表頭文字色 ARGB hex，如 'FF333333'(深灰)" },
-            headerBorder: { type: "string", description: "表頭底線色 ARGB hex" },
-            zebraFill: { type: "string", description: "斑馬紋背景色 ARGB hex" },
-            borderColor: { type: "string", description: "邊框顏色 ARGB hex" },
+            headerFill: { type: "string", description: "表头背景色 ARGB hex，如 'FFF8BBD0'(粉)" },
+            headerFont: { type: "string", description: "表头文字色 ARGB hex，如 'FF333333'(深灰)" },
+            headerBorder: { type: "string", description: "表头底线色 ARGB hex" },
+            zebraFill: { type: "string", description: "斑马纹背景色 ARGB hex" },
+            borderColor: { type: "string", description: "边框颜色 ARGB hex" },
           },
         },
       },
       required: ["filename", "sheets"],
     },
-    execute: async (args) => {
+    execute: async (args, context?: ToolContext) => {
       const filename = validateFilename(String(args.filename || ""), ".xlsx");
-      if (!filename) return "[錯誤] filename 必須是 .xlsx 結尾";
-      const outputPath = resolveOutputPath(filename);
-      if (!outputPath) return "[錯誤] 路徑不合法（禁止目錄穿越或絕對路徑）: " + filename;
+      if (!filename) return "[错误] filename 必须是 .xlsx 结尾";
+      const outputPath = resolveOutputPath(filename, context?.resolvedWorkspaceRoot);
+      if (!outputPath) return "[错误] 路径不合法（禁止目录穿越或绝对路径）: " + filename;
       const sheets = args.sheets as Array<{
         name: string; headers: string[]; rows: unknown[][];
       }>;
       if (!Array.isArray(sheets) || sheets.length === 0) {
-        return "[錯誤] sheets 不能為空";
+        return "[错误] sheets 不能为空";
       }
 
       const ExcelJS = await import("exceljs");
       const workbook = new ExcelJS.Workbook();
 
-      // 選主題（預設 + 自定義顏色覆蓋）
+      // 选主题（预设 + 自定义颜色覆盖）
       const baseTheme = getTheme(args.style ? String(args.style) : undefined);
       const colors = args.colors as {
         headerFill?: string; headerFont?: string; headerBorder?: string;
         zebraFill?: string; borderColor?: string;
       } | undefined;
       const theme = mergeTheme(baseTheme, colors);
-      console.log(LOG_PREFIX, "Excel 主題:", theme.name, "style=" + (args.style || "default"), colors ? "+自定義顏色" : "");
+      console.log(LOG_PREFIX, "Excel 主题:", theme.name, "style=" + (args.style || "default"), colors ? "+自定义颜色" : "");
 
       const HEADER_FILL: ExcelFill = { type: "pattern", pattern: "solid", fgColor: { argb: theme.headerFill } };
       const ZEBRA_FILL: ExcelFill = { type: "pattern", pattern: "solid", fgColor: { argb: theme.zebraFill } };
@@ -271,7 +277,7 @@ export function registerDocumentTools(): void {
       for (const s of sheets) {
         const ws = workbook.addWorksheet(s.name || "Sheet1");
 
-        // 寫入數據
+        // 写入数据
         if (Array.isArray(s.headers)) ws.addRow(s.headers);
         for (const row of (s.rows || [])) ws.addRow(row);
 
@@ -279,8 +285,8 @@ export function registerDocumentTools(): void {
         const dataRowCount = (s.rows?.length || 0);
         const totalRows = dataRowCount + 1; // +1 for header
 
-        // 1. 表頭樣式：白粗體字 + 深藍填充 + 居中 + 底部粗線
-        // 逐 cell 設置（行級 fill/font/alignment 會鋪到無值的空列，導致表頭藍條超出實際列數）
+        // 1. 表头样式：白粗体字 + 深蓝填充 + 居中 + 底部粗线
+        // 逐 cell 设置（行级 fill/font/alignment 会铺到无值的空列，导致表头蓝条超出实际列数）
         const headerRow = ws.getRow(1);
         headerRow.height = 24;
         headerRow.eachCell({ includeEmpty: false }, (cell) => {
@@ -290,32 +296,32 @@ export function registerDocumentTools(): void {
           cell.border = HEADER_BOTTOM_BORDER;
         });
 
-        // 2. 數據行：全表細邊框 + 智能數字格式 + 斑馬紋
+        // 2. 数据行：全表细边框 + 智能数字格式 + 斑马纹
         for (let r = 2; r <= totalRows; r++) {
           const row = ws.getRow(r);
-          // 斑馬紋（偶數數據行 = Excel 標準交替灰）
+          // 斑马纹（偶数数据行 = Excel 标准交替灰）
           const isZebra = (r - 1) % 2 === 0;
           row.eachCell({ includeEmpty: false }, (cell, colNumber) => {
             cell.border = THIN_BORDER;
-            // 斑馬紋需逐 cell 設（行級 fill 會被 eachCell 的 cell 對象覆蓋）
+            // 斑马纹需逐 cell 设（行级 fill 会被 eachCell 的 cell 对象覆盖）
             if (isZebra) {
               cell.fill = ZEBRA_FILL;
             }
-            // 智能數字格式（參考 minimax skill format.md 的格式矩陣）
+            // 智能数字格式（参考 minimax skill format.md 的格式矩阵）
             if (typeof cell.value === "number") {
               cell.alignment = { horizontal: "right", vertical: "middle" };
-              // 按列內容推斷數字格式
+              // 按列内容推断数字格式
               const headerText = headers[colNumber - 1] ? String(headers[colNumber - 1]).toLowerCase() : "";
               if (/年|year/.test(headerText)) {
-                cell.numFmt = "0";              // 年份：無千位分隔（2024 不是 2,024）
-              } else if (/%|率|比|ratio|rate|漲|跌|幅/.test(headerText)) {
+                cell.numFmt = "0";              // 年份：无千位分隔（2024 不是 2,024）
+              } else if (/%|率|比|ratio|rate|涨|跌|幅/.test(headerText)) {
                 cell.numFmt = "0.0%";           // 百分比
-              } else if (/\$|元|價|額|金|amount|price|cost|revenue/.test(headerText)) {
-                cell.numFmt = "#,##0.00";      // 貨幣：帶分
+              } else if (/\$|元|价|额|金|amount|price|cost|revenue/.test(headerText)) {
+                cell.numFmt = "#,##0.00";      // 货币：带分
               } else if (Number.isInteger(cell.value) && Math.abs(cell.value) >= 1000) {
-                cell.numFmt = "#,##0";          // 大整數：千位分隔無小數
+                cell.numFmt = "#,##0";          // 大整数：千位分隔无小数
               } else {
-                cell.numFmt = "#,##0.00";       // 默認數字
+                cell.numFmt = "#,##0.00";       // 默认数字
               }
             } else if (cell.value instanceof Date) {
               cell.alignment = { horizontal: "center", vertical: "middle" };
@@ -326,7 +332,7 @@ export function registerDocumentTools(): void {
           });
         }
 
-        // 3. 列寬自適應：按表頭 + 數據行中最大寬度計算（中文按 2 寬度估算）
+        // 3. 列宽自适应：按表头 + 数据行中最大宽度计算（中文按 2 宽度估算）
         ws.columns.forEach((col, i) => {
           let maxLen = headers[i] ? Array.from(String(headers[i])).reduce((sum, ch) => sum + (ch.charCodeAt(0) > 127 ? 2 : 1), 0) + 4 : 8;
           for (const row of (s.rows || [])) {
@@ -339,10 +345,10 @@ export function registerDocumentTools(): void {
           col.width = Math.min(Math.max(maxLen, 10), 45);
         });
 
-        // 4. 凍結首行
+        // 4. 冻结首行
         ws.views = [{ state: "frozen", ySplit: 1 }];
 
-        // 5. 自動篩選：表頭行加 filter（方便用戶篩選排序）
+        // 5. 自动筛选：表头行加 filter（方便用户筛选排序）
         if (headers.length > 0 && dataRowCount > 0) {
           ws.autoFilter = {
             from: { row: 1, column: 1 },
@@ -351,13 +357,13 @@ export function registerDocumentTools(): void {
         }
       }
 
-      // 自動創建父目錄（支持子目錄寫入）
+      // 自动创建父目录（支持子目录写入）
       const dir = path.dirname(outputPath);
       if (!fs.existsSync(dir)) {
         fs.mkdirSync(dir, { recursive: true });
       }
       await workbook.xlsx.writeFile(outputPath);
-      console.log(LOG_PREFIX, "Excel 已生成（默認美觀樣式）:", outputPath);
+      console.log(LOG_PREFIX, "Excel 已生成（默认美观样式）:", outputPath);
       return `[write_excel] 已生成：${outputPath}`;
     },
   });
@@ -365,39 +371,49 @@ export function registerDocumentTools(): void {
   // ── write_word ───────────────────────────────────────
   toolRegistry.register({
     id: "write_word",
-    name: "寫 Word",
+    name: "写 Word",
     description:
-      "生成一個美觀的 Word 文檔（.docx）。支持多種預設風格主題。\n" +
-      "已內置：標題樣式（顏色/字號/字體）、正文行距/字體/顏色、段落間距。\n\n" +
-      "何時用：\n" +
-      "- 用戶要寫報告/總結/方案/請假條\n" +
-      "- 需要「導出成 Word」「做成 docx」\n" +
-      "- 用戶通過 ask_user_choice 選擇了風格 → 用對應 style 參數直接生成\n\n" +
-      "不要用於：\n" +
-      "- 表格數據（用 write_excel）\n" +
-      "- 輕量筆記（用 write_markdown）\n" +
-      "- 需要複雜排版（頁眉頁腳/目錄/圖片/表格）→ 才考慮 invoke_skill(docx)\n\n" +
-      "style 可選值（見 skills/docx/styles/catalog.md）：default(商務) / academic(學術) / clean(極簡) / elegant(優雅) / formal(公文)。\n" +
-      "參數：filename（.docx 結尾，可含子目錄），title（標題），paragraphs（段落數組），style（可選預設風格）。",
+      "生成一个美观的 Word 文档（.docx）。支持多种预设风格主题。\n" +
+      "已内置：标题样式（颜色/字号/字体）、正文行距/字体/颜色、段落间距。\n\n" +
+      "何时用：\n" +
+      "- 用户要写报告/总结/方案/请假条\n" +
+      "- 需要「导出成 Word」「做成 docx」\n" +
+      "- 用户通过 ask_user_choice 选择了风格 → 用对应 style 参数直接生成\n\n" +
+      "不要用于：\n" +
+      "- 表格数据（用 write_excel）\n" +
+      "- 轻量笔记（用 write_markdown）\n" +
+      "- 需要复杂排版（页眉页脚/目录/图片/表格）→ 才考虑 invoke_skill(docx)\n\n" +
+      "style 可选值（见 skills/docx/styles/catalog.md）：default(商务) / academic(学术) / clean(极简) / elegant(优雅) / formal(公文)。\n" +
+      "参数：filename（只传文件名，如 AI新闻汇总.docx，不要传绝对路径；输出目录由系统固定为桌面），title（标题），paragraphs（段落数组），style（可选预设风格）。",
     enabled: true,
     risk: "fs-write",
+    needsContext: true,
+    effectKind: "mutation" as const,
+    verificationPolicy: "artifact" as const,
+    soulActionLabel: "生成 Word 文档",
+    soulProjection: {
+      projector: "artifact_path",
+      source: "trusted_internal",
+      kind: "docx",
+    },
+    completionEvidence: [{ kind: "tool_succeeded" }],
     inputSchema: {
       type: "object",
       properties: {
-        filename:   { type: "string", description: "文件名，可含子目錄如 'test/report.docx'（.docx 結尾）" },
-        title:      { type: "string", description: "文檔標題" },
-        paragraphs: { type: "array", description: "段落字符串數組", items: { type: "string" } },
-        style:      { type: "string", description: "預設風格：default(商務) / academic(學術) / clean(極簡) / elegant(優雅) / formal(公文)" },
+        filename:   { type: "string", description: "文件名，必须以 .docx 结尾，例如 'AI新闻汇总.docx'。只传文件名，不要传绝对路径或目录。文件默认写入系统指定的桌面目录。" },
+        title:      { type: "string", description: "文档标题" },
+        paragraphs: { type: "array", description: "段落字符串数组", items: { type: "string" } },
+        style:      { type: "string", description: "预设风格：default(商务) / academic(学术) / clean(极简) / elegant(优雅) / formal(公文)" },
       },
       required: ["filename", "title", "paragraphs"],
     },
-    execute: async (args) => {
+    execute: async (args, context?: ToolContext) => {
       const filename = validateFilename(String(args.filename || ""), ".docx");
-      if (!filename) return "[錯誤] filename 必須是 .docx 結尾";
-      const outputPath = resolveOutputPath(filename);
-      if (!outputPath) return "[錯誤] 路徑不合法（禁止目錄穿越或絕對路徑）: " + filename;
+      if (!filename) return "[错误] filename 必须是 .docx 结尾";
+      const outputPath = resolveOutputPath(filename, context?.resolvedWorkspaceRoot);
+      if (!outputPath) return "[错误] 路径不合法（禁止目录穿越或绝对路径）: " + filename;
 
-      // 加載風格
+      // 加载风格
       const styles = loadStylesDir("docx");
       const styleId = args.style ? String(args.style) : "default";
       const theme = (styles[styleId] ?? styles["default"]) as {
@@ -407,14 +423,14 @@ export function registerDocumentTools(): void {
 
       const titleColor = toHexColor(theme?.titleColor ?? "FF1F4E79");
       const titleSize = theme?.titleSize ?? 28;
-      const titleFont = theme?.titleFont ?? "微軟雅黑";
-      const bodyFont = theme?.bodyFont ?? "微軟雅黑";
+      const titleFont = theme?.titleFont ?? "微软雅黑";
+      const bodyFont = theme?.bodyFont ?? "微软雅黑";
       const bodySize = theme?.bodySize ?? 24;
       const bodyColor = toHexColor(theme?.bodyColor ?? "FF333333");
       const lineSpacing = theme?.lineSpacing ?? 360;
       const headingColor = toHexColor(theme?.headingColor ?? "FF1F4E79");
 
-      console.log(LOG_PREFIX, "Word 主題:", theme?.name ?? "默認商務", "style=" + styleId);
+      console.log(LOG_PREFIX, "Word 主题:", theme?.name ?? "默认商务", "style=" + styleId);
 
       const { Document, Packer, Paragraph, HeadingLevel, TextRun } = await import("docx");
       const doc = new Document({
@@ -456,32 +472,35 @@ export function registerDocumentTools(): void {
   // ── write_pdf ────────────────────────────────────────
   toolRegistry.register({
     id: "write_pdf",
-    name: "寫 PDF",
+    name: "写 PDF",
     description:
-      "生成一個 PDF 文件保存到桌面。\n\n" +
-      "何時用：\n" +
-      "- 用戶要寫正式文檔（合同/簡歷/申請書）\n" +
-      "- 需要「導出成 PDF」\n\n" +
-      "不要用於：\n" +
-      "- 可編輯文檔（用 write_word）\n" +
-      "- 表格數據（用 write_excel）\n\n" +
-      "參數：filename（.pdf 結尾），title（標題），paragraphs（段落數組）。",
+      "生成一个 PDF 文件保存到桌面。\n\n" +
+      "何时用：\n" +
+      "- 用户要写正式文档（合同/简历/申请书）\n" +
+      "- 需要「导出成 PDF」\n\n" +
+      "不要用于：\n" +
+      "- 可编辑文档（用 write_word）\n" +
+      "- 表格数据（用 write_excel）\n\n" +
+      "参数：filename（.pdf 结尾），title（标题），paragraphs（段落数组）。",
     enabled: true,
     risk: "fs-write",
+    needsContext: true,
+    effectKind: "mutation" as const,
+    verificationPolicy: "artifact" as const,
     inputSchema: {
       type: "object",
       properties: {
-        filename:   { type: "string", description: "文件名（.pdf 結尾）" },
-        title:      { type: "string", description: "標題" },
-        paragraphs: { type: "array", description: "段落字符串數組", items: { type: "string" } },
+        filename:   { type: "string", description: "文件名（.pdf 结尾）" },
+        title:      { type: "string", description: "标题" },
+        paragraphs: { type: "array", description: "段落字符串数组", items: { type: "string" } },
       },
       required: ["filename", "title", "paragraphs"],
     },
-    execute: async (args) => {
+    execute: async (args, context?: ToolContext) => {
       const filename = validateFilename(String(args.filename || ""), ".pdf");
-      if (!filename) return "[錯誤] filename 必須是 .pdf 結尾";
-      const outputPath = resolveOutputPath(filename);
-      if (!outputPath) return "[錯誤] 路徑不合法（禁止目錄穿越或絕對路徑）: " + filename;
+      if (!filename) return "[错误] filename 必须是 .pdf 结尾";
+      const outputPath = resolveOutputPath(filename, context?.resolvedWorkspaceRoot);
+      if (!outputPath) return "[错误] 路径不合法（禁止目录穿越或绝对路径）: " + filename;
 
       const PDFKit = await import("pdfkit");
       const dir = path.dirname(outputPath);
@@ -490,7 +509,7 @@ export function registerDocumentTools(): void {
       const stream = fs.createWriteStream(outputPath);
       doc.pipe(stream);
 
-      // 中文字體：Windows 用微軟雅黑，找不到則用默認（中文會亂碼但能生成）
+      // 中文字体：Windows 用微软雅黑，找不到则用默认（中文会乱码但能生成）
       const fontCandidates = [
         "C:\\Windows\\Fonts\\msyh.ttc",
         "C:\\Windows\\Fonts\\simsun.ttc",
@@ -521,32 +540,35 @@ export function registerDocumentTools(): void {
   // ── write_markdown ───────────────────────────────────
   toolRegistry.register({
     id: "write_markdown",
-    name: "寫 Markdown",
+    name: "写 Markdown",
     description:
-      "生成一個 Markdown 文件（.md）保存到桌面。\n\n" +
-      "何時用：\n" +
-      "- 用戶要寫筆記/文檔\n" +
-      "- 需要輕量級文檔輸出\n" +
-      "- 比 Word/PDF 更輕量的場景\n\n" +
-      "不要用於：\n" +
-      "- 正式文檔（用 write_word / write_pdf）\n" +
-      "- 表格數據（用 write_excel）\n\n" +
-      "參數：filename（.md 結尾），content（markdown 內容字符串）。",
+      "生成一个 Markdown 文件（.md）。绑定项目时保存到该项目目录；未绑定时保存到桌面。\n\n" +
+      "何时用：\n" +
+      "- 用户要写笔记/文档\n" +
+      "- 需要轻量级文档输出\n" +
+      "- 比 Word/PDF 更轻量的场景\n\n" +
+      "不要用于：\n" +
+      "- 正式文档（用 write_word / write_pdf）\n" +
+      "- 表格数据（用 write_excel）\n\n" +
+      "参数：filename（.md 结尾），content（markdown 内容字符串）。",
     enabled: true,
     risk: "fs-write",
+    needsContext: true,
+    effectKind: "mutation" as const,
+    verificationPolicy: "artifact" as const,
     inputSchema: {
       type: "object",
       properties: {
-        filename: { type: "string", description: "文件名（.md 結尾）" },
-        content:  { type: "string", description: "markdown 內容" },
+        filename: { type: "string", description: "文件名（.md 结尾）" },
+        content:  { type: "string", description: "markdown 内容" },
       },
       required: ["filename", "content"],
     },
-    execute: async (args) => {
+    execute: async (args, context?: ToolContext) => {
       const filename = validateFilename(String(args.filename || ""), ".md");
-      if (!filename) return "[錯誤] filename 必須是 .md 結尾";
-      const outputPath = resolveOutputPath(filename);
-      if (!outputPath) return "[錯誤] 路徑不合法（禁止目錄穿越或絕對路徑）: " + filename;
+      if (!filename) return "[错误] filename 必须是 .md 结尾";
+      const outputPath = resolveOutputPath(filename, context?.resolvedWorkspaceRoot);
+      if (!outputPath) return "[错误] 路径不合法（禁止目录穿越或绝对路径）: " + filename;
 
       const dir = path.dirname(outputPath);
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });

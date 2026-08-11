@@ -1,257 +1,24 @@
-import * as fs from "fs"
-import * as path from "path"
-import { getAdapterForConfig } from "../orchestrator/vendors"
-import type { VendorConfig, ChatMessage } from "../orchestrator/vendors"
-import { app } from "electron"
 import { MemoryCandidate, L0_FIELD_DESCRIPTIONS, MemoryJudgeTurn } from "./memory-types"
-import { recordUsage } from "../token-usage-store"
-import { revealSecrets } from "../security/secret-vault"
+import { invokeMemoryStructuredOutput, getDefaultMaxOutputTokens } from "./memory-llm-client"
+import { loadMemoryModelConfig } from "./memory-llm-shared"
+import { parseMemoryJudgeResult, validateMemoryJudgeBusiness, MemoryJudgeResult } from "./memory-schemas"
 
-interface ModelSettings {
-  provider: string
-  baseUrl: string
-  model: string
-  apiKey: string
-  explicitTransport?: "openai" | "anthropic" | "auto"
-}
-
-const DEFAULT_MODEL_SETTINGS: ModelSettings = {
-  provider: "DeepSeek（深度求索）",
-  baseUrl: "https://api.deepseek.com",
-  model: "deepseek-v4-pro",
-  apiKey: "",
-};
-
-function getSettingsPath(): string {
-  return path.join(app.getPath("userData"), "model-settings.json")
-}
-
-function loadModelSettings(): ModelSettings {
-  try {
-    const filePath = getSettingsPath()
-    if (!fs.existsSync(filePath)) return DEFAULT_MODEL_SETTINGS
-    const raw = fs.readFileSync(filePath, "utf8")
-    const parsed = revealSecrets(JSON.parse(raw)) as any
-    const provider = typeof parsed.provider === "string" && parsed.provider.trim() ? parsed.provider.trim() : DEFAULT_MODEL_SETTINGS.provider
-    const perProfile = parsed.perProvider && typeof parsed.perProvider === "object" ? parsed.perProvider[provider] : null
-    
-    const baseUrl = (perProfile?.baseUrl || parsed.baseUrl || DEFAULT_MODEL_SETTINGS.baseUrl).trim()
-    const model = (perProfile?.model || parsed.model || DEFAULT_MODEL_SETTINGS.model).trim()
-    const apiKey = (perProfile?.apiKey || parsed.apiKey || "").trim()
-    const rawTransport = perProfile?.explicitTransport || parsed.explicitTransport
-    const explicitTransport = rawTransport === "openai" || rawTransport === "anthropic" || rawTransport === "auto" ? rawTransport : undefined
-
-    return {
-      provider,
-      baseUrl,
-      model,
-      apiKey,
-      explicitTransport,
-    }
-  } catch {
-    return DEFAULT_MODEL_SETTINGS
-  }
-}
-
-
-
-function stripThinkBlocks(text: string): string {
-  return text
-    .replace(/<think>[\s\S]*?<\/think>/gi, "")
-    .replace(/<think>[\s\S]*$/gi, "")
-    .trim()
-}
-
-function extractJsonArray(raw: string): unknown[] | null {
-  // 第一步：去掉 markdown 代碼塊包裹 + think 塊
-  let text = raw
-    .replace(/```json\s*/gi, '')
-    .replace(/```\s*/gi, '')
-    .trim()
-
-  // 第二步：截取從第一個 [ 開始的內容（不要求結尾有 ]，防 max_tokens 截斷）
-  const start = text.indexOf('[')
-  if (start === -1) return null
-  text = text.slice(start)
-
-  // 第三步：直接嘗試解析（完整數組的情況）
-  try {
-    const parsed = JSON.parse(text) as unknown[]
-    if (Array.isArray(parsed)) return parsed
-  } catch (_) {}
-
-  // 第四步：截斷救場 —— 即使末尾 ] 缺失，把已完整的 {...} 對象逐個撈出來。
-  // 關鍵：用棧匹配大括號深度，避免把對象內部的 } 當成對象結束。
-  const results: unknown[] = []
-  let i = 0
-  while (i < text.length) {
-    if (text[i] !== '{') { i++; continue }
-    // 找匹配的 } —— 跟蹤引號和嵌套深度
-    let depth = 0
-    let inStr = false
-    let esc = false
-    let j = i
-    for (; j < text.length; j++) {
-      const c = text[j]
-      if (esc) { esc = false; continue }
-      if (c === '\\') { esc = true; continue }
-      if (c === '"') { inStr = !inStr; continue }
-      if (inStr) continue
-      if (c === '{') depth++
-      else if (c === '}') {
-        depth--
-        if (depth === 0) break  // 找到匹配的閉合
-      }
-    }
-    if (depth !== 0) break  // 這個對象被截斷了，後面也不可能有完整的了
-    const objStr = text.slice(i, j + 1)
-    try {
-      const obj = JSON.parse(objStr)
-      if (obj && typeof obj === "object") results.push(obj)
-    } catch (_) {
-      // 單個對象解析失敗，跳過繼續找下一個
-    }
-    i = j + 1
-  }
-
-  if (results.length > 0) {
-    console.log('[MemoryJudge] 截斷救場提取成功，條數:', results.length)
-    return results
-  }
-
-  // 第五步：修復嵌套英文引號問題（針對完整數組的情況再試一次）
-  try {
-    // 給 text 補上缺失的 ] 讓 JSON.parse 有機會成功
-    const fixedText = text.replace(/("content"|"triggerText"):\s*"([\s\S]*?)(?<!\\)"/g,
-      (match: string, key: string, value: string) => {
-        let k = 0
-        const cleaned = value.replace(/"/g, () => k++ % 2 === 0 ? '「' : '」')
-        return key + ': "' + cleaned + '"'
-      }
-    )
-    // 嘗試找最後一個完整對象後補 ]
-    const lastBrace = fixedText.lastIndexOf('}')
-    if (lastBrace > 0) {
-      const candidate = fixedText.slice(0, lastBrace + 1) + ']'
-      const parsed = JSON.parse(candidate) as unknown[]
-      if (Array.isArray(parsed)) return parsed
-    }
-  } catch (_) {}
-
-  return null
-}
-
-const ABSOLUTE_TERMS = ["只", "永遠", "從不", "一定", "完全", "絕對", "以後都", "不再"]
+const ABSOLUTE_TERMS = ["只", "永远", "从不", "一定", "完全", "绝对", "以后都", "不再"]
 
 function hasUnsupportedAbsolute(summary: string, evidenceQuotes: string[]): boolean {
   return ABSOLUTE_TERMS.some((term) => summary.includes(term) && !evidenceQuotes.some((quote) => quote.includes(term)))
 }
 
-function normalizeCandidate(input: unknown): MemoryCandidate | null {
-  if (!input || typeof input !== "object") return null
-  const record = input as Record<string, unknown>
-  const layer = record.layer
-  const summary = record.summary
-  const importance = record.importance
-  const stability = record.stability
-  const certainty = record.certainty
-  const attribution = record.attribution
-  const evidenceQuotes = Array.isArray(record.evidenceQuotes) ? record.evidenceQuotes.filter((item): item is string => typeof item === "string" && item.trim().length > 0).map((item) => item.trim()) : []
-  const contextSummary = record.contextSummary
-  const shouldWrite = record.shouldWrite
-  const reason = record.reason
-  const forbiddenOverclaims = Array.isArray(record.forbiddenOverclaims) ? record.forbiddenOverclaims.filter((item): item is string => typeof item === "string" && item.trim().length > 0).map((item) => item.trim()) : []
-  if (layer !== "L0" && layer !== "L1" && layer !== "L2") return null
-  if (typeof summary !== "string" || !summary.trim()) return null
-  if (importance !== "low" && importance !== "medium" && importance !== "high") return null
-  if (stability !== "one_off" && stability !== "situational" && stability !== "stable") return null
-  if (certainty !== "explicit" && certainty !== "inferred" && certainty !== "uncertain") return null
-  if (attribution !== "user_explicit" && attribution !== "assistant_inferred" && attribution !== "mixed") return null
-  if (shouldWrite !== true) return null
-  if (typeof contextSummary !== "string" || !contextSummary.trim()) return null
-  if (typeof reason !== "string" || !reason.trim()) return null
-  if (evidenceQuotes.length === 0) return null
-  if (forbiddenOverclaims.length > 0) return null
-  if (hasUnsupportedAbsolute(summary, evidenceQuotes)) return null
-
-  const confidence =
-    certainty === "explicit" ? 0.9 :
-    certainty === "inferred" ? 0.65 :
-    0.4
-  return {
-    layer,
-    field: typeof record.field === 'string' ? record.field : undefined,
-    summary: summary.trim(),
-    content: summary.trim(),
-    confidence,
-    triggerText: evidenceQuotes[0],
-    importance,
-    stability,
-    certainty,
-    attribution,
-    evidenceQuotes,
-    contextSummary: contextSummary.trim(),
-    shouldWrite,
-    reason: reason.trim(),
-    forbiddenOverclaims,
-  }
-}
-
-async function callChatCompletions(
-  settings: ModelSettings,
-  messages: Array<{ role: "system" | "user"; content: string }>,
-  timeoutMs: number,
-  label: string,
-): Promise<string> {
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), timeoutMs)
-
-  // 拼 VendorConfig（settings 頂層三件套 + 鏡像字段都參與）
-  const cfg: VendorConfig = {
-    provider: settings.provider,
-    baseUrl: settings.baseUrl,
-    model: settings.model,
-    apiKey: settings.apiKey,
-    explicitTransport: settings.explicitTransport,
-  }
-
-  try {
-    // adapter 三層 transport 解析（explicitTransport → baseUrl 啟發式 → capabilities fallback）
-    // —— 之前直接寫 OpenAI body / Bearer header / choices[0].message.content 解析，
-    // 切到 anthropic transport 廠商（如 MiniMax / Claude）時會拿到空字符串，誤判 "JSON 解析失敗"。
-    // 現在交給 adapter，OpenAI / Anthropic 端點都正確。
-    const adapter = getAdapterForConfig(cfg)
-    const http = adapter.buildRequest({
-      model: cfg.model,
-      messages: messages as ChatMessage[],
-      maxTokens: 800,
-      stream: false,
-    }, cfg)
-
-    const response = await fetch(http.url, {
-      method: "POST",
-      signal: controller.signal,
-      headers: http.headers,
-      body: http.body,
-    })
-
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({})) as Record<string, unknown>
-      const errMsg = (errorData as { error?: { message?: string } }).error?.message
-      throw new Error(errMsg || `模型請求失敗：HTTP ${response.status}`)
-    }
-
-    const data = await response.json()
-    const parsed = adapter.parseResponse(data)
-
-    // 記錄 token 用量（統一字段，OpenAI / Anthropic adapter 都映射成 {input, output}）
-    if (parsed.usage) {
-      recordUsage(parsed.usage.input, parsed.usage.output, 1, settings.model)
-    }
-    return stripThinkBlocks(parsed.text ?? "")
-  } finally {
-    clearTimeout(timer)
-  }
+/**
+ * 业务级后处理：过滤不符合条件的候选。
+ * 这些规则是 Memory Judge 的业务语义，不是 schema 校验。
+ */
+function postFilterCandidates(candidates: MemoryCandidate[]): MemoryCandidate[] {
+  return candidates
+    .filter((item) => item.shouldWrite === true)
+    .filter((item) => item.layer !== "L0" || (item.certainty === "explicit" && item.attribution === "user_explicit"))
+    .filter((item) => !item.forbiddenOverclaims || item.forbiddenOverclaims.length === 0)
+    .filter((item) => !hasUnsupportedAbsolute(item.summary ?? item.content, item.evidenceQuotes ?? []))
 }
 
 export class MemoryJudge {
@@ -263,126 +30,153 @@ export class MemoryJudge {
   async judgeRecentTurns(
     turns: MemoryJudgeTurn[],
     conversationId: string,
-  ): Promise<MemoryCandidate[]> {
-    console.log(`[MemoryJudge] 分析最近 ${turns.length} 輪對話...`)
+  ): Promise<MemoryJudgeResult> {
+    console.log(`[PMRS/Judge] 分析最近 ${turns.length} 轮对话...`)
 
     try {
-      const settings = loadModelSettings()
-      if (!settings.apiKey) {
-        console.error("[MemoryJudge] LLM 調用失敗: missing api key")
-        console.log("[MemoryJudge] 本輪無值得記錄的信息")
-        return []
+      const config = loadMemoryModelConfig()
+      if (!config.apiKey) {
+        console.error("[PMRS/Judge] LLM 调用失败: missing api key")
+        console.log("[PMRS/Judge] 本轮无值得记录的信息")
+        return { candidates: [], entities: [] }
       }
 
       const systemPrompt = [
-        "你是一個保守的記憶候選提取器，不是事實裁判，也不是用戶畫像改寫器。",
-        "你的目標是少記錯，不是多記住。",
+        "你是一个保守的记忆候选提取器，不是事实裁判，也不是用户画像改写器。",
+        "你的目标是少记错，不是多记住。",
         "",
-        "你只能提取用戶明確表達、且未來確實有幫助的信息候選。",
-        "禁止把推斷寫成確定事實；禁止把一次性狀態寫成長期偏好；禁止為了輸出而輸出。",
-        "如果最近這些對話沒有值得記的內容，必須返回空數組 []。",
+        "你只能提取用户明确表达、且未来确实有帮助的信息候选。",
+        "禁止把推断写成确定事实；禁止把一次性状态写成长期偏好；禁止为了输出而输出。",
+        "如果最近这些对话没有值得记的内容，必须返回 {\"candidates\":[]}。",
         "",
-        "記憶層級定義：",
-        "- L0：用戶穩定身份信息或核心畫像。只有 certainty=explicit 且 attribution=user_explicit 才允許進入 L0。",
-        "  識別到 L0 信息時，必須同時在 field 字段裡指定要寫入哪個格子。",
-        "  可用的 field 值如下（只能用這些，不能自己發明）：",
+        "PMRS 层级定义：",
+        "- 画像 (L0)：用户稳定身份信息或核心画像。只有 certainty=explicit 且 attribution=user_explicit 才允许进入画像。",
+        "  识别到画像信息时，必须同时在 field 字段里指定要写入哪个格子。",
+        "  可用的 field 值如下（只能用这些，不能自己发明）：",
         this.buildL0FieldPrompt(),
         "",
-        "  重要：field 的值必須嚴格是上方列出的英文字段名，",
+        "  重要：field 的值必须严格是上方列出的英文字段名，",
         "  例如 preferredName、occupation，",
-        "  不能用 nickname、name、job 等其他詞。",
-        "- L1：用戶近期目標或階段性偏好，只能寫近期狀態，不要寫成長期偏好。",
-        "- L2：具體事件、經歷、局部偏好、情緒背景、待觀察信息。",
+        "  不能用 nickname、name、job 等其他词。",
+        "- 近况 (L1)：用户近期目标或阶段性偏好，只能写近期状态，不要写成长期偏好。",
+        "  识别到近况信息时，必须在 field 字段指定写入哪个格子，可用值：recentGoals / recentPreferences / currentProject。",
+        "- 片段 (L2)：具体事件、经历、局部偏好、情绪背景、待观察信息。",
         "",
-        "判斷原則：",
-        "- 寧可漏記，不要誤記",
-        "- 純日常問候、閒聊、情緒發洩（無信息量）→ 返回空數組",
-        "- 必須是用戶主動表達的信息，不是 AI 說的",
-        "- summary 必須忠於用戶原話和上下文，不要自行推廣範圍",
-        "- 如果只是 AI 的建議、安慰、總結、推斷，不要寫成用戶事實",
-        "- 不要把「這次」「剛剛」「這個話題裡」變成長期偏好",
-        "- 不要自動使用絕對化表達：只、永遠、從不、一定、完全、絕對、以後都、不再，除非用戶原話明確說過這些詞",
-        "- 如果 summary 中存在可能過度概括的詞，必須寫入 forbiddenOverclaims；有 forbiddenOverclaims 時 shouldWrite 必須是 false",
+        "判断原则：",
+        "- 宁可漏记，不要误记",
+        "- 纯日常问候、闲聊、情绪发泄（无信息量）→ 返回 {\"candidates\":[]}",
+        "- 必须是用户主动表达的信息，不是 AI 说的",
+        "- summary 必须忠于用户原话和上下文，不要自行推广范围",
+        "- 如果只是 AI 的建议、安慰、总结、推断，不要写成用户事实",
+        "- 不要把「这次」「刚刚」「这个话题里」变成长期偏好",
+        "- 不要自动使用绝对化表达：只、永远、从不、一定、完全、绝对、以后都、不再，除非用户原话明确说过这些词",
+        "- 如果 summary 中存在可能过度概括的词，必须写入 forbiddenOverclaims；有 forbiddenOverclaims 时 shouldWrite 必须是 false",
         "",
-        "重要格式規則：",
-        "- summary 和 evidenceQuotes 字段的值裡，禁止出現英文雙引號 \"",
-        "- 如果內容裡有引號，統一用中文引號「」替代，例如：用戶希望被稱為「寶寶」",
-        "- 不要用 markdown 代碼塊包裹 JSON，直接輸出裸 JSON",
-        "- 數組第一個字符必須是 [，最後一個字符必須是 ]",
+        "重要格式规则：",
+        "- summary 和 evidenceQuotes 字段的值里，禁止出现英文双引号 \"",
+        "- 如果内容里有引号，统一用中文引号「」替代，例如：用户希望被称为「宝宝」",
+        "- 输出必须是顶层 JSON 对象，顶层字段为 candidates 和 entities",
+        "- candidates 的值必须是 JSON 数组",
         "",
-        "輸出格式為 JSON 數組，禁止用 markdown 代碼塊包裹，直接輸出裸 JSON。",
+        "实体抽取（与候选一起输出，复用本次调用，不额外开销）：",
+        "- 只抽用户明确提到的、有指代价值的命名实体（人物名/地名/机构名/具体偏好对象/具体概念）",
+        "- 实体类型只能是：person（人物）/ place（地点）/ concept（概念）/ preference（偏好）/ organization（组织）",
+        "- 禁止抽取聊天碎片：标点、引号、emoji、语气词、单字、代词、感叹词、对话子串",
+        "- 如果只是 AI 提到的、或用户随口一带没有指代价值的，不要抽",
+        "- aliases 字段：该实体的其他叫法（可选，没有就省略）",
+        "- 没有值得记录的实体时，entities 返回空数组 []",
         "",
-        "每個候選必須包含這些字段：",
+        "L2 slug 抽取（与候选一起输出，复用本次调用，不额外开销）：",
+        "- L2 候选必须输出 slug 字段：精炼的记忆标题，将作为 Obsidian 文件名与双链锚点",
+        "- 规则：≤20 字；只能含中文/英文字母/数字/下划线/连字符；禁止标点、引号、空格、emoji",
+        "- slug 应高度概括本条记忆的主题，不要直接复用 summary 全文",
+        "- 示例：用户说喜欢吃香菇 → slug=\"喜欢香菇\"；和小张约下周吃饭 → slug=\"和小张约饭\"；React Chat 窗口迁移 → slug=\"ReactChat迁移\"",
+        "- L0 / L1 候选不要输出 slug 字段",
+        "",
+        "L2 sourceQuote 抽取（与候选一起输出，复用本次调用，不额外开销）：",
+        "- L2 候选必须输出 sourceQuote 字段：从最近对话里挑出最有信息量的一段原文片段（用户或对话原话）",
+        "- 目的：L2 是浓缩结论，会丢失字面信息（专有名词/数字/代码片段）；sourceQuote 保留「用户当时说的原话」，召回时让后续模型看到字面证据",
+        "- 规则：软上限 500 字；不要整段照抄对话；优先挑含专有名词、数字、代码、关键名词的句子；允许标点、空格、emoji（因为是原文）",
+        "- 不要把 summary 复制进 sourceQuote；sourceQuote 应是原话片段，summary 是你的浓缩结论",
+        "- 示例：用户说「我用 React 18.2 做的前端，部署在 vercel 上」→ sourceQuote=\"我用 React 18.2 做的前端，部署在 vercel 上\"",
+        "- L0 / L1 候选不要输出 sourceQuote 字段",
+        "",
+        "输出结构：",
         "{",
-        "  \"layer\": \"L0\",",
-        "  \"field\": \"preferredName\",",
-        "  \"summary\": \"保守、可追溯的候選摘要\",",
-        "  \"importance\": \"low|medium|high\",",
-        "  \"stability\": \"one_off|situational|stable\",",
-        "  \"certainty\": \"explicit|inferred|uncertain\",",
-        "  \"attribution\": \"user_explicit|assistant_inferred|mixed\",",
-        "  \"evidenceQuotes\": [\"用戶原話短引文，必須來自用戶\"],",
-        "  \"contextSummary\": \"最近多輪上下文概括，不超過80字\",",
-        "  \"shouldWrite\": true,",
-        "  \"reason\": \"為什麼值得記，或為什麼不寫\",",
-        "  \"forbiddenOverclaims\": []",
+        "  \"candidates\": [",
+        "    {",
+        "      \"layer\": \"L0\",",
+        "      \"field\": \"preferredName\",",
+        "      \"summary\": \"保守、可追溯的候选摘要\",",
+        "      \"slug\": \"L2精炼标题\",",
+        "      \"sourceQuote\": \"L2原文对话片段\",",
+        "      \"content\": \"与 summary 相同\",",
+        "      \"confidence\": 0.9,",
+        "      \"triggerText\": \"用户原话短引文\",",
+        "      \"importance\": \"low|medium|high\",",
+        "      \"stability\": \"one_off|situational|stable\",",
+        "      \"certainty\": \"explicit|inferred|uncertain\",",
+        "      \"attribution\": \"user_explicit|assistant_inferred|mixed\",",
+        "      \"evidenceQuotes\": [\"用户原话短引文，必须来自用户\"],",
+        "      \"contextSummary\": \"最近多轮上下文概括，不超过80字\",",
+        "      \"shouldWrite\": true,",
+        "      \"reason\": \"为什么值得记，或为什么不写\",",
+        "      \"forbiddenOverclaims\": []",
+        "    }",
+        "  ],",
+        "  \"entities\": [",
+        "    {\"name\": \"小张\", \"type\": \"person\", \"aliases\": [\"张三\"]}",
+        "  ]",
         "}",
         "",
-        "L1/L2 不需要 field。",
-        "inferred / uncertain 不允許進入 L0；如果還值得保留，只能放 L2，或者 shouldWrite=false。",
-        "沒有值得記錄的信息時，輸出：[]",
-        "summary 和 evidenceQuotes 裡禁止出現英文雙引號，用「」替代。",
+        "片段不需要 field。近况必须指定 field（recentGoals / recentPreferences / currentProject）。",
+        "L2 片段必须输出 slug 字段（精炼标题，≤20 字，仅中文/字母/数字/_/-），如 \"slug\": \"喜欢香菇\"。",
+        "L2 片段必须输出 sourceQuote 字段（原文对话片段，≤500 字，允许标点/空格/emoji），如 \"sourceQuote\": \"我用 React 18.2 做的前端\"。",
+        "inferred / uncertain 不允许进入画像；如果还值得保留，只能放片段，或者 shouldWrite=false。",
+        "没有值得记录的信息时，输出：{\"candidates\":[],\"entities\":[]}",
+        "summary 和 evidenceQuotes 里禁止出现英文双引号，用「」替代。",
+        "实体 name 也禁止包含英文双引号、标点、emoji。",
+        "slug 禁止包含标点、引号、空格、emoji；只能含中文/字母/数字/下划线/连字符。",
       ].join("\n")
 
       const transcript = turns.map((turn, index) => [
-        `第 ${index + 1} 輪：`,
-        `用戶：${turn.userInput}`,
+        `第 ${index + 1} 轮：`,
+        `用户：${turn.userInput}`,
         `AI：${turn.assistantReply}`,
       ].join("\n")).join("\n\n")
 
       const userPrompt = [
         `conversationId: ${conversationId}`,
-        "最近對話：",
+        "最近对话：",
         transcript,
       ].join("\n")
 
-      const raw = await callChatCompletions(
-        settings,
-        [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: userPrompt },
-        ],
-        30000,
-        "MemoryJudge",
-      )
+      const result = await invokeMemoryStructuredOutput<MemoryJudgeResult>({
+        operation: "judge",
+        systemPrompt,
+        userPrompt,
+        maxOutputTokens: getDefaultMaxOutputTokens("judge"),
+        parseSchema: parseMemoryJudgeResult,
+        validateBusiness: validateMemoryJudgeBusiness,
+        config,
+      })
 
-      const parsed = extractJsonArray(raw)
-      if (!parsed) {
-        console.error("[MemoryJudge] JSON 解析失敗，原始內容：\n", raw.slice(0, 200))
-        console.log("[MemoryJudge] 本輪無值得記錄的信息")
-        return []
+      const filtered = postFilterCandidates(result.candidates)
+
+      // 注入来源会话 ID，供 L2 回溯使用（LLM 不负责输出此字段）
+      for (const candidate of filtered) {
+        candidate.sourceConversationId = conversationId
       }
 
-      const candidates = parsed
-        .map(normalizeCandidate)
-        .filter((item): item is MemoryCandidate => item !== null)
-        .filter((item) => item.shouldWrite === true)
-        .filter((item) => item.layer !== "L0" || (item.certainty === "explicit" && item.attribution === "user_explicit"))
-
-      if (candidates.length === 0) {
-        console.log("[MemoryJudge] 本輪無值得記錄的信息")
-        return []
-      }
-
-      console.log(`[MemoryJudge] 提取候選: ${candidates.length} 條（過濾後）`)
+      console.log(`[PMRS/Judge] 提取候选: ${filtered.length} 条（过滤后），实体: ${result.entities.length} 个`)
       console.log(
-        `[MemoryJudge] 候選詳情: ${candidates.map((item) => item.layer === "L0" && item.field ? `${item.layer}.${item.field}(\"${item.content.slice(0, 20)}\", ${item.confidence.toFixed(2)})` : `${item.layer}(\"${item.content.slice(0, 20)}\", ${item.confidence.toFixed(2)})`).join(" ")}`,
+        `[PMRS/Judge] 候选详情: ${filtered.map((item) => item.layer === "L0" && item.field ? `${item.layer}.${item.field}(\"${(item.summary ?? item.content).slice(0, 20)}\", ${item.confidence.toFixed(2)})` : `${item.layer}(\"${(item.summary ?? item.content).slice(0, 20)}\", ${item.confidence.toFixed(2)})`).join(" ")}`,
       )
-      return candidates
+      return { candidates: filtered, entities: result.entities }
     } catch (error) {
-      console.error("[MemoryJudge] LLM 調用失敗:", error)
-      console.log("[MemoryJudge] 本輪無值得記錄的信息")
-      return []
+      console.error("[PMRS/Judge] LLM 调用失败:", error)
+      console.log("[PMRS/Judge] 本轮无值得记录的信息")
+      return { candidates: [], entities: [] }
     }
   }
 
@@ -390,7 +184,7 @@ export class MemoryJudge {
     userMessage: string,
     assistantMessage: string,
     conversationId: string,
-  ): Promise<MemoryCandidate[]> {
+  ): Promise<MemoryJudgeResult> {
     return this.judgeRecentTurns([{ userInput: userMessage, assistantReply: assistantMessage }], conversationId)
   }
 }

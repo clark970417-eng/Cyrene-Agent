@@ -1,17 +1,17 @@
-// channels/dispatcher —— 入站消息處理核心。
+// channels/dispatcher —— 入站消息处理核心。
 //
-// 設計原則：
-//   - 不知道任何具體平臺。platform 信息只用於查找 adapter / 落日誌 / 寫 sessionId。
-//   - 完全無副作用：UI 廣播、記憶寫入、sticker 推斷都在外部注入的回調裡完成。
-//   - Phase 0 只搭骨架 + sessionId hash + 限速 + capability 降級工具函數。
-//     Phase 1 填入完整的 agent 調用（handleIncoming → CyreneAgent）。
+// 设计原则：
+//   - 不知道任何具体平台。platform 信息只用于查找 adapter / 落日志 / 写 sessionId。
+//   - 完全无副作用：UI 广播、记忆写入、sticker 推断都在外部注入的回调里完成。
+//   - Phase 0 只搭骨架 + sessionId hash + 限速 + capability 降级工具函数。
+//     Phase 1 填入完整的 agent 调用（handleIncoming → CyreneAgent）。
 //
-// sessionId 生成規則：
+// sessionId 生成规则：
 //   `channel:<channel>:<sha256(channel:senderId).slice(0,16)>`
-//   加 channel 前綴防止跨平臺 ID 衝突；hash 截斷 16 字符節約空間且日誌脫敏。
+//   加 channel 前缀防止跨平台 ID 冲突；hash 截断 16 字符节约空间且日志脱敏。
 //
-// capability 降級：
-//   把 OutgoingMessage 按目標渠道的 cap 翻譯 —— image→text 描述 / card→markdown / sticker 跳過。
+// capability 降级：
+//   把 OutgoingMessage 按目标渠道的 cap 翻译 —— image→text 描述 / card→markdown / sticker 跳过。
 import { createHash } from "crypto";
 import * as fs from "fs";
 import * as path from "path";
@@ -24,7 +24,7 @@ import type {
   OutgoingPart,
 } from "./types";
 import { channelManager, type ChannelManager } from "./manager";
-import { getDefaultChannelsSettings, loadChannelsSettings, type ChannelsSettings } from "./settings-store";
+import { loadChannelsSettings, type ChannelsSettings } from "./settings-store";
 import { appendLog, reloadLogFromDisk } from "./message-log";
 import { appendHistory as appendChannelHistory } from "./history-log";
 import { resolveLocalStickerPath } from "../sticker-protocol";
@@ -37,7 +37,6 @@ import {
   type MobileMessageSegmentationMode,
 } from "../../shared/preferences";
 import { rememberProactiveChannelRecipient } from "./proactive-delivery";
-import { toTraditionalTaiwan } from "../utils/opencc";
 
 /** Phase A：用于拼接历史对话的轻量 ChatMessage 形状（与 orchestrator ChatMessage 兼容）。 */
 interface ChatMessage {
@@ -82,7 +81,7 @@ class RateLimiter {
     fresh.push(now);
     this.buckets.set(key, fresh);
 
-    // 渠道級全侷限速
+    // 渠道级全局限速
     const chKey = `__channel__:${channel}`;
     const chArr = this.buckets.get(chKey) ?? [];
     const chFresh = chArr.filter((t) => now - t < 60_000);
@@ -96,13 +95,13 @@ class RateLimiter {
     return true;
   }
 
-  /** 測試用：重置所有桶 */
+  /** 测试用：重置所有桶 */
   reset(): void {
     this.buckets.clear();
   }
 }
 
-/** 計算一個穩定、匿名的 sessionId。 */
+/** 计算一个稳定、匿名的 sessionId。 */
 export function makeSessionId(channel: ChannelId, senderId: string): string {
   const hash = createHash("sha256")
     .update(`${channel}:${senderId}`)
@@ -210,40 +209,6 @@ export function shouldAppendChannelTtsAudio(
   return ttsEnabled && hasSynthesizeTts && adapterSupportsAudio === true;
 }
 
-export function extractDiscordVoiceRequestTopic(text: string): string | null {
-  const cleaned = text.replace(/<@!?\d+>/g, " ").replace(/\s+/g, " ").trim();
-  const match = cleaned.match(/能傳一段(?:(.+?)的)?語音(?:嗎)?[？?]?\s*$/u);
-  if (!match) return null;
-  return match[1]?.trim() || "自由發揮一段自然、親切的內容";
-}
-
-export function isDiscordTextVoiceRequest(msg: IncomingMessage): boolean {
-  return msg.channel === "discord" && extractDiscordVoiceRequestTopic(msg.text) !== null;
-}
-
-export function prepareDiscordVoiceAgentMessage(msg: IncomingMessage): IncomingMessage {
-  if (msg.channel !== "discord") return msg;
-  const topic = extractDiscordVoiceRequestTopic(msg.text);
-  if (topic === null) return msg;
-  return { ...msg, text: [
-    `請直接寫出一段關於「${topic}」、適合用昔漣口吻朗讀的自然口語內容。`,
-    "本次回答會由 Discord 語音附件功能自動合成並成功發送。",
-    "只輸出要被朗讀的內容，不要解釋傳送方式，也不要討論是否能傳語音。",
-  ].join("\n") };
-}
-
-export function shouldSynthesizeChannelTts(msg: IncomingMessage, ttsEnabled: boolean): boolean {
-  if (!ttsEnabled) return false;
-  if (msg.channel !== "discord") return true;
-  if (isDiscordTextVoiceRequest(msg)) return true;
-  const raw = msg._raw;
-  return !!raw && typeof raw === "object" && (raw as { source?: unknown }).source === "discord-voice";
-}
-
-export function normalizeChannelReplyText(text: string): string {
-  return toTraditionalTaiwan(text);
-}
-
 export class ChannelDispatcher {
   private settings: ChannelsSettings;
   private limiter: RateLimiter;
@@ -251,24 +216,22 @@ export class ChannelDispatcher {
 
   constructor(deps: DispatcherDeps) {
     this.deps = deps;
-    // 這個 singleton 可能早於 app.whenReady() 建立，此時不可讀 safeStorage。
-    // initChannels() 會在 Electron ready 後呼叫 reloadSettings()。
-    this.settings = getDefaultChannelsSettings();
+    this.settings = loadChannelsSettings();
     this.limiter = new RateLimiter(this.settings);
     reloadLogFromDisk();
   }
 
-  /** 重新加載 settings（UI 改了限速配置時調） */
+  /** 重新加载 settings（UI 改了限速配置时调） */
   reloadSettings(): void {
     this.settings = loadChannelsSettings();
     this.limiter = new RateLimiter(this.settings);
   }
 
   /**
-   * 處理一條入站消息。這是 manager 注入到 adapter.onMessage 的回調。
+   * 处理一条入站消息。这是 manager 注入到 adapter.onMessage 的回调。
    *
-   * Phase 0 行為：限速 → 計算 sessionId → 調 buildAndRunAgent（如果有）→ 構造 OutgoingMessage。
-   * 如果沒注入 buildAndRunAgent，返回 echo 作為佔位（僅 Phase 0 用於聯調）。
+   * Phase 0 行为：限速 → 计算 sessionId → 调 buildAndRunAgent（如果有）→ 构造 OutgoingMessage。
+   * 如果没注入 buildAndRunAgent，返回 echo 作为占位（仅 Phase 0 用于联调）。
    */
   async handleIncoming(msg: IncomingMessage): Promise<OutgoingMessage | null> {
     if (!this.limiter.hit(msg.channel, msg.senderId)) {
@@ -293,11 +256,11 @@ export class ChannelDispatcher {
           at: msg.at.getTime(),
         });
       } catch (err) {
-        console.warn(LOG, "broadcastChat (incoming) 失敗:", err);
+        console.warn(LOG, "broadcastChat (incoming) 失败:", err);
       }
     }
 
-    // Phase 3.4：入站消息寫日誌
+    // Phase 3.4：入站消息写日志
     try {
       appendLog({
         dir: "incoming",
@@ -335,8 +298,8 @@ export class ChannelDispatcher {
         }
       }
       try {
-        const result = await this.deps.buildAndRunAgent(prepareDiscordVoiceAgentMessage(msg), sessionId, priorMessages);
-        replyText = normalizeChannelReplyText(result.text);
+        const result = await this.deps.buildAndRunAgent(msg, sessionId, priorMessages);
+        replyText = result.text;
         sticker = result.sticker;
       } catch (err) {
         console.error(LOG, "agent 调用失败:", err instanceof Error ? err.message : err);
@@ -357,8 +320,7 @@ export class ChannelDispatcher {
     console.log(LOG, `TTS 决策: ttsEnabled=${this.settings.ttsEnabled} hasFn=${!!this.deps.synthesizeTts}`);
     const adapterCap = this.deps.manager.getAdapter(msg.channel)?.capability;
     console.log(LOG, `TTS 决策: adapterCap.audio=${adapterCap?.audio}`);
-    const discordVoiceRequest = isDiscordTextVoiceRequest(msg);
-    if (shouldAppendChannelTtsAudio(msg.channel, shouldSynthesizeChannelTts(msg, this.settings.ttsEnabled), !!this.deps.synthesizeTts, adapterCap?.audio)) {
+    if (shouldAppendChannelTtsAudio(msg.channel, this.settings.ttsEnabled, !!this.deps.synthesizeTts, adapterCap?.audio)) {
       if (this.deps.synthesizeTts) {
         try {
           const audioResult = normalizeTtsResult(await this.deps.synthesizeTts(replyText, { channel: msg.channel }));
@@ -371,7 +333,6 @@ export class ChannelDispatcher {
             fs.writeFileSync(audioPath, audioResult.audio);
             console.log(LOG, `TTS verify: written path=${audioPath} ext=${audioResult.extension} mime=${audioResult.mime}`);
             parts.push({ kind: "audio", filePath: audioPath, mime: audioResult.mime });
-            if (discordVoiceRequest) parts.splice(0, parts.length - 1);
             console.log(LOG, `TTS 合成完成: ${audioResult.audio.length} bytes → ${audioPath}`);
           }
         } catch (err) {
@@ -407,11 +368,11 @@ export class ChannelDispatcher {
           at: Date.now(),
         });
       } catch (err) {
-        console.warn(LOG, "broadcastChat (outgoing) 失敗:", err);
+        console.warn(LOG, "broadcastChat (outgoing) 失败:", err);
     }
     }
 
-    // Phase 3.4：出站消息寫日誌（僅文本 part，附件路徑不寫進 JSONL）
+    // Phase 3.4：出站消息写日志（仅文本 part，附件路径不写进 JSONL）
     try {
       appendLog({
         dir: "outgoing",
@@ -420,20 +381,20 @@ export class ChannelDispatcher {
         senderName: msg.senderName,
         chatId: msg.chatId,
         text: replyText,
-        hasAttachments: parts.some((p) => p.kind !== "text"),
+        hasAttachments: parts.some((p) => p.kind === "audio"),
       });
     } catch (err) {
-      console.warn(LOG, "appendLog (outgoing) 失敗:", err);
+      console.warn(LOG, "appendLog (outgoing) 失败:", err);
     }
 
-    // Phase A2：出站消息落對話歷史（assistant 角色）
+    // Phase A2：出站消息落对话历史（assistant 角色）
     try {
       appendChannelHistory(sessionId, "assistant", replyText);
     } catch (err) {
-      console.warn(LOG, "appendHistory (outgoing) 失敗:", err);
+      console.warn(LOG, "appendHistory (outgoing) 失败:", err);
     }
 
-    // 構造 OutgoingMessage，capability 降級
+    // 构造 OutgoingMessage，capability 降级
     const outgoing: OutgoingMessage = {
       channel: msg.channel,
       targetId: msg.chatId,
@@ -443,7 +404,7 @@ export class ChannelDispatcher {
     return this.downgradeToCapability(outgoing, this.deps.manager.getAdapter(msg.channel)?.capability);
   }
 
-  /** 按目標渠道 cap 做降級。返回新對象不修改原對象。 */
+  /** 按目标渠道 cap 做降级。返回新对象不修改原对象。 */
   downgradeToCapability(msg: OutgoingMessage, cap: ChannelCapability | undefined): OutgoingMessage {
     if (!cap) return msg;
     const parts: OutgoingPart[] = [];
@@ -452,15 +413,15 @@ export class ChannelDispatcher {
         if (cap.maxTextLength > 0 && p.text.length > cap.maxTextLength) {
           parts.push({
             kind: "text",
-            text: p.text.slice(0, Math.max(0, cap.maxTextLength - 20)) + "\n…(過長已截斷)",
+            text: p.text.slice(0, Math.max(0, cap.maxTextLength - 20)) + "\n...(过长已截断)",
           });
         } else {
           parts.push(p);
         }
       } else if (p.kind === "image" && !cap.image) {
-        parts.push({ kind: "text", text: `[圖片] ${p.caption ?? p.url ?? p.filePath ?? ""}` });
+        parts.push({ kind: "text", text: `[图片] ${p.caption ?? p.url ?? p.filePath ?? ""}` });
       } else if (p.kind === "audio" && !cap.audio) {
-        parts.push({ kind: "text", text: `[語音消息 ${p.mime}，見桌面端]` });
+        parts.push({ kind: "text", text: `[语音消息 ${p.mime}, 见桌面端]` });
       } else if (p.kind === "file" && !cap.file) {
         parts.push({ kind: "text", text: `[文件] ${p.name ?? p.filePath}` });
       } else if (p.kind === "video" && !cap.video) {

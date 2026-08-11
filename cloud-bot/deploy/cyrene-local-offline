@@ -1,6 +1,0 @@
-#!/bin/sh
-set -eu
-if [ -e /run/cyrene-failover/local-heartbeat ]; then
-  unlink /run/cyrene-failover/local-heartbeat
-fi
-systemctl start cyrene-cloud.service

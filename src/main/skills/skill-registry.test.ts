@@ -65,15 +65,15 @@ describe("SkillRegistry", () => {
   it("getBody 去掉 frontmatter 只返回正文", () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "reg-"));
     const mdPath = path.join(tmp, "SKILL.md");
-    fs.writeFileSync(mdPath, "---\nname: a\ndescription: d\ntools: [x]\n---\n# 正文\n調用工具", "utf8");
+    fs.writeFileSync(mdPath, "---\nname: a\ndescription: d\ntools: [x]\n---\n# 正文\n调用工具", "utf8");
     reg.register(entry("a", { bodyPath: mdPath }));
     const body = reg.getBody("a");
-    expect(body).toBe("# 正文\n調用工具");
+    expect(body).toBe("# 正文\n调用工具");
     expect(body).not.toContain("description");
     fs.rmSync(tmp, { recursive: true, force: true });
   });
 
-  it("getReference 命中清單才讀", () => {
+  it("getReference 命中清单才读", () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "reg-"));
     const refDir = path.join(tmp, "references");
     fs.mkdirSync(refDir, { recursive: true });
@@ -83,7 +83,7 @@ describe("SkillRegistry", () => {
     fs.rmSync(tmp, { recursive: true, force: true });
   });
 
-  it("getReference 拒絕不在清單的 ref（路徑穿越防護）", () => {
+  it("getReference 拒绝不在清单的 ref（路径穿越防护）", () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "reg-"));
     reg.register(entry("a", { dirPath: tmp, references: ["ok.md"] }));
     expect(reg.getReference("a", "../../../etc/passwd")).toBeNull();
@@ -101,7 +101,7 @@ describe("SkillRegistry", () => {
     expect(reg.getBody("a")).toBeNull();
   });
 
-  it("getReference 文件被刪返回 null", () => {
+  it("getReference 文件被删返回 null", () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "reg-"));
     const refDir = path.join(tmp, "references");
     fs.mkdirSync(refDir, { recursive: true });

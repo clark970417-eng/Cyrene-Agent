@@ -10,7 +10,7 @@ vi.mock("pixi-live2d-display/cubism4", () => {
       static from = vi.fn();
       motion = vi.fn(async () => true);
       expression = vi.fn(async () => true);
-      internalModel = { motionManager: { definitions: { "動作#6": [{}, {}, {}, {}] } } };
+      internalModel = { motionManager: { definitions: { "动作#6": [{}, {}, {}, {}] } } };
     },
   };
 });
@@ -37,7 +37,7 @@ describe("Live2DManager.playAction", () => {
     const { Live2DManager } = await import("./manager");
     const mgr = new Live2DManager({ canvas: fakeCanvas, width: 100, height: 100, modelPath: "/x" });
     // init() will try to load the real model — we never call it, so model stays null
-    await mgr.playAction({ kind: "expression", name: "墨鏡" });
+    await mgr.playAction({ kind: "expression", name: "墨镜" });
     // No assertion needed beyond "did not throw"
   });
 
@@ -113,9 +113,9 @@ describe("Live2DManager.playAction", () => {
       destroy: vi.fn(),
     };
 
-    await mgr.playAction({ kind: "expression", name: "墨鏡" });
+    await mgr.playAction({ kind: "expression", name: "墨镜" });
     const model = (mgr as unknown as { model: { expression: ReturnType<typeof vi.fn> } }).model;
-    expect(model.expression).toHaveBeenCalledWith("墨鏡");
+    expect(model.expression).toHaveBeenCalledWith("墨镜");
   });
 
   it("resolves motionName to the right index in the right group", async () => {
@@ -125,7 +125,7 @@ describe("Live2DManager.playAction", () => {
     (mgr as unknown as { model: unknown }).model = {
       motion: motionMock,
       expression: vi.fn(async () => true),
-      internalModel: { motionManager: { definitions: { "動作#6": [{ Name: "動作回正" }, { Name: "Wink~" }, { Name: "我可愛吧~" }, { Name: "笑一笑吧~" }] } } },
+      internalModel: { motionManager: { definitions: { "动作#6": [{ Name: "动作回正" }, { Name: "Wink~" }, { Name: "我可爱吧~" }, { Name: "笑一笑吧~" }] } } },
       scale: { set: vi.fn() },
       anchor: { set: vi.fn() },
       x: 0, y: 0, width: 100, height: 100,
@@ -133,19 +133,19 @@ describe("Live2DManager.playAction", () => {
     };
     // Inject the motionIndexMap that loadModel() would normally build from the JSON.
     (mgr as unknown as { motionIndexMap: Map<string, Map<string, number>> }).motionIndexMap = new Map([
-      ["動作#6", new Map([
-        ["動作回正", 0],
+      ["动作#6", new Map([
+        ["动作回正", 0],
         ["Wink~", 1],
-        ["我可愛吧~", 2],
+        ["我可爱吧~", 2],
         ["笑一笑吧~", 3],
       ])],
     ]);
 
-    await mgr.playAction({ kind: "motion", group: "動作#6", motionName: "Wink~" });
-    expect(motionMock).toHaveBeenCalledWith("動作#6", 1);
+    await mgr.playAction({ kind: "motion", group: "动作#6", motionName: "Wink~" });
+    expect(motionMock).toHaveBeenCalledWith("动作#6", 1);
 
-    await mgr.playAction({ kind: "motion", group: "動作#6", motionName: "笑一笑吧~" });
-    expect(motionMock).toHaveBeenLastCalledWith("動作#6", 3);
+    await mgr.playAction({ kind: "motion", group: "动作#6", motionName: "笑一笑吧~" });
+    expect(motionMock).toHaveBeenLastCalledWith("动作#6", 3);
   });
 
   it("falls back to expression() when motionName is not in the group", async () => {
@@ -156,14 +156,14 @@ describe("Live2DManager.playAction", () => {
     (mgr as unknown as { model: unknown }).model = {
       motion: motionMock,
       expression: expressionMock,
-      internalModel: { motionManager: { definitions: { "動作#6": [{ Name: "動作回正" }] } } },
+      internalModel: { motionManager: { definitions: { "动作#6": [{ Name: "动作回正" }] } } },
       scale: { set: vi.fn() },
       anchor: { set: vi.fn() },
       x: 0, y: 0, width: 100, height: 100,
       destroy: vi.fn(),
     };
 
-    await mgr.playAction({ kind: "motion", group: "動作#6", motionName: "Wink~" });
+    await mgr.playAction({ kind: "motion", group: "动作#6", motionName: "Wink~" });
     expect(expressionMock).toHaveBeenCalledWith("Wink~");
   });
 

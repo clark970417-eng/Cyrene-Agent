@@ -1,11 +1,13 @@
 import * as path from "path";
 import * as fs from "fs";
 import { app } from "electron";
-import { getEmbeddingProvider, resetEmbeddingProvider, EmbeddingProvider, switchEmbeddingModel as switchModel, getCurrentModelDims } from "./embedding";
+import { getEmbeddingProvider, resetEmbeddingProvider, EmbeddingProvider, switchEmbeddingModel as switchModel, getCurrentModelDims, EmbeddingDimensionMismatchError } from "./embedding";
+import type { EmbeddingIndexMetadata } from "./vectorstore";
 import { JsonVectorStore } from "./vectorstore";
 import type { MemoryEntry } from "./vectorstore";
 import { HybridRetriever } from "./retriever";
 import { WorldbookManager } from "./worldbook";
+import { logger, LogTag } from "../logger";
 export { INJECTION_HEADER, INJECTION_PREAMBLE } from "./worldbook-constants";
 import { chunkText } from "./chunk";
 import { feedEntityNamesToJieba } from "../memory/entity-graph";
@@ -17,6 +19,8 @@ let store: JsonVectorStore | null = null;
 let retriever: HybridRetriever | null = null;
 let worldbook: WorldbookManager | null = null;
 let provider: EmbeddingProvider | null = null;
+// 每轮对话递增，用于 DMAE repeatWindow 统计（worldbook 状态不持久化，重启回 0 可接受）
+let worldbookTurnCounter = 0;
 
 function getDataDir(): string {
   return path.join(app.getPath("userData"), "rag-data");
@@ -27,12 +31,13 @@ export async function initRAG(
   ragMode: "auto" | "local" | "cloud" = "auto",
   cloudBaseUrl?: string,
   cloudApiKey?: string,
-  embeddingModel?: string
+  embeddingModel?: string,
+  cloudDimensions?: number,
 ): Promise<void> {
   const dataDir = getDataDir();
-  provider = getEmbeddingProvider(ragMode, cloudBaseUrl, cloudApiKey, embeddingModel);
+  provider = getEmbeddingProvider(ragMode, cloudBaseUrl, cloudApiKey, embeddingModel, cloudDimensions);
   store = new JsonVectorStore(dataDir);
-  // 只有 provider 存在時才創建 retriever（向量檢索依賴 embedding）
+  // 只有 provider 存在时才创建 retriever（向量检索依赖 embedding）
   if (provider) {
     retriever = new HybridRetriever(store, provider);
   }
@@ -42,12 +47,13 @@ export async function initRAG(
   );
   await worldbook.loadFromDirectory();
 
-  // 把實體圖譜中的已有實體名灌入 jieba 自定義詞典
-  // 防止 "昔漣"、"小鹿" 等 AI 伴侶核心名詞被錯誤切分
+  // 把实体图谱中的已有实体名灌入 jieba 自定义词典
+  // 防止 "昔涟"、"小鹿" 等 AI 伴侣核心名词被错误切分
   await feedEntityNamesToJieba();
 
-  console.log(
-    "[RAG] initialized. Mode:", ragMode,
+  logger.info(
+    LogTag.RAG,
+    "initialized. Mode:", ragMode,
     "Provider:", provider?.name ?? "none",
     "Dims:", provider?.dims ?? "N/A",
     "Memories:", store.stats.total,
@@ -62,15 +68,13 @@ export async function switchEmbeddingModel(modelKey: string): Promise<{ ok: bool
     switchModel(modelKey);
     const newProvider = getEmbeddingProvider("auto", undefined, undefined, modelKey);
 
-    // 模型不存在時無法切換 — 輸出詳細診斷幫助排查"放到 models/ 卻檢測不到"
+    // 模型不存在时无法切换 — 输出详细诊断帮助排查"放到 models/ 却检测不到"
     if (!newProvider) {
       try {
         // require to avoid circular import at module load
         const { getModelInstallStatusDetail } = require("./model-status") as typeof import("./model-status");
         const detail = getModelInstallStatusDetail("embedding", modelKey);
         if (detail.existingProjectDir) {
-          // Project-side directory exists but is incomplete — explicit warning,
-          // do NOT silently fall back to HuggingFace cache.
           console.error(
             `[Cyrene] embedding model "${modelKey}" project directory exists but is incomplete.\n` +
             `  existingProjectDir: ${detail.existingProjectDir}\n` +
@@ -92,7 +96,7 @@ export async function switchEmbeddingModel(modelKey: string): Promise<{ ok: bool
       }
       return { ok: false, clearedEntries: 0, error: "Local embedding model not found. Cannot switch." };
     }
-    
+
     const newDims = newProvider.dims;
 
     // Check existing entries for dimension mismatch
@@ -102,13 +106,18 @@ export async function switchEmbeddingModel(modelKey: string): Promise<{ ok: bool
       if (entries && entries.length > 0) {
         const oldDims = entries[0].embedding.length;
         if (oldDims !== newDims) {
-          // Dimension mismatch — clear the vector store
+          // Dimension mismatch — clear the vector store and metadata
           const dataDir = getDataDir();
           const storePath = path.join(dataDir, "memory-store.json");
+          const metaPath = path.join(dataDir, "memory-store-meta.json");
           if (fs.existsSync(storePath)) {
             clearedEntries = entries.length;
             fs.writeFileSync(storePath, "[]", "utf8");
             console.log("[RAG] dimension mismatch (" + oldDims + " → " + newDims + "), cleared " + clearedEntries + " entries");
+          }
+          // 清除旧的索引元数据，下次写入时会自动创建新的
+          if (fs.existsSync(metaPath)) {
+            fs.unlinkSync(metaPath);
           }
           // Reload store from the now-empty file
           store = new JsonVectorStore(dataDir);
@@ -131,6 +140,14 @@ export async function switchEmbeddingModel(modelKey: string): Promise<{ ok: bool
   }
 }
 
+/**
+ * 获取当前向量索引的元数据（只读）。
+ * 用于设置 UI 展示或诊断。
+ */
+export function getIndexMetadata(): Readonly<EmbeddingIndexMetadata> | null {
+  return store?.getIndexMeta() ?? null;
+}
+
 // ── Memory write ──
 export async function addMemory(
   text: string,
@@ -151,10 +168,6 @@ export async function addL2MemoryVector(
   if (!l2Id.trim()) throw new Error("l2Id is required");
   const entry = await store.addUnique(text, "user_memory", provider, { ...metadata, l2Id });
   return entry.id;
-}
-
-export function removeMemory(id: string): boolean {
-  return store?.removeById(id) ?? false;
 }
 
 // ── Memory search ──
@@ -225,8 +238,8 @@ async function recordUserMemoryRecalls(results: Array<{ entry: MemoryEntry }>): 
 }
 
 // ── History search with metadata（供 recall_history 工具用）──
-// 跟 searchMemory 的區別：返回完整 entry（含 createdAt / metadata），
-// 讓召回工具能按時間排序、展示時間戳。
+// 跟 searchMemory 的区别：返回完整 entry（含 createdAt / metadata），
+// 让召回工具能按时间排序、展示时间戳。
 export async function searchHistoryEntries(
   query: string,
   topK = 5
@@ -241,20 +254,21 @@ export async function searchHistoryEntries(
   }));
 }
 
-// ── Worldbook DMAE：每輪打分（本輪用戶輸入 + 上輪模型回覆）──
-export function updateWorldbookActivation(userText: string, modelText: string): void {
+// ── Worldbook DMAE：每轮打分（本轮用户输入 + 上轮模型回复）──
+export function updateWorldbookActivation(userText: string, modelText: string, turn?: number): void {
   if (!worldbook) return;
-  worldbook.updateActivation(userText, modelText);
+  const t = turn ?? ++worldbookTurnCounter;
+  worldbook.updateActivation(userText, modelText, t);
 }
 
-// ── Worldbook DMAE：取 Active 條目內容（閾值門控 + 注入）──
+// ── Worldbook DMAE：取 Active 条目内容（阈值门控 + 注入）──
 export function getActiveWorldbookEntries(): string[] {
   if (!worldbook) return [];
   return worldbook.getActiveEntries();
 }
 
-// ── Worldbook One-Shot：取本輪 cascade 觸發的條目（不入 DMAE 狀態表）──
-// 返回帶條目標題的完整內容（與 getActiveWorldbookEntries 一致格式，便於合併注入）
+// ── Worldbook One-Shot：取本轮 cascade 触发的条目（不入 DMAE 状态表）──
+// 返回带条目标题的完整内容（与 getActiveWorldbookEntries 一致格式，便于合并注入）
 export function getCascadeWorldbookEntries(): string[] {
   if (!worldbook) return [];
   return worldbook.getCascadeEntries().map(e => {
@@ -360,8 +374,8 @@ export async function searchImportedDocumentChunksForImportIds(
 }
 
 // ── Build memory context (legacy, kept for compatibility) ──
-// 注意：單參簽名無 modelText，故 model 獎勵不觸發（降級行為）。
-// 主流程已改用 orchestrator 的 buildAlwaysOnContext（會傳上輪模型回覆）。
+// 注意：单参签名无 modelText，故 model 奖励不触发（降级行为）。
+// 主流程已改用 orchestrator 的 buildAlwaysOnContext（会传上轮模型回复）。
 export async function buildMemoryContext(userInput: string): Promise<string> {
   const parts: string[] = [];
 
@@ -405,7 +419,7 @@ export function isUserMemoryVectorStoreReady(): boolean {
 }
 
 /**
- * 获取指定 source 的所有向量条目（含 embedding），用于记忆压缩 / 聚类。
+ * 获取指定 source 的所有向量条目（含 embedding），用于片段压缩 / 聚类。
  * 返回浅拷贝，调用方不应修改返回的 embedding。
  */
 export function getEntriesBySource(source: string): Array<{ id: string; text: string; embedding: number[]; createdAt: number; weight: number; metadata?: Record<string, unknown> }> {

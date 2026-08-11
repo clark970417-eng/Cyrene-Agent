@@ -1,8 +1,10 @@
 import * as fs from "fs";
 import * as path from "path";
-import { getEmbeddingProvider, EmbeddingProvider } from "./embedding";
+import { getEmbeddingProvider, EmbeddingProvider, type EmbeddingIndexMetadata } from "./embedding";
 
-// ── 類型 ──
+export type { EmbeddingIndexMetadata };
+
+// ── 类型 ──
 export interface MemoryEntry {
   id: string;
   text: string;
@@ -34,14 +36,14 @@ export function cosineSimilarity(a: number[], b: number[]): number {
 }
 
 // ── IVF 倒排文件索引 ──
-// 用 k-means 把向量聚成 K 個簇，搜索時只查最近的 nprobe 個簇，
-// 將 O(n) 變為 O(n / K * nprobe) ≈ O(√n)。
+// 用 k-means 把向量聚成 K 个簇，搜索时只查最近的 nprobe 个簇，
+// 将 O(n) 变为 O(n / K * nprobe) ≈ O(√n)。
 interface IvfIndex {
-  /** 簇中心向量（已歸一化） */
+  /** 簇中心向量（已归一化） */
   centroids: number[][];
-  /** 每個簇中的條目 index（指向 this.entries） */
+  /** 每个簇中的条目 index（指向 this.entries） */
   clusters: number[][];
-  /** 建索引時的條目數，用於判定是否需要重建 */
+  /** 建索引时的条目数，用于判定是否需要重建 */
   entryCount: number;
 }
 
@@ -51,17 +53,17 @@ function kmeansPlusPlusInit(
   dim: number,
 ): number[][] {
   const centroids: number[][] = [];
-  // 1. 隨機選第一個中心
+  // 1. 随机选第一个中心
   const firstIdx = Math.floor(Math.random() * vectors.length);
   centroids.push(vectors[firstIdx].slice());
 
-  // 2. 按距離平方加權選剩下的
+  // 2. 按距离平方加权选剩下的
   for (let c = 1; c < K; c++) {
     const dists = vectors.map((v) => {
       let minDist = Infinity;
       for (const cent of centroids) {
         const sim = cosineSimilarity(v, cent);
-        const d = 1 - sim; // 餘弦距離 = 1 - cos
+        const d = 1 - sim; // 余弦距离 = 1 - cos
         if (d < minDist) minDist = d;
       }
       return minDist * minDist;
@@ -134,7 +136,7 @@ function buildIvfIndex(
         const v = vectors[idx];
         for (let d = 0; d < dim; d++) sum[d] += v[d];
       }
-      // 歸一化新中心
+      // 归一化新中心
       let norm = 0;
       for (let d = 0; d < dim; d++) norm += sum[d] * sum[d];
       norm = Math.sqrt(norm);
@@ -144,7 +146,7 @@ function buildIvfIndex(
       newCentroids.push(sum);
     }
 
-    // 檢查收斂
+    // 检查收敛
     for (let c = 0; c < effectiveK; c++) {
       const sim = cosineSimilarity(newCentroids[c], centroids[c]);
       if (sim < 0.999) { changed = true; break; }
@@ -156,20 +158,24 @@ function buildIvfIndex(
   return { centroids, clusters, entryCount: entries.length };
 }
 
-// ── JSON 向量存儲 ──
+// ── JSON 向量存储 ──
 export class JsonVectorStore {
   private filePath: string;
+  private metaFilePath: string;
   private entries: MemoryEntry[] = [];
   private dirty = false;
+  private indexMeta: EmbeddingIndexMetadata | null = null;
 
-  /** IVF 索引，null = 未構建或需要重建 */
+  /** IVF 索引，null = 未构建或需要重建 */
   private ivf: IvfIndex | null = null;
-  /** 搜索次數計數，達到閾值時惰性重建索引 */
+  /** 搜索次数计数，达到阈值时惰性重建索引 */
   private searchCount = 0;
 
   constructor(dbPath: string) {
     this.filePath = path.join(dbPath, "memory-store.json");
+    this.metaFilePath = path.join(dbPath, "memory-store-meta.json");
     this.load();
+    this.loadIndexMeta();
   }
 
   private load(): void {
@@ -184,6 +190,29 @@ export class JsonVectorStore {
     }
   }
 
+  private loadIndexMeta(): void {
+    try {
+      if (fs.existsSync(this.metaFilePath)) {
+        const raw = fs.readFileSync(this.metaFilePath, "utf8");
+        this.indexMeta = JSON.parse(raw) as EmbeddingIndexMetadata;
+      }
+    } catch {
+      this.indexMeta = null;
+    }
+  }
+
+  private saveIndexMeta(): void {
+    try {
+      const dir = path.dirname(this.metaFilePath);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      const tmp = this.metaFilePath + ".tmp";
+      fs.writeFileSync(tmp, JSON.stringify(this.indexMeta, null, 2), "utf8");
+      fs.renameSync(tmp, this.metaFilePath);
+    } catch (err) {
+      console.warn("[RAG] failed to save index metadata:", err);
+    }
+  }
+
   private save(): void {
     try {
       const dir = path.dirname(this.filePath);
@@ -195,9 +224,80 @@ export class JsonVectorStore {
     }
   }
 
+  // ── 索引元数据校验 ──
+
+  /**
+   * 校验 provider 的维度与索引元数据是否一致。
+   * - 无元数据 + 有旧数据：尝试从现有向量推断并补写元数据（兼容迁移）
+   * - 无元数据 + 无数据：首次写入时创建元数据
+   * - 有元数据：严格校验维度一致性
+   */
+  private validateDimensionsForProvider(provider: EmbeddingProvider): void {
+    const providerDims = provider.resolvedDimensions ?? provider.declaredDimensions;
+    if (providerDims === undefined) {
+      // 维度尚未解析（cloud provider 首次调用前），允许通过
+      // 后续 embed() 调用会自行解析并校验
+      return;
+    }
+
+    if (!this.indexMeta) {
+      // 无元数据：尝试兼容迁移
+      if (this.entries.length > 0) {
+        const inferredDims = this.entries[0].embedding.length;
+        if (inferredDims !== providerDims) {
+          throw new Error(
+            `[RAG] Index dimension mismatch: existing index has ${inferredDims}-dim vectors, ` +
+            `but provider declares ${providerDims}-dim. Rebuild the index first.`
+          );
+        }
+        // 维度一致，补写元数据
+        this.indexMeta = this.buildIndexMeta(provider, providerDims);
+        this.saveIndexMeta();
+        console.log("[RAG] migrated index metadata (inferred from existing vectors):", this.indexMeta);
+      }
+      return;
+    }
+
+    // 有元数据：严格校验
+    if (this.indexMeta.dimensions !== providerDims) {
+      throw new Error(
+        `[RAG] Index dimension mismatch: index was built with ${this.indexMeta.dimensions}-dim ` +
+        `(model: ${this.indexMeta.model}), but current provider declares ${providerDims}-dim. ` +
+        `Rebuild the index or switch back to the original model.`
+      );
+    }
+  }
+
+  /**
+   * 首次写入时，如果还没有元数据，根据 provider 创建并保存。
+   */
+  private ensureIndexMeta(provider: EmbeddingProvider, resolvedDims: number): void {
+    if (this.indexMeta) return;
+    this.indexMeta = this.buildIndexMeta(provider, resolvedDims);
+    this.saveIndexMeta();
+    console.log("[RAG] created index metadata:", this.indexMeta);
+  }
+
+  private buildIndexMeta(provider: EmbeddingProvider, dimensions: number): EmbeddingIndexMetadata {
+    const identity = provider.cacheIdentity;
+    return {
+      provider: identity?.provider ?? provider.name,
+      model: identity?.model ?? provider.name,
+      dimensions,
+      cacheIdentity: identity ? JSON.stringify(identity) : provider.name,
+    };
+  }
+
+  /**
+   * 获取当前索引元数据（只读）。
+   */
+  getIndexMeta(): Readonly<EmbeddingIndexMetadata> | null {
+    return this.indexMeta;
+  }
+
   // ── IVF 索引管理 ──
 
-  /** 強制重建 IVF 索引 */
+  /** 强制重建 IVF 索引 */
   rebuildIndex(): void {
     const n = this.entries.length;
     if (n < 2) {
@@ -211,12 +311,12 @@ export class JsonVectorStore {
     console.log(`[RAG] IVF index rebuilt: K=${K}, entries=${n}, took ${Date.now() - t0}ms`);
   }
 
-  /** 檢查是否需重建索引，每次數據庫變化後調用 */
+  /** 检查是否需重建索引，每次数据库变化后调用 */
   private markIndexDirty(): void {
     this.ivf = null;
   }
 
-  /** 搜索前確保索引可用（惰性重建） */
+  /** 搜索前确保索引可用（惰性重建） */
   private ensureIndex(): void {
     if (this.ivf) return;
     if (this.entries.length >= 2) {
@@ -226,27 +326,29 @@ export class JsonVectorStore {
 
   // ── CRUD ──
 
-  // 添加記憶（自動去重）
+  // 添加记忆（自动去重）
   async add(
     text: string,
     source: string,
     provider: EmbeddingProvider,
     metadata?: Record<string, unknown>
   ): Promise<MemoryEntry> {
-    // 一般知識可做語義去重；逐字對話歷史不可去重，否則兩次相同的原話會被錯當成同一事件。
-    if (source !== "chat_history") {
-      const existing = await this.search(text, source, provider, 1, 0.95);
-      if (existing.length > 0) {
-        // 更新權重和時間
-        existing[0].entry.weight = Math.min(existing[0].entry.weight + 0.1, 5.0);
-        existing[0].entry.lastRecalledAt = Date.now();
-        this.dirty = true;
-        this.save();
-        return existing[0].entry;
-      }
+    this.validateDimensionsForProvider(provider);
+
+    // 去重检查
+    const existing = await this.search(text, source, provider, 1, 0.95);
+    if (existing.length > 0) {
+      // 更新权重和时间
+      existing[0].entry.weight = Math.min(existing[0].entry.weight + 0.1, 5.0);
+      existing[0].entry.lastRecalledAt = Date.now();
+      this.dirty = true;
+      this.save();
+      return existing[0].entry;
     }
 
     const embedding = await provider.embed(text);
+    // 首次成功写入后记录索引元数据
+    this.ensureIndexMeta(provider, embedding.length);
     const entry: MemoryEntry = {
       id: `${source}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
       text,
@@ -271,7 +373,9 @@ export class JsonVectorStore {
     provider: EmbeddingProvider,
     metadata?: Record<string, unknown>,
   ): Promise<MemoryEntry> {
+    this.validateDimensionsForProvider(provider);
     const embedding = await provider.embed(text);
+    this.ensureIndexMeta(provider, embedding.length);
     return this.addPreparedBatch([{ text, source, embedding, metadata }])[0];
   }
 
@@ -281,6 +385,7 @@ export class JsonVectorStore {
     provider: EmbeddingProvider,
     options?: { isCancelled?: () => boolean },
   ): Promise<MemoryEntry[]> {
+    this.validateDimensionsForProvider(provider);
     const results: MemoryEntry[] = [];
     const batchSize = 16;
     for (let start = 0; start < items.length; start += batchSize) {
@@ -288,6 +393,10 @@ export class JsonVectorStore {
       const batch = items.slice(start, start + batchSize);
       const embeddings = await provider.embedBatch(batch.map((item) => item.text));
       if (options?.isCancelled?.()) throw new Error("cancelled");
+      // 首次成功批量写入后记录索引元数据
+      if (embeddings.length > 0) {
+        this.ensureIndexMeta(provider, embeddings[0].length);
+      }
       results.push(...this.addPreparedBatch(batch.map((item, index) => ({ ...item, embedding: embeddings[index] }))));
     }
     return results;
@@ -319,17 +428,6 @@ export class JsonVectorStore {
     return results;
   }
 
-  /** 依穩定 id 刪除單一向量條目。 */
-  removeById(id: string): boolean {
-    const before = this.entries.length;
-    this.entries = this.entries.filter(entry => entry.id !== id);
-    if (this.entries.length === before) return false;
-    this.dirty = true;
-    this.markIndexDirty();
-    this.save();
-    return true;
-  }
-
   // 搜索（使用 IVF 索引加速）
   async search(
     query: string,
@@ -343,6 +441,8 @@ export class JsonVectorStore {
 
     const embeddingProvider = provider ?? getEmbeddingProvider();
     if (!embeddingProvider) return [];
+
+    this.validateDimensionsForProvider(embeddingProvider);
 
     const queryEmbedding = await embeddingProvider.embed(query);
 
@@ -372,7 +472,7 @@ export class JsonVectorStore {
       clusterDists.sort((a, b) => a.dist - b.dist);
       const probeClusters = new Set(clusterDists.slice(0, nprobe).map((c) => c.idx));
 
-      // 只在選中簇內搜索
+      // 只在选中簇内搜索
       for (const clusterIdx of probeClusters) {
         for (const entryIdx of this.ivf.clusters[clusterIdx]) {
           const entry = this.entries[entryIdx];
@@ -405,11 +505,11 @@ export class JsonVectorStore {
       }
     }
 
-    // 排序並取 topK
+    // 排序并取 topK
     results.sort((a, b) => b.score - a.score);
     const top = results.slice(0, topK);
 
-    // 更新召回時間（僅對 topK 結果）
+    // 更新召回时间（仅对 topK 结果）
     for (const r of top) {
       r.entry.lastRecalledAt = now;
       r.entry.weight = Math.min(r.entry.weight + 0.05, 5.0);
@@ -422,7 +522,7 @@ export class JsonVectorStore {
     return top;
   }
 
-  // 清理低權重記憶
+  // 清理低权重记忆
   prune(minWeight = 0.1): number {
     const before = this.entries.length;
     this.entries = this.entries.filter((e) => e.weight >= minWeight);

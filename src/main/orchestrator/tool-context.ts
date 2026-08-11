@@ -4,6 +4,7 @@
 
 import type { ChatMessage } from "./vendors";
 import { ContextRefRegistry } from "./context-ref-registry";
+import type { ConversationMode } from "../../shared/chat-types";
 
 export const contextRefRegistry = new ContextRefRegistry();
 
@@ -17,6 +18,24 @@ export interface ToolContext {
   runId?: string;
   /** Tool Runtime-owned opaque reference registry. */
   contextRefs?: ContextRefRegistry;
+  /** 父运行取消信号。工具应在长操作中检查 signal.aborted 并抛出 AbortError。
+   *  子代理通过统一工具执行边界传入；直接调用的工具（主 Agent Loop）当前不传。 */
+  signal?: AbortSignal;
+  /**
+   * 可信工作区根目录（来自 Conversation Workspace Binding）。
+   *
+   * 信任边界：这是唯一可信的 workspaceRoot 来源。
+   * 以下来源都不能覆盖它：
+   * - 用户消息中的路径
+   * - Planner
+   * - Action Gate
+   * - Native FC 生成的 workspaceRoot
+   *
+   * Work 工具和 run_verification 必须使用此目录。
+   */
+  resolvedWorkspaceRoot?: string;
+  /** 当前会话的 UI 模式；工具可用它做模式隔离（如 todo_write）。 */
+  mode?: ConversationMode;
   /** 未来扩展兜底；当前为空对象，不预设字段。遵循"地基通用，上层克制"。 */
   metadata?: Record<string, unknown>;
 }
@@ -38,9 +57,9 @@ export function extractLastUserQuery(messages: ChatMessage[]): string {
     if (m.role !== "user") continue;
     const content = m.content;
     if (typeof content === "string") return content;
-    // 多模態數組：拼 text 塊（未來用，當前 content 永遠是 string）。
-    // ChatMessage.content 當前類型只有 string，這裡用 unknown 中轉避免 TS 收窄成 never；
-    // 未來 content 改成 string | ContentBlock[] 後可去掉斷言。
+    // 多模态数组：拼 text 块（未来用，当前 content 永远是 string）。
+    // ChatMessage.content 当前类型只有 string，这里用 unknown 中转避免 TS 收窄成 never；
+    // 未来 content 改成 string | ContentBlock[] 后可去掉断言。
     const arr = content as unknown;
     if (Array.isArray(arr)) {
       return (arr as Array<{ type?: string; text?: string }>)

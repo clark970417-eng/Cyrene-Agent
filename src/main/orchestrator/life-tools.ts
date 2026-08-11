@@ -1,23 +1,26 @@
-// 生活類工具 —— 記賬/匯率/翻譯/代碼補丁。
+// 生活类工具 —— 记账/汇率/翻译/代码补丁。
 //
-// 設計原則：
-// - 每個工具職責單一（鐵律 1）
-// - 描述寫清 use case / anti-use case（鐵律 2）
-// - 記賬走本地 JSON 存儲，不依賴外部服務
-// - 匯率走免費無 key 的 frankfurter.app
-// - 翻譯複用主模型（質量穩，不增加依賴）
-// - apply_patch 做精確字符串替換，要求 old_string 唯一
+// 设计原则：
+// - 每个工具职责单一（铁律 1）
+// - 描述写清 use case / anti-use case（铁律 2）
+// - 记账走本地 JSON 存储，不依赖外部服务
+// - 汇率走免费无 key 的 frankfurter.app
+// - 翻译复用主模型（质量稳，不增加依赖）
+// - apply_patch 做精确字符串替换，要求 old_string 唯一
 
 import * as fs from "fs";
 import * as path from "path";
 import { app } from "electron";
 import { toolRegistry } from "./tool-registry";
 import { currentUserTimezone } from "./built-in-tools";
+import { resolveTimeoutPolicy } from "../runtime-policy";
+import { getDateLocale } from "../locale-context";
+import { logger, LogTag } from "../logger";
 
 const LOG_PREFIX = "[LifeTools]";
 
 // ══════════════════════════════════════════════════════════
-// 記賬
+// 记账
 // ══════════════════════════════════════════════════════════
 
 interface ExpenseRecord {
@@ -46,31 +49,32 @@ function saveExpenses(records: ExpenseRecord[]): void {
 function registerExpenseTools(): void {
   toolRegistry.register({
     id: "record_expense",
-    name: "記賬",
+    name: "记账",
     description:
-      "記錄一筆支出。\n\n" +
-      "何時用：\n" +
-      "- 用戶說「花了 X 元買 Y」「記一下支出」「記賬」\n" +
-      "- 用戶提到具體金額和用途\n\n" +
-      "不要用於：\n" +
-      "- 查賬（用 query_expense）\n" +
-      "- 收入記錄（暫不支持）\n\n" +
-      "參數：amount（金額，數字），category（分類：餐飲/交通/購物/娛樂/生活/其他），note（備註）。",
+      "记录一笔支出。\n\n" +
+      "何时用：\n" +
+      "- 用户说「花了 X 元买 Y」「记一下支出」「记账」\n" +
+      "- 用户提到具体金额和用途\n\n" +
+      "不要用于：\n" +
+      "- 查账（用 query_expense）\n" +
+      "- 收入记录（暂不支持）\n\n" +
+      "参数：amount（金额，数字），category（分类：餐饮/交通/购物/娱乐/生活/其他），note（备注）。",
     enabled: true,
     risk: "safe",
+    effectKind: "external_side_effect" as const,
     inputSchema: {
       type: "object",
       properties: {
-        amount:   { type: "number", description: "金額（元）" },
-        category: { type: "string", description: "分類：餐飲/交通/購物/娛樂/生活/其他" },
-        note:     { type: "string", description: "備註" },
+        amount:   { type: "number", description: "金额（元）" },
+        category: { type: "string", description: "分类：餐饮/交通/购物/娱乐/生活/其他" },
+        note:     { type: "string", description: "备注" },
       },
       required: ["amount"],
     },
     execute: async (args) => {
       const amount = Number(args.amount);
       if (!Number.isFinite(amount) || amount <= 0) {
-        return "[錯誤] amount 必須是正數";
+        return "[错误] amount 必须是正数";
       }
       const records = loadExpenses();
       const rec: ExpenseRecord = {
@@ -81,30 +85,32 @@ function registerExpenseTools(): void {
       };
       records.push(rec);
       saveExpenses(records);
-      console.log(LOG_PREFIX, "記賬:", rec);
-      return `[record_expense] 已記錄：${amount} 元 / ${rec.category} / ${rec.note}`;
+      console.log(LOG_PREFIX, "记账:", rec);
+      return `[record_expense] 已记录：${amount} 元 / ${rec.category} / ${rec.note}`;
     },
   });
 
   toolRegistry.register({
     id: "query_expense",
-    name: "查賬",
+    name: "查账",
     description:
-      "查詢支出記錄。\n\n" +
-      "何時用：\n" +
-      "- 用戶問「這個月花了多少」「最近記賬」「支出明細」\n" +
-      "- 用戶想看支出彙總\n\n" +
-      "不要用於：\n" +
-      "- 記新的一筆（用 record_expense）\n\n" +
-      "參數：days（最近 N 天，默認 30），category（可選，按分類過濾），summary（可選，true 只返回彙總）。",
+      "查询支出记录。\n\n" +
+      "何时用：\n" +
+      "- 用户问「这个月花了多少」「最近记账」「支出明细」\n" +
+      "- 用户想看支出汇总\n\n" +
+      "不要用于：\n" +
+      "- 记新的一笔（用 record_expense）\n\n" +
+      "参数：days（最近 N 天，默认 30），category（可选，按分类过滤），summary（可选，true 只返回汇总）。",
     enabled: true,
     risk: "safe",
+    effectKind: "read" as const,
+    verificationPolicy: "none" as const,
     inputSchema: {
       type: "object",
       properties: {
-        days:     { type: "number", description: "最近 N 天，默認 30" },
-        category: { type: "string", description: "可選，按分類過濾" },
-        summary:  { type: "boolean", description: "可選，true 只返回彙總" },
+        days:     { type: "number", description: "最近 N 天，默认 30" },
+        category: { type: "string", description: "可选，按分类过滤" },
+        summary:  { type: "boolean", description: "可选，true 只返回汇总" },
       },
     },
     execute: async (args) => {
@@ -115,7 +121,7 @@ function registerExpenseTools(): void {
         records = records.filter(r => r.category === args.category);
       }
       if (records.length === 0) {
-        return `[query_expense] 最近 ${days} 天沒有記賬記錄`;
+        return `[query_expense] 最近 ${days} 天没有记账记录`;
       }
       if (args.summary) {
         const total = records.reduce((s, r) => s + r.amount, 0);
@@ -126,7 +132,7 @@ function registerExpenseTools(): void {
         return `[query_expense] 最近 ${days} 天共 ${records.length} 笔，合计 ${total.toFixed(2)} 元\n分类：${JSON.stringify(byCat)}`;
       }
       const lines = records.map(r => {
-        const d = new Date(r.ts).toLocaleDateString("zh-CN", { timeZone: currentUserTimezone() });
+        const d = new Date(r.ts).toLocaleDateString(getDateLocale(), { timeZone: currentUserTimezone() });
         return `${d} ${r.amount}元 ${r.category} ${r.note}`;
       });
       return `[query_expense] 最近 ${days} 天 ${records.length} 笔：\n${lines.join("\n")}`;
@@ -153,6 +159,8 @@ function registerExchangeRateTool(): void {
       "参数：from（源货币代码，如 USD/EUR/JPY/CNY），to（目标货币），amount（金额，默认 1）。",
     enabled: true,
     risk: "network",
+    effectKind: "read" as const,
+    verificationPolicy: "none" as const,
     inputSchema: {
       type: "object",
       properties: {
@@ -181,7 +189,7 @@ function registerExchangeRateTool(): void {
         return `[exchange_rate] 查不到 ${from} → ${to}，可能是不支持的币种`;
       }
       const result = (amount * rate).toFixed(2);
-      return `[exchange_rate] ${amount} ${from} = ${result} ${to}（汇率 ${rate}，更新于 ${new Date().toLocaleDateString("zh-CN", { timeZone: currentUserTimezone() })}）`;
+      return `[exchange_rate] ${amount} ${from} = ${result} ${to}（汇率 ${rate}，更新于 ${new Date().toLocaleDateString(getDateLocale(), { timeZone: currentUserTimezone() })}）`;
     },
   });
 }
@@ -201,43 +209,45 @@ export function setTranslateConfig(getter: () => { provider: string; baseUrl: st
 function registerTranslateTool(): void {
   toolRegistry.register({
     id: "translate",
-    name: "翻譯",
+    name: "翻译",
     description:
-      "翻譯文本。\n\n" +
-      "何時用：\n" +
-      "- 用戶說「翻譯 X」「這句話用 Y 語怎麼說」「X 是什麼意思」\n" +
-      "- 用戶問外語詞義\n\n" +
-      "不要用於：\n" +
-      "- 用戶用中文問中文能答的事\n" +
-      "- 長文檔翻譯（建議分段）\n\n" +
-      "參數：text（要翻譯的文本），to（目標語言，如「英文」「中文」「日文」），from（可選，源語言，默認自動檢測）。",
+      "翻译文本。\n\n" +
+      "何时用：\n" +
+      "- 用户说「翻译 X」「这句话用 Y 语怎么说」「X 是什么意思」\n" +
+      "- 用户问外语词义\n\n" +
+      "不要用于：\n" +
+      "- 用户用中文问中文能答的事\n" +
+      "- 长文档翻译（建议分段）\n\n" +
+      "参数：text（要翻译的文本），to（目标语言，如「英文」「中文」「日文」），from（可选，源语言，默认自动检测）。",
     enabled: true,
     risk: "network",
+    effectKind: "read" as const,
+    verificationPolicy: "none" as const,
     inputSchema: {
       type: "object",
       properties: {
-        text: { type: "string", description: "要翻譯的文本" },
-        to:   { type: "string", description: "目標語言，如「英文」「中文」「日文」" },
-        from: { type: "string", description: "可選，源語言，默認自動檢測" },
+        text: { type: "string", description: "要翻译的文本" },
+        to:   { type: "string", description: "目标语言，如「英文」「中文」「日文」" },
+        from: { type: "string", description: "可选，源语言，默认自动检测" },
       },
       required: ["text", "to"],
     },
     execute: async (args) => {
       const text = String(args.text || "");
       const to = String(args.to || "");
-      if (!text || !to) return "[錯誤] text 和 to 不能為空";
+      if (!text || !to) return "[错误] text 和 to 不能为空";
 
       const settings = modelSettingsGetter?.();
       if (!settings || !settings.apiKey) {
-        return "[錯誤] 未配置模型，翻譯不可用";
+        return "[错误] 未配置模型，翻译不可用";
       }
 
-      // 動態 import 避免循環依賴
+      // 动态 import 避免循环依赖
       const { buildVendorUrlByProvider } = await import("./vendors");
-      const fromHint = args.from ? `（源語言：${args.from}）` : "（自動檢測源語言）";
-      const sysPrompt = `你是翻譯器${fromHint}。把以下文本翻譯成${to}，只輸出譯文，不要任何解釋或額外文字。`;
+      const fromHint = args.from ? `（源语言：${args.from}）` : "（自动检测源语言）";
+      const sysPrompt = `你是翻译器${fromHint}。把以下文本翻译成${to}，只输出译文，不要任何解释或额外文字。`;
       const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 30000);
+      const timer = setTimeout(() => ctrl.abort(), resolveTimeoutPolicy({ stage: "external-http" }).totalMs);
       try {
         const resp = await fetch(buildVendorUrlByProvider(settings.provider, settings.baseUrl), {
           method: "POST",
@@ -256,13 +266,13 @@ function registerTranslateTool(): void {
             stream: false,
           }),
         });
-        if (!resp.ok) return `[錯誤] 翻譯失敗：HTTP ${resp.status}`;
+        if (!resp.ok) return `[错误] 翻译失败：HTTP ${resp.status}`;
         const data = await resp.json() as { choices?: Array<{ message?: { content?: string } }> };
         const result = data.choices?.[0]?.message?.content?.trim() || "";
-        if (!result) return "[錯誤] 翻譯返回空";
+        if (!result) return "[错误] 翻译返回空";
         return `[translate] ${result}`;
       } catch (e) {
-        return "[錯誤] 翻譯失敗：" + (e instanceof Error ? e.message : String(e));
+        return "[错误] 翻译失败：" + (e instanceof Error ? e.message : String(e));
       } finally {
         clearTimeout(timer);
       }
@@ -271,65 +281,207 @@ function registerTranslateTool(): void {
 }
 
 // ══════════════════════════════════════════════════════════
-// 代碼補丁
+// 代码补丁
 // ══════════════════════════════════════════════════════════
+
+interface MatchPosition {
+  line: number;       // 1-based 行号
+  context: string;    // 匹配位置前后各 2 行上下文
+}
+
+/** 计算两个字符串的相似度（0-1） */
+function similarity(a: string, b: string): number {
+  if (a === b) return 1;
+  if (!a || !b) return 0;
+  const maxLen = Math.max(a.length, b.length);
+  if (maxLen === 0) return 1;
+
+  // 简单的字符集相似度
+  const setA = new Set(a);
+  const setB = new Set(b);
+  let intersection = 0;
+  for (const c of setA) {
+    if (setB.has(c)) intersection++;
+  }
+  return intersection / Math.max(setA.size, setB.size);
+}
+
+/** 在文件行中查找最接近 old_string 的位置 */
+function findNearestMatch(
+  lines: string[],
+  oldStr: string,
+): { line: number; similarity: number; context: string } | null {
+  const oldLines = oldStr.split("\n");
+  const firstLine = oldLines[0]?.trim() || "";
+  if (!firstLine) return null;
+
+  let bestMatch: { line: number; sim: number } | null = null;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const sim = similarity(firstLine, line.trim());
+    if (sim > 0.5 && (!bestMatch || sim > bestMatch.sim)) {
+      bestMatch = { line: i + 1, sim };
+    }
+  }
+
+  if (!bestMatch) return null;
+
+  // 收集上下文（前后各 2 行）
+  const contextStart = Math.max(0, bestMatch.line - 3);
+  const contextEnd = Math.min(lines.length, bestMatch.line + 2);
+  const contextLines = lines.slice(contextStart, contextEnd).map((l, idx) => {
+    const ln = contextStart + idx + 1;
+    const marker = ln === bestMatch!.line ? ">" : " ";
+    return `${marker} ${String(ln).padStart(4)} | ${l}`;
+  });
+
+  return {
+    line: bestMatch.line,
+    similarity: bestMatch.sim,
+    context: contextLines.join("\n"),
+  };
+}
+
+/** 查找所有匹配位置和上下文 */
+function findAllMatchPositions(lines: string[], oldStr: string): MatchPosition[] {
+  const positions: MatchPosition[] = [];
+  const oldLines = oldStr.split("\n");
+  const firstLine = oldLines[0] || "";
+
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].includes(firstLine)) {
+      // 检查完整匹配
+      const candidate = lines.slice(i, i + oldLines.length).join("\n");
+      if (candidate === oldStr) {
+        const contextStart = Math.max(0, i - 2);
+        const contextEnd = Math.min(lines.length, i + oldLines.length + 2);
+        const contextLines = lines.slice(contextStart, contextEnd).map((l, idx) => {
+          const ln = contextStart + idx + 1;
+          const marker = (ln >= i + 1 && ln <= i + oldLines.length) ? ">" : " ";
+          return `${marker} ${String(ln).padStart(4)} | ${l}`;
+        });
+
+        positions.push({
+          line: i + 1,
+          context: contextLines.join("\n"),
+        });
+      }
+    }
+  }
+
+  return positions;
+}
 
 function registerApplyPatchTool(): void {
   toolRegistry.register({
     id: "apply_patch",
-    name: "應用代碼補丁",
+    name: "应用代码补丁",
     description:
-      "對文件應用精確的字符串替換。\n\n" +
-      "何時用：\n" +
-      "- 修改現有文件中的特定代碼片段\n" +
-      "- 用戶要「把 X 改成 Y」「把第 N 行的 A 替換成 B」\n\n" +
-      "不要用於：\n" +
-      "- 整文件重寫（用 write_file）\n" +
+      "对文件应用精确的字符串替换。\n\n" +
+      "何时用：\n" +
+      "- 修改现有文件中的特定代码片段\n" +
+      "- 用户要「把 X 改成 Y」「把第 N 行的 A 替换成 B」\n\n" +
+      "不要用于：\n" +
+      "- 整文件重写（用 write_file）\n" +
       "- 新建文件（用 write_file）\n\n" +
-      "參數：file_path（文件路徑），old_string（要替換的原文本，必須精確匹配含縮進），new_string（替換後的文本）。\n" +
-      "old_string 必須在文件中唯一；匹配多處會報錯，需要更長的上下文使其唯一。",
+      "参数：file_path（文件路径），old_string（要替换的原文本，必须精确匹配含缩进），new_string（替换后的文本）。\n" +
+      "old_string 必须在文件中唯一；匹配多处会报错，需要更长的上下文使其唯一。",
     enabled: true,
     risk: "fs-write",
+    effectKind: "mutation" as const,
+    verificationPolicy: "code" as const,
     inputSchema: {
       type: "object",
       properties: {
-        file_path:   { type: "string", description: "文件絕對路徑" },
-        old_string:  { type: "string", description: "要替換的原文本（必須精確匹配，含縮進）" },
-        new_string:  { type: "string", description: "替換後的文本" },
+        file_path:   { type: "string", description: "文件绝对路径" },
+        old_string:  { type: "string", description: "要替换的原文本（必须精确匹配，含缩进）" },
+        new_string:  { type: "string", description: "替换后的文本" },
       },
       required: ["file_path", "old_string", "new_string"],
     },
     execute: async (args) => {
       const filePath = String(args.file_path || "");
-      if (!filePath) return "[錯誤] file_path 不能為空";
-      if (!fs.existsSync(filePath)) return `[錯誤] 文件不存在：${filePath}`;
-
-      const content = fs.readFileSync(filePath, "utf8");
       const oldStr = String(args.old_string ?? "");
       const newStr = String(args.new_string ?? "");
-      if (!oldStr) return "[錯誤] old_string 不能為空";
-
-      const count = content.split(oldStr).length - 1;
-      if (count === 0) {
-        return "[錯誤] old_string 在文件中未找到。請確認內容（包括縮進、換行）是否精確匹配。";
+      console.log(LOG_PREFIX, "apply_patch:", filePath, "old_len=" + oldStr.length, "new_len=" + newStr.length);
+      if (!filePath) return JSON.stringify({ success: false, errorCode: "INVALID_PATH", error: "file_path 不能为空", retryable: false });
+      if (!fs.existsSync(filePath)) {
+        return JSON.stringify({
+          success: false,
+          errorCode: "FILE_NOT_FOUND",
+          error: `文件不存在：${filePath}。不要重复相同路径，请先用 read_file 或 search_code 确认文件存在。`,
+          retryable: true,
+        });
       }
+
+      const content = fs.readFileSync(filePath, "utf8");
+      if (!oldStr) return JSON.stringify({ success: false, errorCode: "INVALID_INPUT", error: "old_string 不能为空", retryable: false });
+
+      const lines = content.split("\n");
+      const count = content.split(oldStr).length - 1;
+
+      if (count === 0) {
+        // old_string 未找到：提供最近似候选和上下文
+        const nearest = findNearestMatch(lines, oldStr);
+        return JSON.stringify({
+          success: false,
+          errorCode: "OLD_STRING_NOT_FOUND",
+          error: "old_string 在文件中未找到。请确认内容（包括缩进、换行）是否精确匹配。",
+          retryable: false,
+          diagnostic: {
+            kind: "not_found",
+            filePath,
+            oldStringLength: oldStr.length,
+            nearestMatch: nearest ? {
+              line: nearest.line,
+              similarity: nearest.similarity,
+              context: nearest.context,
+            } : null,
+          },
+        });
+      }
+
       if (count > 1) {
-        return `[錯誤] old_string 在文件中匹配 ${count} 處，需要更長的上下文使其唯一。`;
+        // 多处匹配：提供所有匹配位置和上下文
+        const positions = findAllMatchPositions(lines, oldStr);
+        return JSON.stringify({
+          success: false,
+          errorCode: "MULTIPLE_MATCHES",
+          error: `old_string 在文件中匹配 ${count} 处，需要更长的上下文使其唯一。`,
+          retryable: false,
+          diagnostic: {
+            kind: "multiple_matches",
+            filePath,
+            matchCount: count,
+            positions: positions.slice(0, 5).map(pos => ({
+              line: pos.line,
+              context: pos.context,
+            })),
+          },
+        });
       }
 
       const newContent = content.replace(oldStr, newStr);
       fs.writeFileSync(filePath, newContent, "utf8");
-      console.log(LOG_PREFIX, "apply_patch:", filePath);
-      return `[apply_patch] 已更新 ${filePath}`;
+      const size = fs.statSync(filePath).size;
+      console.log(LOG_PREFIX, "apply_patch:", filePath, "size=" + size);
+      return JSON.stringify({
+        tool: "apply_patch",
+        filePath,
+        action: "modified",
+        sizeBytes: size,
+        success: true,
+      });
     },
   });
 }
 
-/** 註冊全部生活類工具。index.ts startup 調一次。 */
+/** 注册全部生活类工具。index.ts startup 调一次。 */
 export function registerLifeTools(): void {
   registerExpenseTools();
   registerExchangeRateTool();
   registerTranslateTool();
   registerApplyPatchTool();
-  console.log(LOG_PREFIX, "已註冊：record_expense / query_expense / exchange_rate / translate / apply_patch");
+  logger.info(LogTag.LifeTools, "registered: record_expense / query_expense / exchange_rate / translate / apply_patch");
 }

@@ -1,8 +1,8 @@
-// 聊天會話列表 UI 層共享代碼（settings 💬面板 + chat 窗口側欄 都用）。
+// 聊天会话列表 UI 层共享代码（settings 💬面板 + react chat 窗口侧栏 都用）。
 //
-// 這裡只放純展示相關的類型/常量/純函數——不涉及任何 DOM 構建，
-// 因為兩個入口的 DOM 結構和交互不同（settings=跨窗口openInChatWindow，
-// chat=本地loadSessionIntoUI），各自 build，但時間格式化/類型/默認標籤統一。
+// 这里只放纯展示相关的类型/常量/纯函数——不涉及任何 DOM 构建，
+// 因为两个入口的 DOM 结构和交互不同（settings=跨窗口 openInReactChatWindow，
+// chat=本地 loadSessionIntoUI），各自 build，但时间格式化/类型/默认标签统一。
 
 export interface ChatSessionMetaUI {
   id: string;
@@ -12,6 +12,7 @@ export interface ChatSessionMetaUI {
   updatedAt: number;
   messageCount: number;
   purpose?: "proactive-chat";
+  mode: "chat" | "work" | "code" | "learn" | "daily";
 }
 
 // 默认 identity 显示名（职位面板未做，所有会话先用这个）

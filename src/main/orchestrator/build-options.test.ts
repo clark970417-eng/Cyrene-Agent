@@ -36,7 +36,6 @@ function createBuildDeps(): BuildOptionsDeps {
     readStylePrompt: (styleId) => `STYLE_PROMPT:${styleId}`,
     resolveSoulSampling: () => ({}),
     toolRegistry: { getEnabled: () => [] },
-    logWorldbookInjection: () => {},
     normalizeChatMessages: (raw) => raw as never,
     chatRequestTimeoutMs: 1000,
     loadActionGateSystemPrompt: () => "",
@@ -189,6 +188,24 @@ describe("build-options", () => {
     expect(result.options.citaContextBlock).toBe("")
     expect(result.options.soulSystemBaseContent).toContain("STYLE_PROMPT:lively")
     expect(result.options.toolSystemContent).not.toContain("STYLE_PROMPT:lively")
+  })
+
+  it("injects the trusted session workspace into tool instructions", async () => {
+    const deps = createBuildDeps()
+    deps.getWorkspaceBinding = (conversationId) => conversationId === "daily-session"
+      ? { workspaceRoot: "C:\\projects\\daily", displayName: "daily", boundAt: 1 }
+      : undefined
+
+    const result = await buildAgentRunOptions({
+      sessionId: "daily-session",
+      messages: [{ role: "user", content: "搜索后写一份 Markdown 报告" }],
+      style: "01_default.md",
+      executionMode: "work",
+    }, deps)
+
+    expect(result.options.resolvedWorkspaceRoot).toBe("C:\\projects\\daily")
+    expect(result.options.toolSystemContent).toContain("可信根目录：C:\\projects\\daily")
+    expect(result.options.toolSystemContent).toContain("不得写入桌面")
   })
 
   it("adds a bounded social background only to enabled Chat runs", async () => {
@@ -485,29 +502,6 @@ describe("build-options", () => {
     expect(userMessage?.content).not.toContain("image_url")
   })
 
-  it("keeps the exact latest user text for memory and proactively injects recalled history", async () => {
-    const exact = "請記住：" + "昔漣".repeat(600)
-    const buildProactiveHistoryContext = vi.fn(async (query: string) => `HISTORY:${query}`)
-    const deps = createBuildDeps()
-    deps.normalizeChatMessages = () => [{ role: "user", content: exact.slice(0, 800) }] as never
-    deps.buildMemoryInjection = async () => "L2_MEMORY"
-    deps.buildProactiveHistoryContext = buildProactiveHistoryContext
-
-    const result = await buildAgentRunOptions({
-      messages: [{ role: "user", content: exact }],
-      style: "01_default.md",
-      sessionId: "desktop-session",
-    }, deps)
-
-    expect(result.latestUserText).toBe(exact)
-    expect(buildProactiveHistoryContext).toHaveBeenCalledWith(exact, {
-      sessionId: "desktop-session",
-      topK: 8,
-    })
-    expect(result.options.messages[0].content).toContain("L2_MEMORY")
-    expect(result.options.messages[0].content).toContain(`HISTORY:${exact}`)
-  })
-
   it("has distinct system text for Feishu work chat", () => {
     expect(buildChannelSystem("feishu")).toContain("你正在通过飞书回复用户")
     expect(buildChannelSystem("feishu")).toContain("工作上下文")
@@ -519,8 +513,8 @@ describe("build-options", () => {
       loadModelSettings: () => ({ provider: "test", baseUrl: "", model: "", apiKey: "", runtimeSync: "off" }),
       scheduleMemoryWrite: () => {},
       inferRuntimeState: () => ({ status: "陪伴中" }),
-      runtimeState: { status: "陪伴中", feeling: "溫柔", expression: 0, updatedAt: 0 },
-      feelingToExpression: { "溫柔": 0 },
+      runtimeState: { status: "陪伴中", feeling: "温柔", expression: 0, updatedAt: 0 },
+      feelingToExpression: { "温柔": 0 },
       setRuntimeState: () => {},
       stickerEmbeddingIndex: null,
       getEmbeddingProvider: () => null,
@@ -529,22 +523,20 @@ describe("build-options", () => {
       broadcastRuntimeStateChanged: () => {},
       observeRuntimeState: async () => {},
       recordRelationshipTurn,
-      getChatWindow: () => null,
     }
 
-    await onAgentRunFinished({ reply: "好呀", toolResults: [] }, "今天有點累", deps, "wechat")
+    await onAgentRunFinished({ reply: "好呀", toolResults: [] }, "今天有点累", deps, "wechat")
 
     expect(recordRelationshipTurn).toHaveBeenCalledWith({
-      userText: "今天有點累",
+      userText: "今天有点累",
       assistantText: "好呀",
-      cyreneFeeling: "溫柔",
+      cyreneFeeling: "温柔",
       channel: "wechat",
     })
   })
 
   it("uses the latest sticker embedding index when agent run finishes", async () => {
     const matchSticker = vi.fn(async () => ({ id: "hugtight" }))
-    const send = vi.fn()
     const latestIndex = [{ id: "hugtight", embedding: [1, 0] }]
     const deps: OnRunFinishedDeps & { getStickerEmbeddingIndex: () => unknown } = {
       loadModelSettings: () => ({
@@ -558,8 +550,8 @@ describe("build-options", () => {
       }),
       scheduleMemoryWrite: () => {},
       inferRuntimeState: () => ({ status: "陪伴中" }),
-      runtimeState: { status: "陪伴中", feeling: "溫柔", expression: 0, updatedAt: 0 },
-      feelingToExpression: { "溫柔": 0 },
+      runtimeState: { status: "陪伴中", feeling: "温柔", expression: 0, updatedAt: 0 },
+      feelingToExpression: { "温柔": 0 },
       setRuntimeState: () => {},
       stickerEmbeddingIndex: null,
       getStickerEmbeddingIndex: () => latestIndex,
@@ -569,27 +561,17 @@ describe("build-options", () => {
       broadcastRuntimeStateChanged: () => {},
       observeRuntimeState: async () => {},
       recordRelationshipTurn: async () => {},
-      getChatWindow: () => ({
-        isDestroyed: () => false,
-        webContents: {
-          isDestroyed: () => false,
-          send,
-        },
-      }),
     }
 
-    const sticker = await onAgentRunFinished({ reply: "來，抱抱你", toolResults: [] }, "今天好累", deps)
+    const effects = await onAgentRunFinished({ reply: "来，抱抱你", toolResults: [] }, "今天好累", deps)
 
     expect(matchSticker).toHaveBeenCalledWith(
-      "來，抱抱你\n今天好累",
+      "来，抱抱你\n今天好累",
       expect.anything(),
       latestIndex,
       0.55,
     )
-    expect(send).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({
-      name: "cyrene.sticker",
-      value: "hugtight",
-    }))
+    expect(effects).toEqual({ sticker: "hugtight" })
   })
 
   it("does not send document model context into memory or sticker embedding side effects", async () => {
@@ -624,18 +606,45 @@ describe("build-options", () => {
       broadcastRuntimeStateChanged: () => {},
       observeRuntimeState: async () => {},
       recordRelationshipTurn: async () => {},
-      getChatWindow: () => null,
     }
 
     await onAgentRunFinished({ reply: "总结好了", toolResults: [] }, latestUserText, deps)
 
-    expect(scheduleMemoryWrite).toHaveBeenCalledWith("帮我总结这个 md", "总结好了")
+    expect(scheduleMemoryWrite).toHaveBeenCalledWith("帮我总结这个 md", "总结好了", undefined)
     expect(matchSticker).toHaveBeenCalledWith(
       "总结好了\n帮我总结这个 md",
       expect.anything(),
       latestIndex,
       0.55,
     )
+  })
+
+  it("skips sticker embedding when reply and user content contain only code or math", async () => {
+    const matchSticker = vi.fn(async () => ({ id: "hugtight" }))
+    const deps: OnRunFinishedDeps = {
+      loadModelSettings: () => ({ provider: "test", baseUrl: "", model: "", apiKey: "", runtimeSync: "off", stickerEnabled: true }),
+      scheduleMemoryWrite: () => {},
+      inferRuntimeState: () => ({ status: "陪伴中" }),
+      runtimeState: { status: "陪伴中", feeling: "温柔", expression: 0, updatedAt: 0 },
+      feelingToExpression: { "温柔": 0 },
+      setRuntimeState: () => {},
+      stickerEmbeddingIndex: [{ id: "hugtight", embedding: [1, 0] }],
+      getEmbeddingProvider: () => ({ embed: async () => [1, 0] }),
+      matchSticker,
+      loadStickerSettings: () => ({}),
+      broadcastRuntimeStateChanged: () => {},
+      observeRuntimeState: async () => {},
+      recordRelationshipTurn: async () => {},
+    }
+
+    const effects = await onAgentRunFinished(
+      { reply: "```ts\nconst onlyCode = true\n```\n$$x^2$$", toolResults: [] },
+      "$E=mc^2$",
+      deps,
+    )
+
+    expect(matchSticker).not.toHaveBeenCalled()
+    expect(effects).toEqual({ sticker: null })
   })
 
   it("schedules one social extraction instead of legacy memory for an enabled Chat result", async () => {
@@ -657,7 +666,6 @@ describe("build-options", () => {
       broadcastRuntimeStateChanged: () => {},
       observeRuntimeState,
       recordRelationshipTurn: async () => {},
-      getChatWindow: () => null,
     }
     const retrievedAtoms: SocialAtom[] = []
 

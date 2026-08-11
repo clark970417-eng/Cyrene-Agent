@@ -12,11 +12,6 @@ import { resolveAsset } from "../shared/renderer-base";
 
 const canvas = document.getElementById("live2d-canvas") as HTMLCanvasElement;
 if (!canvas) throw new Error("Canvas #live2d-canvas not found");
-const openerBubbleEl = document.getElementById("opener-bubble");
-const openerBubble = openerBubbleEl ? new OpenerBubbleController(openerBubbleEl) : null;
-const petChatForm = document.getElementById("pet-chat-form") as HTMLFormElement | null;
-const petChatInput = document.getElementById("pet-chat-input") as HTMLInputElement | null;
-const petChatSubmit = document.getElementById("pet-chat-submit") as HTMLButtonElement | null;
 
 if (!window.cyrene) {
   (window as unknown as { cyrene: unknown }).cyrene = {
@@ -24,7 +19,6 @@ if (!window.cyrene) {
     hide: () => {},
     quit: () => {},
     setInteractive: (_: boolean) => Promise.resolve(),
-    setTextInputActive: (_active: boolean) => {},
     moveBy: (_dx: number, _dy: number) => {},
     moveTo: (_x: number, _y: number) => {},
     setDragging: (_isDragging: boolean) => {},
@@ -188,7 +182,6 @@ addTrackedEventListener(window, "window:resize", "resize", () => {
 });
 
 window.addEventListener("beforeunload", () => {
-  window.cyrene.setTextInputActive(false);
   expressionReset?.dispose();
   expressionReset = null;
   for (const off of live2dSpeechOffs) off();
@@ -219,20 +212,40 @@ let rafId: number | null = null;
 let dragOverlay: HTMLImageElement | null = null;
 let dragToken = 0;
 
+let dragOverlayUrl: string | null = null;
+
 function clearDragOverlay(): void {
   if (dragOverlay) {
     dragOverlay.remove();
     dragOverlay = null;
   }
+  if (dragOverlayUrl) {
+    URL.revokeObjectURL(dragOverlayUrl);
+    dragOverlayUrl = null;
+  }
   canvas.style.visibility = "";
 }
 
-async function showDragOverlay(token: number): Promise<void> {
-  const frame = await window.cyrene.captureFrame();
-  if (!frame || token !== dragToken || !isDragging) return;
+function captureCanvasBlob(): Promise<Blob | null> {
+  return new Promise((resolve) => {
+    try {
+      // preserveDrawingBuffer is enabled, so the last rendered frame is
+      // readable even after the PIXI ticker has been paused.
+      canvas.toBlob((blob) => resolve(blob), "image/png");
+    } catch (err) {
+      console.warn("[Cyrene] canvas.toBlob failed", err);
+      resolve(null);
+    }
+  });
+}
 
+async function showDragOverlay(token: number): Promise<void> {
+  const blob = await captureCanvasBlob();
+  if (!blob || token !== dragToken || !isDragging) return;
+
+  const url = URL.createObjectURL(blob);
   const img = document.createElement("img");
-  img.src = frame;
+  img.src = url;
   img.alt = "";
   img.draggable = false;
   img.style.position = "fixed";
@@ -244,10 +257,18 @@ async function showDragOverlay(token: number): Promise<void> {
   img.style.userSelect = "none";
   img.style.zIndex = "10";
 
-  dragOverlay?.remove();
-  dragOverlay = img;
-  document.body.appendChild(img);
-  canvas.style.visibility = "hidden";
+  img.onload = () => {
+    if (token !== dragToken || !isDragging) {
+      URL.revokeObjectURL(url);
+      return;
+    }
+    dragOverlay?.remove();
+    dragOverlay = img;
+    dragOverlayUrl = url;
+    document.body.appendChild(img);
+    canvas.style.visibility = "hidden";
+  };
+  img.onerror = () => URL.revokeObjectURL(url);
 }
 
 function scheduleMoveTo(screenX: number, screenY: number): void {

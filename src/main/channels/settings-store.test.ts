@@ -1,5 +1,5 @@
-// channels settings-store 單元測試
-// 重點驗證 safeStorage encrypt/decrypt 邊界 + 私有字段保存往返
+// channels settings-store 单元测试
+// 重点验证 safeStorage encrypt/decrypt 边界 + 私有字段保存往返
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
@@ -36,13 +36,13 @@ vi.mock("electron", () => {
   };
 });
 
-// 必須在 mock 後 import
+// 必须在 mock 后 import
 // eslint-disable-next-line import/first
 import { loadChannelsSettings, saveChannelsSettings } from "./settings-store";
 
 describe("channels/settings-store", () => {
   beforeEach(() => {
-    // 每個測試前清掉磁盤文件（如果存在）
+    // 每个测试前清掉磁盘文件（如果存在）
     const p = path.join(os.tmpdir(), "channels-settings.json");
     if (fs.existsSync(p)) fs.unlinkSync(p);
     encState.clear();
@@ -50,29 +50,14 @@ describe("channels/settings-store", () => {
     decryptCalls = 0;
   });
 
-  it("loadChannelsSettings: 不存在時返回默認值", () => {
+  it("loadChannelsSettings: 不存在时返回默认值", () => {
     const cfg = loadChannelsSettings();
     expect(cfg.wechat.enabled).toBe(false);
     expect(cfg.feishu.enabled).toBe(false);
-    expect(cfg.bilibili).toEqual({ enabled: false, browser: "opera-gx" });
     expect(cfg.rateLimitPerUser).toBe(10);
-    expect(cfg.discord.cloudPrimary).toBe(true);
   });
 
-  it("Discord: 預設由雲端獨佔 Gateway，但允許手動切回本機", () => {
-    saveChannelsSettings({ discord: { enabled: true, cloudPrimary: false } });
-    expect(loadChannelsSettings().discord.cloudPrimary).toBe(false);
-  });
-
-  it("Bilibili: 只保存本機瀏覽器連接狀態，不保存憑證", () => {
-    saveChannelsSettings({ bilibili: { enabled: true, browser: "opera-gx" } });
-    const raw = fs.readFileSync(path.join(os.tmpdir(), "channels-settings.json"), "utf8");
-    expect(raw).toContain('"browser": "opera-gx"');
-    expect(raw).not.toMatch(/cookie|password/i);
-    expect(loadChannelsSettings().bilibili.enabled).toBe(true);
-  });
-
-  it("saveChannelsSettings + load: 私密字段加密落盤 + 解密還原", () => {
+  it("saveChannelsSettings + load: 私密字段加密落盘 + 解密还原", () => {
     saveChannelsSettings({
       feishu: {
         enabled: true,
@@ -80,20 +65,20 @@ describe("channels/settings-store", () => {
         appSecret: "my-super-secret",
       },
     });
-    // 磁盤上應該是 enc: 前綴密文
+    // 磁盘上应该是 enc: 前缀密文
     const raw = fs.readFileSync(path.join(os.tmpdir(), "channels-settings.json"), "utf8");
-    expect(raw).not.toContain("my-super-secret"); // 明文不落盤
-    expect(raw).toContain("cli_test_001"); // 公開字段明文
+    expect(raw).not.toContain("my-super-secret"); // 明文不落盘
+    expect(raw).toContain("cli_test_001"); // 公开字段明文
     expect(raw).toContain('"appSecret": "enc:'); // 私密字段已加密
-    // 加載回來：明文還原
+    // 加载回来：明文还原
     const loaded = loadChannelsSettings();
     expect(loaded.feishu.appId).toBe("cli_test_001");
     expect(loaded.feishu.appSecret).toBe("my-super-secret");
   });
 
-  it("saveChannelsSettings: 不傳 secret 不覆蓋已有值", () => {
+  it("saveChannelsSettings: 不传 secret 不覆盖已有值", () => {
     saveChannelsSettings({ feishu: { enabled: true, appSecret: "secret-1" } });
-    // 第二次保存不傳 secret
+    // 第二次保存不传 secret
     saveChannelsSettings({ feishu: { enabled: false, appId: "cli_002" } });
     const loaded = loadChannelsSettings();
     expect(loaded.feishu.appSecret).toBe("secret-1"); // 保留

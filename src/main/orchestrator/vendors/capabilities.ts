@@ -11,6 +11,7 @@ export const PROVIDER_CAPABILITIES = [
     transport: "openai",
     baseUrl: "https://api.minimaxi.com/v1",
     authStyle: "bearer",
+    anthropicAuthStyle: "x-api-key",
     defaultModel: "MiniMax-M3",
     supportsTools: true,
     supportsThinking: true,
@@ -28,6 +29,7 @@ export const PROVIDER_CAPABILITIES = [
     transport: "openai",
     baseUrl: "https://api.deepseek.com",
     authStyle: "bearer",
+    anthropicAuthStyle: "x-api-key",
     defaultModel: "deepseek-v4-pro",
     supportsTools: true,
     supportsThinking: true,
@@ -63,13 +65,13 @@ export const PROVIDER_CAPABILITIES = [
     thinkingField: "reasoning_content",
     cacheStrategy: "auto",
     testStrategy: "text",
-    // 視覺版是 glm-5v-turbo，默認 glm-5.2 不支持
+    // 视觉版是 glm-5v-turbo，默认 glm-5.2 不支持
     supportsVision: false,
   },
   {
     id: "kimi",
     displayName: "Kimi（月之暗面）",
-    // OpenAI 兼容 + prompt_cache_key + function.name 正則限制；baseUrl 必須是 .cn
+    // OpenAI 兼容 + prompt_cache_key + function.name 正则限制；baseUrl 必须是 .cn
     transport: "openai",
     baseUrl: "https://api.moonshot.cn/v1",
     authStyle: "bearer",
@@ -84,7 +86,7 @@ export const PROVIDER_CAPABILITIES = [
   },
   {
     id: "qwen",
-    displayName: "Qwen（通義千問）",
+    displayName: "Qwen（通义千问）",
     transport: "openai",
     baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
     authStyle: "bearer",
@@ -94,7 +96,7 @@ export const PROVIDER_CAPABILITIES = [
     thinkingField: "reasoning_content",
     cacheStrategy: "auto",
     testStrategy: "text",
-    // 視覺版是 qwen-vl 系列，默認 qwen-max 不支持
+    // 视觉版是 qwen-vl 系列，默认 qwen-max 不支持
     supportsVision: false,
   },
   {
@@ -109,8 +111,8 @@ export const PROVIDER_CAPABILITIES = [
     thinkingField: "reasoning_content",
     cacheStrategy: "auto",
     testStrategy: "text",
-    // model 由用戶填，支持自定義多模態模型（如 gpt-4o / gemini）
-    supportsVision: true,
+    // model 由用户填，保守 false；门控会按 supportsVision 拦截
+    supportsVision: false,
   },
   {
     id: "claude",
@@ -130,7 +132,7 @@ export const PROVIDER_CAPABILITIES = [
   {
     id: "mimo",
     displayName: "MiMo（小米）",
-    // 默认入口：用户切 /anthropic 时由 detectTransport 自动推断
+    // 默认使用 OpenAI 入口；Anthropic 入口由用户在设置中明确选择。
     transport: "openai",
     baseUrl: "https://api.xiaomimimo.com/v1",
     // 官方文档：/v1 与 /anthropic 都支持 Authorization: Bearer
@@ -153,7 +155,7 @@ export function getCapability(provider: string): ProviderCapability | undefined 
   return byDisplayName.get(provider);
 }
 
-/** 兜底：未知廠商按 OpenAI 兼容處理（保守可用），避免直接崩。 */
+/** 兜底：未知厂商按 OpenAI 兼容处理（保守可用），避免直接崩。 */
 export function getCapabilityOrOpenAI(provider: string): ProviderCapability {
   return byDisplayName.get(provider) ?? {
     id: "unknown",

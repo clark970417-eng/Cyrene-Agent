@@ -1,13 +1,13 @@
 // ILink Bot Adapter —— 用 iLinkProtocolClient 包出 ChannelAdapter。
 //
 // 流程：
-//   微信用戶發消息
+//   微信用户发消息
 //     └─ ILinkClient.getUpdates() (long-poll 35s)
 //           └─ adapter.onMessage() → dispatcher → buildAndRunAgent → OutgoingMessage
 //                 └─ ILinkClient.sendText() → POST /sendmessage → 微信
 //
-// 憑據存盤：<userData>/weixin/<botId>.json
-// （首次運行需在 UI 點"掃碼登錄"生成；之後自動續用）
+// 凭据存盘：<userData>/weixin/<botId>.json
+// （首次运行需在 UI 点"扫码登录"生成；之后自动续用）
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { app } from "electron";
@@ -49,6 +49,7 @@ import type {
   OutgoingMessage,
 } from "../../types";
 import type { ChannelAdapter } from "../base";
+import { logger, LogTag } from "../../../logger";
 
 const LOG_PREFIX = "[WechatBot]";
 const USER_PROFILE_FILE = "user-profile.json";
@@ -111,15 +112,15 @@ export class ILinkBotAdapter implements ChannelAdapter {
 
   async start(): Promise<void> {
     this.status = { enabled: true, phase: "starting" };
-    console.log(LOG_PREFIX, "Starting...");
+    logger.info(LogTag.Wechat, "Starting...");
 
-    // 1. 加載已存憑證
+    // 1. 加载已存凭证
     const creds = await loadCredentials();
     if (!creds) {
       this.status = {
         enabled: true,
         phase: "config_missing",
-        message: "未登錄，請先掃碼",
+        message: "未登录，请先扫码",
       };
       console.log(LOG_PREFIX, "No credentials, please run /wechat login");
       return;
@@ -129,12 +130,12 @@ export class ILinkBotAdapter implements ChannelAdapter {
     this.client = new ILinkClient(creds);
     this.isLoggedIn = true;
 
-    // 2. 啟動 long-poll 循環
+    // 2. 启动 long-poll 循环
     this.pollAbort = new AbortController();
     this.pollLoopPromise = this.#pollLoop();
 
-    this.status = { enabled: true, phase: "running", message: "微信已連接" };
-    console.log(LOG_PREFIX, `Connected as botId=${creds.ilinkBotId}`);
+    this.status = { enabled: true, phase: "running", message: "微信已连接" };
+    logger.info(LogTag.Wechat, `Connected as botId=${creds.ilinkBotId}`);
   }
 
   async stop(): Promise<void> {
@@ -238,11 +239,11 @@ export class ILinkBotAdapter implements ChannelAdapter {
   // ── Login UI flow ────────────────────────────────────────────────────────
 
   /**
-   * 掃碼登錄入口（由 init.ts 調用）。
-   * init.ts 已經調用過 fetchQrCode() + createQrDataUrl() 把 PNG 推到 renderer，
-   * 這裡只負責等掃碼結果。
+   * 扫码登录入口（由 init.ts 调用）。
+   * init.ts 已经调用过 fetchQrCode() + createQrDataUrl() 把 PNG 推到 renderer，
+   * 这里只负责等扫码结果。
    *
-   * @param qrcode  原始 qrcode 字符串（由 init.ts 傳入）
+   * @param qrcode  原始 qrcode 字符串（由 init.ts 传入）
    */
   async login(qrcode: string): Promise<Credentials> {
     console.log(LOG_PREFIX, "Waiting for QR scan...");
@@ -252,7 +253,7 @@ export class ILinkBotAdapter implements ChannelAdapter {
       try {
         status = await pollQrStatus(qrcode);
       } catch (err) {
-        // timeout 是正常的 long-poll，繼續
+        // timeout 是正常的 long-poll，继续
         if ((err as Error).name === "AbortError") throw new Error("login aborted");
         continue;
       }
@@ -271,13 +272,13 @@ export class ILinkBotAdapter implements ChannelAdapter {
         return creds;
       }
       if (status.status === "expired") {
-        throw new Error("二維碼已過期，請重新掃碼");
+        throw new Error("二维码已过期，请重新扫码");
       }
-      // pending/scanning — 繼續輪詢
+      // pending/scanning — 继续轮询
     }
   }
 
-  /** 註銷（刪除憑證文件） */
+  /** 注销（删除凭证文件） */
   async logout(): Promise<void> {
     await this.stop();
     await deleteCredentials();
@@ -307,12 +308,12 @@ export class ILinkBotAdapter implements ChannelAdapter {
           this.status = {
             enabled: true,
             phase: "error",
-            message: "會話已過期，請重新掃碼登錄",
+            message: "会话已过期，请重新扫码登录",
           };
           break;
         }
         if (this.pollAbort?.signal.aborted) break;
-        // 網絡抖一下 backoff
+        // 网络抖一下 backoff
         await new Promise((r) => setTimeout(r, 2_000));
       }
     }

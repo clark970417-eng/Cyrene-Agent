@@ -1,20 +1,9 @@
-// 通話窗口渲染端 —— 粒子背景 + 麥克風採集 + VAD 靜默檢測 + 狀態機 + TTS 播放。
+// 通话窗口渲染端 —— 粒子背景 + 麦克风采集 + VAD 静默检测 + 状态机 + TTS 播放。
 //
-// 狀態：LISTENING（用戶說話）→ THINKING（agent 思考）→ SPEAKING（昔漣說話）→ LISTENING
-// 用戶說話時：柱狀膠囊波形跳動 + 頭像外圈音量波形
-// 昔漣說話時：電波環脈衝擴散 + 波形隱藏
+// 状态：LISTENING（用户说话）→ THINKING（agent 思考）→ SPEAKING（昔涟说话）→ LISTENING
+// 用户说话时：柱状胶囊波形跳动 + 头像外圈音量波形
+// 昔涟说话时：电波环脉冲扩散 + 波形隐藏
 import "../ui/theme";
-import {
-  callAudioMimeType,
-  calibratedNoiseFloor,
-  collectRecognitionText,
-  keepPcmWorkletAlive,
-  isFatalSpeechRecognitionError,
-  speechOnsetThreshold,
-  speechReleaseThreshold,
-  timeDomainRms,
-  type CallAudioFormat,
-} from "./audio-utils";
 
 // ── 粒子背景 ──
 const canvas = document.getElementById("particles") as HTMLCanvasElement | null;
@@ -45,7 +34,7 @@ function spawnParticle(): Particle {
 function resizeParticles(): void {
   if (!canvas || !ctx) return;
   const dpr = window.devicePixelRatio || 1;
-  // 直接用窗口尺寸，不依賴 clientWidth（可能被 body 層遮擋讀到錯誤值）
+  // 直接用窗口尺寸，不依赖 clientWidth（可能被 body 层遮挡读到错误值）
   particlesW = window.innerWidth;
   particlesH = window.innerHeight;
   canvas.width = particlesW * dpr;
@@ -88,23 +77,12 @@ const transcriptEl = document.getElementById("transcript") as HTMLElement;
 const hangupBtn = document.getElementById("hangup-btn") as HTMLButtonElement;
 const closeBtn = document.getElementById("close-btn") as HTMLButtonElement;
 const durationEl = document.getElementById("call-duration") as HTMLElement | null;
-const muteBtn = document.getElementById("mute-btn") as HTMLButtonElement;
-const muteLabel = document.getElementById("mute-label") as HTMLElement;
-const shareBtn = document.getElementById("share-btn") as HTMLButtonElement;
-const shareLabel = document.getElementById("share-label") as HTMLElement;
-const sharePreview = document.getElementById("share-preview") as HTMLElement;
-const shareVideo = document.getElementById("share-video") as HTMLVideoElement;
-const signalLabel = document.getElementById("signal-label") as HTMLElement;
-const pttBtn = document.getElementById("ptt-btn") as HTMLButtonElement;
-const pttLabel = document.getElementById("ptt-label") as HTMLElement;
-const textBackupForm = document.getElementById("text-backup-form") as HTMLFormElement;
-const textBackupInput = document.getElementById("text-backup-input") as HTMLInputElement;
 
-// ── 通話時長計時（首次進入活動狀態時啟動，END 時停止） ──
+// ── 通话时长计时（首次进入活动状态时启动，END 时停止） ──
 let callStartAt: number | null = null;
 let callTimer: number | null = null;
 
-/** 把毫秒數格式化為 MM:SS，超過 60 分鐘進入 HH:MM:SS。 */
+/** 把毫秒数格式化为 MM:SS，超过 60 分钟进入 HH:MM:SS。 */
 function formatDuration(ms: number): string {
   const totalSec = Math.floor(ms / 1000);
   const h = Math.floor(totalSec / 3600);
@@ -114,9 +92,9 @@ function formatDuration(ms: number): string {
   return h > 0 ? `${pad(h)}:${pad(m)}:${pad(s)}` : `${pad(m)}:${pad(s)}`;
 }
 
-/** 啟動 / 重置 計時器。第一次傳 true 時記錄起點並啟動 1s interval。 */
+/** 启动 / 重置 计时器。第一次传 true 时记录起点并启动 1s interval。 */
 function startCallTimer(): void {
-  if (callStartAt !== null) return; // 已經啟動過了，避免 LISTENING<->SPEAKING 時重置
+  if (callStartAt !== null) return; // 已经启动过了，避免 LISTENING<->SPEAKING 时重置
   callStartAt = performance.now();
   if (durationEl) {
     durationEl.textContent = "00:00";
@@ -130,7 +108,7 @@ function startCallTimer(): void {
   tick();
 }
 
-/** 停止計時並隱藏時長元素（用於 hangup / 通話已結束）。 */
+/** 停止计时并隐藏时长元素（用于 hangup / 通话已结束）。 */
 function stopCallTimer(): void {
   if (callTimer !== null) {
     window.clearInterval(callTimer);
@@ -140,10 +118,10 @@ function stopCallTimer(): void {
   if (durationEl) durationEl.hidden = true;
 }
 
-// ── 狀態管理 ──
-type CallState = "IDLE" | "LISTENING" | "THINKING" | "SYNTHESIZING" | "SPEAKING" | "ERROR" | "ENDED";
+// ── 状态管理 ──
+type CallState = "IDLE" | "LISTENING" | "THINKING" | "SPEAKING" | "ERROR" | "ENDED";
 let currentState: CallState = "IDLE";
-let showTranscript = false; // 從設置讀取
+let showTranscript = false; // 从设置读取
 
 function setState(state: CallState): void {
   currentState = state;
@@ -157,7 +135,7 @@ function updateUI(): void {
   const mic = micWaveEl;
 
   if (currentState === "LISTENING") {
-    status.textContent = hasSpoken ? "正在聆聽..." : "等待你說話...";
+    status.textContent = "正在聆听...";
     status.className = "call__status";
     ring.classList.remove("is-active");
     wave?.classList.add("is-active");
@@ -165,15 +143,7 @@ function updateUI(): void {
     waveformMode = "listening";
     micMode = "listening";
   } else if (currentState === "THINKING") {
-    status.textContent = "昔漣思考中...";
-    status.className = "call__status call__status--thinking";
-    ring.classList.remove("is-active");
-    wave?.classList.add("is-active");
-    mic.classList.add("is-active");
-    waveformMode = "thinking";
-    micMode = "thinking";
-  } else if (currentState === "SYNTHESIZING") {
-    status.textContent = "正在準備語音...";
+    status.textContent = "昔涟思考中...";
     status.className = "call__status call__status--thinking";
     ring.classList.remove("is-active");
     wave?.classList.add("is-active");
@@ -181,7 +151,7 @@ function updateUI(): void {
     waveformMode = "thinking";
     micMode = "thinking";
   } else if (currentState === "SPEAKING") {
-    status.textContent = "昔漣說話中...";
+    status.textContent = "昔涟说话中...";
     status.className = "call__status";
     ring.classList.add("is-active");
     wave?.classList.remove("is-active");
@@ -189,7 +159,7 @@ function updateUI(): void {
     waveformMode = "idle";
     micMode = "idle";
   } else if (currentState === "ERROR") {
-    status.textContent = "連接出錯，請檢查網絡";
+    status.textContent = "连接出错，请检查网络";
     status.className = "call__status call__status--error";
     ring.classList.remove("is-active");
     wave?.classList.remove("is-active");
@@ -197,7 +167,7 @@ function updateUI(): void {
     waveformMode = "idle";
     micMode = "idle";
   } else if (currentState === "ENDED") {
-    status.textContent = "通話已結束";
+    status.textContent = "通话已结束";
     status.className = "call__status";
     ring.classList.remove("is-active");
     wave?.classList.remove("is-active");
@@ -205,7 +175,7 @@ function updateUI(): void {
     waveformMode = "idle";
     micMode = "idle";
   } else {
-    status.textContent = "正在連接...";
+    status.textContent = "正在连接...";
     status.className = "call__status";
     ring.classList.remove("is-active");
     wave?.classList.remove("is-active");
@@ -214,20 +184,15 @@ function updateUI(): void {
     micMode = "idle";
   }
 
-  // 通話時長：進入活動狀態時啟動計時，END 時停止（IDLE/ERROR/ENDED 均停）。
-  if (currentState === "LISTENING" || currentState === "THINKING" || currentState === "SYNTHESIZING" || currentState === "SPEAKING") {
+  // 通话时长：进入活动状态时启动计时，END 时停止（IDLE/ERROR/ENDED 均停）。
+  if (currentState === "LISTENING" || currentState === "THINKING" || currentState === "SPEAKING") {
     startCallTimer();
   } else if (currentState === "ENDED") {
     stopCallTimer();
   }
-
-  if (isMuted && currentState === "LISTENING") {
-    status.textContent = "麥克風已靜音";
-    mic.classList.remove("is-active");
-  }
 }
 
-// ── 轉寫顯示（只顯示當前一輪） ──
+// ── 转写显示（只显示当前一轮） ──
 function renderTranscript(userText: string, botText: string): void {
   if (!showTranscript) { transcriptEl.hidden = true; return; }
   transcriptEl.hidden = false;
@@ -249,7 +214,7 @@ function renderTranscript(userText: string, botText: string): void {
 let currentUserText = "";
 let currentBotText = "";
 
-// ── 音量波形（繞頭像一圈） ──
+// ── 音量波形（绕头像一圈） ──
 let waveformMode = "idle"; // idle, listening, thinking
 const NUM_WAVE_BARS = 32;
 const waveBars: Array<{ angle: number }> = [];
@@ -273,13 +238,13 @@ function drawWaveform(): void {
   if (!waveformCtx || !waveformCanvas) { requestAnimationFrame(drawWaveform); return; }
   const cx = waveformCanvas.width / (window.devicePixelRatio || 1) / 2;
   const cy = waveformCanvas.height / (window.devicePixelRatio || 1) / 2;
-  const innerRadius = 80; // 頭像半徑（150px / 2 ≈ 75，留一點邊）
+  const innerRadius = 80; // 头像半径（150px / 2 ≈ 75，留一点边）
   waveformCtx.clearRect(0, 0, waveformCanvas.width, waveformCanvas.height);
 
   for (const b of waveBars) {
     let h: number;
     if (waveformMode === "listening") {
-      // 從 AnalyserNode 取頻域數據
+      // 从 AnalyserNode 取频域数据
       const dataIdx = Math.floor((b.angle / (Math.PI * 2)) * (analyserData?.length ?? 1));
       const vol = analyserData ? analyserData[dataIdx] / 255 : 0;
       h = 5 + vol * 85;
@@ -303,14 +268,14 @@ function drawWaveform(): void {
   requestAnimationFrame(drawWaveform);
 }
 
-// ── 柱狀膠囊波形動畫 ──
+// ── 柱状胶囊波形动画 ──
 let micMode = "idle"; // idle, listening, thinking
 
 function animateMicWave(): void {
   for (const bar of micBars) {
     let h: number;
     if (micMode === "listening") {
-      // 從 AnalyserNode 取平均音量
+      // 从 AnalyserNode 取平均音量
       const avg = analyserData ? analyserData.reduce((a, b) => a + b, 0) / analyserData.length / 255 : 0;
       h = 10 + Math.random() * avg * 76 + avg * 20;
     } else if (micMode === "thinking") {
@@ -434,7 +399,7 @@ function nextSpeechToken(): number {
   return speechToken;
 }
 
-/** 停止嘴型聯動（掛斷 / 新 TTS / 錯誤時調用）。 */
+/** 停止嘴型联动（挂断 / 新 TTS / 错误时调用）。 */
 function stopLive2dMouth(): void {
   speechToken += 1;
   window.live2dSpeech?.stopMouth();
@@ -468,48 +433,41 @@ function waitForAudioMetadata(audio: HTMLAudioElement): Promise<number | null> {
   });
 }
 
-function playNextTtsAudio(): void {
-  if (currentAudio || ttsAudioQueue.length === 0) return;
-  const { base64, format, isFinal } = ttsAudioQueue.shift()!;
+function playTtsAudio(base64: string): void {
+  // 停掉旧音频和嘴型
+  if (currentAudio) { currentAudio.pause(); currentAudio = null; }
   stopLive2dMouth();
 
   const token = nextSpeechToken();
   const bytes = Uint8Array.from(atob(base64), c => c.charCodeAt(0));
-  const mimeType = callAudioMimeType(format);
-  const blob = new Blob([bytes], { type: mimeType });
+  const blob = new Blob([bytes], { type: "audio/mp3" });
   const url = URL.createObjectURL(blob);
   const audio = new Audio(url);
   audio.preload = "auto";
   audio.load();
   currentAudio = audio;
-  currentAudioUrl = url;
 
-  // 重置表情，準備嘴型聯動
+  // 重置表情，准备嘴型联动
   window.live2dSpeech?.prepare();
 
-  let finished = false;
-  const finishSegment = () => {
-    if (finished) return;
-    finished = true;
+  audio.onended = () => {
     URL.revokeObjectURL(url);
-    if (currentAudio === audio) {
-      currentAudio = null;
-      currentAudioUrl = null;
-    }
+    if (currentAudio === audio) currentAudio = null;
     if (speechToken === token) stopLive2dMouth();
-    if (ttsAudioQueue.length > 0) {
-      playNextTtsAudio();
-    } else if (isFinal) {
-      window.call?.ttsDone();
-    }
+    window.call?.ttsDone();
   };
-  audio.onended = finishSegment;
-  audio.onerror = finishSegment;
+  audio.onerror = () => {
+    URL.revokeObjectURL(url);
+    if (currentAudio === audio) currentAudio = null;
+    if (speechToken === token) stopLive2dMouth();
+    window.call?.ttsDone();
+  };
   audio.play().catch(() => {
-    finishSegment();
+    if (speechToken === token) stopLive2dMouth();
+    window.call?.ttsDone();
   });
 
-  // 等音頻 metadata 獲取時長，延遲後驅動嘴型
+  // 等音频 metadata 获取时长，延迟后驱动嘴型
   void (async () => {
     const durationSec = await waitForAudioMetadata(audio);
     if (speechToken !== token) return;
@@ -521,32 +479,16 @@ function playNextTtsAudio(): void {
   })();
 }
 
-function enqueueTtsAudio(base64: string, format: CallAudioFormat, isFinal: boolean): void {
-  ttsAudioQueue.push({ base64, format, isFinal });
-  playNextTtsAudio();
-}
-
 function stopTts(): void {
-  if (currentAudio) {
-    currentAudio.onended = null;
-    currentAudio.onerror = null;
-    currentAudio.pause();
-    currentAudio = null;
-  }
-  if (currentAudioUrl) { URL.revokeObjectURL(currentAudioUrl); currentAudioUrl = null; }
-  ttsAudioQueue.length = 0;
+  if (currentAudio) { currentAudio.pause(); currentAudio = null; }
   stopLive2dMouth();
 }
 
-// ── IPC 事件監聽 ──
+// ── IPC 事件监听 ──
 window.call?.onState((state: string) => {
   setState(state as CallState);
-  if (state === "LISTENING") {
-    if (!micStream) {
-      void startMicrophone();
-    }
-  } else if (state === "THINKING" || state === "SYNTHESIZING" || state === "SPEAKING" || state === "IDLE" || state === "ENDED") {
-    // PCM/Whisper 模式由主程序按通話狀態管理，不需要 renderer 語音服務。
+  if (state === "LISTENING" && !micStream) {
+    void startMicrophone();
   }
 });
 
@@ -561,21 +503,19 @@ window.call?.onAsrResult((data: { partial?: string; final?: string }) => {
   }
 });
 
-window.call?.onTtsAudio((data: { base64: string; format: "wav" | "mp3"; isFinal: boolean }) => {
-  renderTranscript(currentUserText, "（語音回覆中）");
-  enqueueTtsAudio(data.base64, data.format, data.isFinal);
+window.call?.onTtsAudio((data: { base64: string }) => {
+  renderTranscript(currentUserText, "（语音回复中）");
+  playTtsAudio(data.base64);
 });
 
 window.call?.onError((data: { message: string }) => {
-  stopTts();
   statusEl.textContent = data.message;
   statusEl.className = "call__status call__status--error";
 });
 
-// ── 掛斷 ──
+// ── 挂断 ──
 function hangup(): void {
   window.call?.stop();
-  stopScreenShare();
   stopMicrophone();
   stopTts();
   stopCallTimer();
@@ -612,25 +552,24 @@ async function init(): Promise<void> {
   requestAnimationFrame(drawWaveform);
   requestAnimationFrame(animateMicWave);
 
-  // 開始通話
+  // 开始通话
   window.call?.start();
 }
 
 void init();
 
-// 窗口類型聲明
+// 窗口类型声明
 declare global {
   interface Window {
     call?: {
       start: () => void;
       sendAudioFrame: (frame: ArrayBuffer) => void;
-      sendScreenFrame: (dataUrl: string | null) => void;
-      turnEnd: (text?: string) => void;
+      turnEnd: () => void;
       ttsDone: () => void;
       stop: () => void;
       onState: (callback: (state: string) => void) => () => void;
       onAsrResult: (callback: (data: { partial?: string; final?: string }) => void) => () => void;
-      onTtsAudio: (callback: (data: { base64: string; format: "wav" | "mp3"; isFinal: boolean }) => void) => () => void;
+      onTtsAudio: (callback: (data: { base64: string }) => void) => () => void;
       onError: (callback: (data: { message: string }) => void) => () => void;
     };
     tts?: {

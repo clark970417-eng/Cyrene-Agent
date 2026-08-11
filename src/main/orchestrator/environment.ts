@@ -1,12 +1,12 @@
-// Step 1 — 環境注入
+// Step 1 — 环境注入
 //
-// 把"今天是幾號 / 系統是什麼 / 桌面在哪 / 當前權限檔位 / 哪些工具可用"
-// 這些模型本來要靠猜的事實，直接以 system 段落的形式餵給它。
-// 這一層不解決"模型想不想調工具"，但能消掉"模型不知道桌面真實路徑"
-// 這一類低級幻覺，給後續的意圖識別 + tool_choice 兜底打底。
+// 把"今天是几号 / 系统是什么 / 桌面在哪 / 当前权限档位 / 哪些工具可用"
+// 这些模型本来要靠猜的事实，直接以 system 段落的形式喂给它。
+// 这一层不解决"模型想不想调工具"，但能消掉"模型不知道桌面真实路径"
+// 这一类低级幻觉，给后续的意图识别 + tool_choice 兜底打底。
 //
-// 輸出格式刻意選擇 Markdown 小節，方便 LLM 抓字段；同時在終端打印
-// `[Env]` 日誌便於排障。
+// 输出格式刻意选择 Markdown 小节，方便 LLM 抓字段；同时在终端打印
+// `[Env]` 日志便于排障。
 
 import { app } from "electron";
 import * as os from "os";
@@ -16,16 +16,17 @@ import { ACCESS_LEVEL_LABEL, getCurrentLevel, policyFor } from "../permission";
 import type { ToolRiskLevel } from "../permission";
 import { getCapability } from "./vendors/capabilities";
 import { resolveChatContextTimezone } from "../chat-time-context";
+import { getDateLocale } from "../locale-context";
 
 const LOG_PREFIX = "[Env]";
 
-/** 當前模型信息（用於查 capability 判斷視覺等能力），可選。 */
+/** 当前模型信息（用于查 capability 判断视觉等能力），可选。 */
 export interface ModelInfo {
   provider: string;
   model: string;
 }
 
-/** 用戶信息片段（由 index.ts 注入，避免循環依賴）。 */
+/** 用户信息片段（由 index.ts 注入，避免循环依赖）。 */
 export interface UserInfoContext {
   nickname?: string;
   callPreference?: string;
@@ -39,7 +40,7 @@ function safeGetPath(name: "desktop" | "documents" | "downloads" | "home"): stri
   try {
     return app.getPath(name);
   } catch (err) {
-    console.warn(LOG_PREFIX, "getPath 失敗:", name, err);
+    console.warn(LOG_PREFIX, "getPath 失败:", name, err);
     return "";
   }
 }
@@ -53,7 +54,7 @@ function safeGetPath(name: "desktop" | "documents" | "downloads" | "home"): stri
 function formatDate(d: Date, tz: string): string {
   let parts: Intl.DateTimeFormatPart[];
   try {
-    parts = new Intl.DateTimeFormat("zh-CN", {
+    parts = new Intl.DateTimeFormat(getDateLocale(), {
       timeZone: tz,
       year: "numeric",
       month: "2-digit",
@@ -102,10 +103,10 @@ function platformLabel(): string {
 }
 
 /**
- * 構造環境上下文，作為 system prompt 的尾段拼入。
+ * 构造环境上下文，作为 system prompt 的尾段拼入。
  *
- * 注意：這裡只讀取既有運行時狀態，不做任何副作用；調用方負責 try/catch
- * 拼接失敗的情況，避免環境注入炸掉聊天主流程。
+ * 注意：这里只读取既有运行时状态，不做任何副作用；调用方负责 try/catch
+ * 拼接失败的情况，避免环境注入炸掉聊天主流程。
  */
 export function buildEnvironmentContext(modelInfo?: ModelInfo, userInfo?: UserInfoContext): string {
   const level = getCurrentLevel();
@@ -223,7 +224,7 @@ export function buildEnvironmentContext(modelInfo?: ModelInfo, userInfo?: UserIn
     `allowed=${allowedTools.length}`,
     `ask=${askTools.length}`,
     `deny=${deniedTools.length}`,
-    `mcp=${mcpLine.startsWith("未連接") ? "none" : "active"}`,
+    `mcp=${mcpLine.startsWith("未连接") ? "none" : "active"}`,
     `vision=${supportsVision}`,
   );
 

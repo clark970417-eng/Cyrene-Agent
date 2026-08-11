@@ -2,12 +2,11 @@ import "../ui/base.css";
 import "./tasks.css";
 import "../ui/theme";
 import { getSchedulePanelItems, type ScheduledTask } from "./task-filter";
-import { startVisiblePolling } from "../ui/visible-polling";
 
-// ── 類型（後端契約） ──────────────────────────────────────────
+// ── 类型（后端契约） ──────────────────────────────────────────
 interface TokenDayData {
   date: string;       // "06-24"
-  weekday: string;   // "週三"
+  weekday: string;   // "周三"
   input: number;
   output: number;
   hit: number;
@@ -15,7 +14,7 @@ interface TokenDayData {
   requests: number;
 }
 
-// ── preload 橋接（全部由共享 preload 暴露） ─────────────────
+// ── preload 桥接（全部由共享 preload 暴露） ─────────────────
 declare global {
   interface Window {
     tasks?: { minimize: () => void; close: () => void };
@@ -27,7 +26,7 @@ declare global {
   }
 }
 
-// 安全兜底：preload 未注入時不崩
+// 安全兜底：preload 未注入时不崩
 if (!window.tasks) {
   (window as unknown as { tasks: { minimize: () => void; close: () => void } }).tasks = {
     minimize: () => {},
@@ -36,11 +35,11 @@ if (!window.tasks) {
 }
 
 // ── 常量 ──────────────────────────────────────────────────────
-const WEEKDAYS = ["週日", "週一", "週二", "週三", "週四", "週五", "週六"];
-const CHART_HEIGHT_PX = 76;          // mini-chart 可用柱高（與 settings 頁一致）
-const MIN_BAR_PX = 6;                 // 無數據柱最低高度，避免完全消失
-const TASK_REFRESH_MS = 30_000;       // 任務列表輪詢
-const TOKEN_REFRESH_MS = 60_000;      // token 用量輪詢
+const WEEKDAYS = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
+const CHART_HEIGHT_PX = 76;          // mini-chart 可用柱高（与 settings 页一致）
+const MIN_BAR_PX = 6;                 // 无数据柱最低高度，避免完全消失
+const TASK_REFRESH_MS = 30_000;       // 任务列表轮询
+const TOKEN_REFRESH_MS = 60_000;      // token 用量轮询
 
 // ── DOM ───────────────────────────────────────────────────────
 const $ = <T extends HTMLElement = HTMLElement>(id: string): T | null =>
@@ -54,13 +53,13 @@ minBtn?.addEventListener("click", () => window.tasks?.minimize());
 closeBtn?.addEventListener("click", () => window.tasks?.close());
 settingsBtn?.addEventListener("click", () => window.sidebar?.openSettings("tasks"));
 
-// ── 工具函數 ──────────────────────────────────────────────────
-/** 生成 YYYY-MM-DD（本地時區），用作數據鍵 */
+// ── 工具函数 ──────────────────────────────────────────────────
+/** 生成 YYYY-MM-DD（本地时区），用作数据键 */
 function dateKey(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
-/** token 數字短格式：1240 -> 1.2K */
+/** token 数字短格式：1240 -> 1.2K */
 function formatTokenShort(n: number): string {
   if (n >= 1000) return (n / 1000).toFixed(1) + "K";
   return String(Math.round(n));
@@ -122,10 +121,10 @@ function renderWeeklyBars(data7: TokenDayData[]): void {
     });
   }
 
-  // 峰值（僅在已發生的天裡找）
+  // 峰值（仅在已发生的天里找）
   const pastSlots = weekSlots.filter(s => !s.isFuture);
   const maxVal = Math.max(...pastSlots.map(s => s.total ?? 0), 1);
-  // 直接拿到峰值 slot 對象，避免跨數組下標比較出錯
+  // 直接拿到峰值 slot 对象，避免跨数组下标比较出错
   let peakSlot: typeof weekSlots[number] | null = null;
   for (const s of pastSlots) {
     if (!peakSlot || (s.total ?? 0) > (peakSlot.total ?? 0)) peakSlot = s;
@@ -154,7 +153,7 @@ function renderWeeklyBars(data7: TokenDayData[]): void {
     container.appendChild(bar);
   }
 
-  // 日均（僅已發生天）+ 峰值說明
+  // 日均（仅已发生天）+ 峰值说明
   const avgEl = $("mini-chart__avg");
   const noteEl = $("schedule-note");
   const pastTotals = pastSlots.map(s => s.total ?? 0);
@@ -183,7 +182,7 @@ function renderTasks(tasks: ScheduledTask[]): void {
   if (panelItems.items.length === 0) {
     const empty = document.createElement("div");
     empty.className = "task-empty";
-    empty.textContent = "暫無已啟用定時任務";
+    empty.textContent = "暂无已启用定时任务";
     listEl.appendChild(empty);
     return;
   }
@@ -214,12 +213,12 @@ function renderTasks(tasks: ScheduledTask[]): void {
   }
 }
 
-// ── 數據拉取 ──────────────────────────────────────────────────
+// ── 数据拉取 ──────────────────────────────────────────────────
 async function fetchTokenData(): Promise<TokenDayData[]> {
   try {
     return (await window.tokenUsage?.get(7)) ?? [];
   } catch (err) {
-    console.warn("[tasks] 拉取 Token 用量失敗:", err);
+    console.warn("[tasks] 拉取 Token 用量失败:", err);
     return [];
   }
 }
@@ -230,12 +229,12 @@ async function fetchTasks(): Promise<ScheduledTask[]> {
     if (res?.ok && Array.isArray(res.value)) return res.value;
     return [];
   } catch (err) {
-    console.warn("[tasks] 拉取定時任務失敗:", err);
+    console.warn("[tasks] 拉取定时任务失败:", err);
     return [];
   }
 }
 
-// ── 刷新（節流合併） ──────────────────────────────────────────
+// ── 刷新（节流合并） ──────────────────────────────────────────
 let refreshPending = false;
 async function refreshAll(): Promise<void> {
   if (refreshPending) return;
@@ -250,34 +249,29 @@ async function refreshAll(): Promise<void> {
   }
 }
 
-// ── 啟動 ──────────────────────────────────────────────────────
+// ── 启动 ──────────────────────────────────────────────────────
 function init(): void {
   renderDate();
   void refreshAll();
 
-  // 輪詢：任務列表每 30s，token 每 60s
-  startVisiblePolling(async () => {
-    renderTasks(await fetchTasks());
-  }, TASK_REFRESH_MS, { label: "scheduled tasks" });
-  startVisiblePolling(async () => {
-    const data = await fetchTokenData();
+  // 轮询：任务列表每 30s，token 每 60s
+  setInterval(() => void fetchTasks().then(renderTasks), TASK_REFRESH_MS);
+  setInterval(() => {
+    void fetchTokenData().then(data => {
       renderTodayUsage(data);
       renderWeeklyBars(data);
-  }, TOKEN_REFRESH_MS, { label: "token usage" });
+    });
+  }, TOKEN_REFRESH_MS);
 
-  // 事件驅動：scheduler 觸發後立即刷新（用量和任務都會變）
+  // 事件驱动：scheduler 触发后立即刷新（用量和任务都会变）
   window.schedulerEvents?.onEvent((_event) => {
     void refreshAll();
   });
 
-  // 任務增刪改後立即刷新（不再等 30s 輪詢）
+  // 任务增删改后立即刷新（不再等 30s 轮询）
   window.tasks?.onSchedulerChanged?.(() => {
     void refreshAll();
   });
 }
 
 init();
-
-if (window.self !== window.top) {
-  document.body.classList.add("is-embedded");
-}

@@ -3,10 +3,6 @@ import "./settings.css";
 import "../ui/theme";
 import neteaseLogoUrl from "./assets/netease-logo.svg?url";
 import {
-  formatChatRelativeTime,
-  type ChatSessionMetaUI,
-} from "../../shared/chat-ui";
-import {
   normalizeChatSocialContextEnabled,
   normalizeDefaultChatMode,
   normalizeMobileMessageSegmentationMode,
@@ -20,17 +16,19 @@ import {
   type SegmentedOutputMode,
 } from "../../shared/preferences";
 import { isProactiveDeliveryTargetSelectable } from "../../shared/proactive-delivery";
-import { TIMEZONE_OPTIONS, FALLBACK_TIMEZONE, normalizeTimezoneOptionValue } from "./timezone-options";
-import { normalizeUiTheme, type UiTheme } from "../../shared/ui-theme";
+import type { UiTheme } from "../../shared/ui-theme";
 import { DEFAULT_UI_FONT, normalizeUiFont, type UiFont } from "../../shared/ui-font";
 import { normalizeUiIcon, type UiIcon } from "../../shared/ui-icon";
-import { buildAppearanceSettingsPatch } from "./appearance-settings-state";
+import {
+  DEFAULT_WINDOW_CORNER_RADIUS,
+  normalizeWindowCornerRadius,
+} from "../../shared/window-corner-radius";
+import { applyWindowCornerRadius } from "../ui/window-corner-radius";
 import { getCitaUiState } from "./cita-settings-state";
-import { requestTrackPlayback } from "./music-playback";
 import { type ReasoningPreference } from "../../shared/reasoning";
 import { type LoginFlowState } from "../../shared/music-types";
-import { renderMarkdown } from "../chat/markdown/markdown-renderer";
-import workFlowDocMd from "../../../docs/model-work-test/work-flow-test-results-2026-07-24.md?raw";
+import { resolveApiEndpoint, type ApiTransport } from "../../shared/api-endpoint";
+import type { ChatAppearanceSettings } from "../../shared/chat-appearance";
 import {
   DEFAULT_CUSTOM_STYLE,
   normalizeCustomStyleConfig,
@@ -56,494 +54,106 @@ export {
   type MusicStatusSnapshot,
   type NeteaseViewState,
 } from "../../shared/music-view-state";
+import type {
+  ScheduleConfig,
+  SchedulerApi,
+  SchedulerResult,
+  SchedulerToolInfo,
+  SchedulerToolMode,
+  ScheduledTask,
+  ScheduledTaskHistoryEntry,
+} from "./scheduler/types";
+import { musicState } from "./music/state";
+import { musicHomeView, musicReturnBtn, musicSearchForm, musicSearchHint, musicQrStatus, musicProfileAvatar, musicLoginBtn, musicCancelBtn, musicDisconnectBtn, musicQrImg, musicQrTip, musicQrBox, musicFeedbackEl, musicAccountStatusText, musicSearchInput, musicSearchBtn, musicSearchResults, musicToggle, musicAccordionCard, musicAccordionBody } from "./music/dom";
+import { channelsState } from "./channels/state";
+import { channelsWechatEnabledEl, channelsFeishuEnabledEl, channelsWechatStatusEl, channelsFeishuStatusEl, channelsRateUserEl, channelsRateChannelEl, channelsTtsEl, channelsStickerEl, channelsMirrorEl, channelsToolSandboxOffEl, channelsToolSandboxAllEl, channelsToolSandboxSafeEl, channelsFeishuAppIdEl, channelsFeishuAppSecretEl, channelsFeishuAppSecretRevealBtn, channelsFeishuSaveBtn, channelsWechatLoginBtn, channelsWechatRestartBtn, channelsWechatFeedbackEl, channelsFeishuFeedbackEl, channelsLogListEl, channelsLogRefreshBtn, channelsLogClearBtn } from "./channels/dom";
+import { memoryState } from "./memory/state";
+import { memoryL0NameInput, memoryL0OccupationInput, memoryL0InterestsInput, memoryL0LanguageInput, memoryL0NoteInput, memoryL1GoalsInput, memoryL1PreferencesInput, memoryL1ProjectInput, memoryL2SearchInput, memoryL2List, memoryImportedList, memoryReflectionList, memoryL0EditBtn, memoryL0CancelBtn, memoryL1EditBtn, memoryL1CancelBtn } from "./memory/dom";
+import { schedulerState } from "./scheduler/state";
+import { schedulerNewBtn, schedulerEmpty, schedulerList, schedulerEditor, schedulerEditorTitle, schedulerEditorClose, schedulerTitleInput, schedulerPromptInput, schedulerEnabledInput, schedulerKindInput, schedulerOnceRunAtInput, schedulerTimeOfDayInput, schedulerDayOfWeekInput, schedulerIntervalEveryInput, schedulerIntervalUnitInput, schedulerToolLimitInput, schedulerToolPicker, schedulerToolEmptyHint, schedulerSaveStatus, schedulerCancelBtn, schedulerSaveBtn } from "./scheduler/dom";
+import { timeoutProfileTotalBudgetInput, timeoutProfilePerAttemptInput, timeoutProfileRemainingInput } from "./timeout/dom";
+import { tokensState } from "./tokens/state";
+import { modalState } from "./shared/modal-state";
+import { formatDateTime, escapeHtml } from "./shared/format";
+import { parsePositiveIntOrThrow, parseN1SecToMsOrThrow, parseCommandLine } from "./shared/parse";
+import { apiState } from "./api/state";
+import { apiForm, apiRuntimeForm, apiTimeoutForm, presetCards, presetWebsiteLink, displayNameInput, baseUrlInput, baseUrlResetBtn, modelInput, modelInputSuggestions, contextWindowInput, apiKeyInput, apiKeyLabel, apiKeyHint, testConnectionBtn, transportSelect, transportHint, endpointPreview, customEndpointControls, customEndpointOverrides, customEndpointSummary, customEndpointGuideBtn, workFlowAdaptBtn, apiNoteText, multimodalToggle, chatRequestTimeoutSecInput, maxIterationsInput, maxReplansInput, maxRefreshInput, perCallTimeoutSecInput, actionGateRepairBudgetSecInput, embeddingDimensionsInput, modelRequestTimeoutSecInput, modelRequestTimeoutSecReset, toggleEnableThinking, toggleDisableThinking, toggleDisableMaxToken } from "./api/dom";
+import { visionBaseUrlInput, visionApiKeyInput, visionModelInput, visionFieldsWrap, testVisionBtn, visionTestStatus } from "./vision/dom";
+import { appearanceForm, appearanceSaveStatus, runtimeSyncSelect, runtimeSyncNote, windowCornerRadiusInput, windowCornerRadiusVal, petAlwaysOnTopInput, petVisibleInput, petZoomInput, petZoomVal, chatLineHeightInput, chatLineHeightVal, assistantBubbleEnabledInput, chatParaSpacingInput, chatParaSpacingVal, launchAtLoginInput, uiFontCurrent, uiFontImportButton, uiFontResetButton, uiIconSelect, screenshotHotkeyInput, openChromeGpu, disableGpuInput, sidebarVisibleInput, tasksVisibleInput } from "./appearance/dom";
+import { generalForm, generalSaveStatus, languageSelect, defaultChatModeSelect, segmentedOutputSelect, mobileMessageSegmentationSelect, proactiveChatSelect, proactiveDeliveryRow, proactiveDeliverySelect, chatSocialContextEnabledInput, citaEnabledInput, citaEngineSelect, clearChatHistoryBtn, customStyleSamplingBtn, customStylePromptBtn } from "./general/dom";
+import { minBtn, closeBtn, preferencesForm, sectionTitle, sectionHint, placeholderPanel, cyrenePanel, disclaimerPanel, pluginsPanel, placeholderIcon, placeholderTitle, placeholderCopy, saveStatus, runtimeSaveStatus, preferencesSaveStatus, cyreneSaveStatus, openStickerManagerBtn, addStickerBtn } from "./shared/shell";
+import { pluginAddBtn, neteaseDetailView, permissionBlocksWrap, permissionNote, lifeToggle, lifeCard, lifeBody } from "./plugins/dom";
+import { preferencesState } from "./preferences/state";
+import { stickerEnabledInput, stickerSizeSelect, stickerThresholdInput, stickerThresholdVal, stickerAddOverlay, stickerAddPickBtn, stickerAddFileName, stickerAddId, stickerAddDesc, stickerAddPhrases, stickerAddError, stickerAddConfirm, stickerAddCancel } from "./preferences/dom";
+import { diversityDriverOf, diversityValueOf } from "./preferences/style-utils";
+import { pluginsState } from "./plugins/state";
+import type {
+  GeneralSettings,
+  MemoryPanelApi,
+  MemoryPanelPayload,
+  ModelPreset,
+  ModelSettings,
+  ProviderProfile,
+  SettingsApi,
+  UserApi,
+} from "./shared/types";
+import { MODEL_PRESETS } from "./api/presets";
+import { showModal, showHtmlModal, showInputModal } from "./shared/modal";
+import {
+  setSaveStatus, setCyreneSaveStatus, setPreferencesSaveStatus, setAppearanceSaveStatus,
+  setGeneralSaveStatus, setTimeoutSaveStatus, setRuntimeSaveStatus,
+} from "./shared/save-status";
+import { renderEmptyState, renderInfoList } from "./shared/render";
+import { shallowEqual, safeGet } from "./shared/utils";
+import {
+  loadMemoryPanel,
+  enterL0EditMode, exitL0EditMode, saveL0, cancelL0Edit,
+  enterL1EditMode, exitL1EditMode, saveL1, cancelL1Edit,
+  renderImportedDocs,
+} from "./memory/panel";
+import { initObsidianVaultUI } from "./memory/obsidian-vault-ui";
+import {
+  setSchedulerStatus, renderSchedulerTools, renderSchedulerList,
+  loadSchedulerPanel, openSchedulerEditor, closeSchedulerEditor,
+  updateSchedulerConditionalFields, collectSchedule, collectAllowedToolIds,
+  saveSchedulerTask, toggleSchedulerTask, fireSchedulerTask,
+  deleteSchedulerTask, toggleSchedulerHistory,
+} from "./scheduler/panel";
+import { loadMusicPanel, disposeMusicPanel, getMusicApi } from "./music/panel";
+import { loadChannelsPanel } from "./channels/panel";
+import { renderProactiveDeliveryAvailability } from "./channels/panel";
+import "./asr/panel";  // 副作用导入：执行事件绑定 + 初始加载
+import "./email/panel";  // 副作用导入：执行事件绑定 + 初始加载
+import "./search/panel";  // 副作用导入：执行事件绑定 + 初始加载
+import { saveTimeoutSettings } from "./timeout/panel";  // saveTimeoutSettings 被 API 表单处理器调用
+import { DEFAULT_TIMEOUT_SETTINGS, type TimeoutSettings } from "../../shared/timeout-types";  // mock + API 表单校验用
+import "./user/panel";  // 副作用导入：执行事件绑定 + 初始加载
+import "./plugins/panel";  // 副作用导入：执行事件绑定 + 初始加载
+import "./plugins/permission";  // 副作用导入：权限档位 UI + 风险确认弹窗
+import "./tts/panel";  // 副作用导入：TTS 配置加载 + 引擎切换 + 测试发音 + 音色复刻
+import "./rag/panel";  // 副作用导入：RAG 模型切换 + Embedding 下载/删除 + Reranker 模式
+import "./gamebot/panel";  // 副作用导入：游戏代肝插件卡（VLM 配置 + 配方 + 进度日志）
+import "./preferences/panel";  // 副作用导入：截图热键捕获 + 表情包列表/添加/删除
+import "./mcp/panel";  // 副作用导入：MCP Server 添加/删除/启停 + 自定义端点接入说明
+import "./tokens/panel";  // 副作用导入：Token 用量图表 + 时间范围切换
+import { renderSkills } from "./skills/panel";  // renderSkills 在切换到 skills 标签时按需调用
 
 // Inline modal (to avoid Vite tree-shaking)
-let _cyModalOverlay: HTMLElement | null = null;
-function _initModalOverlay(): void {
-  if (_cyModalOverlay) return;
-  _cyModalOverlay = document.createElement("div");
-  _cyModalOverlay.id = "cy-modal-overlay";
-  _cyModalOverlay.className = "cy-modal-overlay is-hidden";
-  _cyModalOverlay.innerHTML = [
-    '<div class="cy-modal" role="alertdialog" aria-modal="true">',
-    '  <div class="cy-modal__head">',
-    '    <span class="cy-modal__icon" id="cy-modal-icon">📌</span>',
-    '    <h3 class="cy-modal__title" id="cy-modal-title">提示</h3>',
-    '  </div>',
-    '  <hr class="cy-modal__divider">',
-    '  <p class="cy-modal__body" id="cy-modal-message">確認執行此操作嗎？</p>',
-    '  <div class="cy-modal__actions">',
-    '    <button type="button" class="ghost-btn" id="cy-modal-cancel">取消</button>',
-    '    <button type="button" class="btn-primary" id="cy-modal-confirm">確定</button>',
-    '  </div>',
-    '</div>',
-  ].join("\n");
-  document.body.appendChild(_cyModalOverlay);
-}
 
-function showModal (options: { title: string; message: string; icon?: string; confirmText?: string; cancelText?: string }): Promise<boolean> {
-  _initModalOverlay();
-  if (!_cyModalOverlay) return Promise.resolve(false);
-  var iconEl = _cyModalOverlay.querySelector("#cy-modal-icon") as HTMLElement;
-  var titleEl = _cyModalOverlay.querySelector("#cy-modal-title") as HTMLElement;
-  var msgEl = _cyModalOverlay.querySelector("#cy-modal-message") as HTMLElement;
-  var cancelBtn = _cyModalOverlay.querySelector("#cy-modal-cancel") as HTMLButtonElement;
-  var confirmBtn = _cyModalOverlay.querySelector("#cy-modal-confirm") as HTMLButtonElement;
-  iconEl.innerHTML = options.icon || "📌";
-  titleEl.textContent = options.title;
-  msgEl.textContent = options.message;
-  cancelBtn.textContent = options.cancelText || "取消";
-  confirmBtn.textContent = options.confirmText || "確定";
-  _cyModalOverlay.classList.remove("is-hidden");
-  return new Promise(function (resolve) {
-    var cleanup = function (result: boolean) {
-      _cyModalOverlay?.classList.add("is-hidden");
-      cancelBtn.removeEventListener("click", onCancel);
-      confirmBtn.removeEventListener("click", onConfirm);
-      resolve(result);
-    };
-    var onCancel = function () { cleanup(false); };
-    var onConfirm = function () { cleanup(true); };
-    cancelBtn.addEventListener("click", onCancel);
-    confirmBtn.addEventListener("click", onConfirm);
-  });
-}
 
 /**
  * 富文本模态框（基于 cy-modal 样式但使用独立 overlay，避免与 showModal 冲突）。
  * 用于"音色快速复刻"这种需要展示多组说明（规格 / 费用 / 过期规则）的场景。
  * 调用方负责传入安全的 HTML（项目内固定字符串）；若内容来自用户/网络必须先 escapeHtml。
  */
-let _cyHtmlModalOverlay: HTMLElement | null = null;
-function _initHtmlModalOverlay(): void {
-  if (_cyHtmlModalOverlay) return;
-  _cyHtmlModalOverlay = document.createElement("div");
-  _cyHtmlModalOverlay.id = "cy-html-modal-overlay";
-  _cyHtmlModalOverlay.className = "cy-modal-overlay is-hidden";
-  _cyHtmlModalOverlay.innerHTML = [
-    '<div class="cy-modal cy-html-modal" role="dialog" aria-modal="true">',
-    '  <div class="cy-modal__head">',
-    '    <span class="cy-modal__icon" id="cy-html-modal-icon">📌</span>',
-    '    <h3 class="cy-modal__title" id="cy-html-modal-title">说明</h3>',
-    '  </div>',
-    '  <hr class="cy-modal__divider">',
-    '  <div class="cy-html-modal__body" id="cy-html-modal-body"></div>',
-    '  <div class="cy-modal__actions">',
-    '    <button type="button" class="btn-primary" id="cy-html-modal-confirm">知道了</button>',
-    '  </div>',
-    '</div>',
-  ].join("\n");
-  document.body.appendChild(_cyHtmlModalOverlay);
-}
 
-function showHtmlModal(options: { title: string; htmlBody: string; icon?: string; confirmText?: string }): Promise<void> {
-  _initHtmlModalOverlay();
-  if (!_cyHtmlModalOverlay) return Promise.resolve();
-  const iconEl = _cyHtmlModalOverlay.querySelector("#cy-html-modal-icon") as HTMLElement;
-  const titleEl = _cyHtmlModalOverlay.querySelector("#cy-html-modal-title") as HTMLElement;
-  const bodyEl = _cyHtmlModalOverlay.querySelector("#cy-html-modal-body") as HTMLElement;
-  const confirmBtn = _cyHtmlModalOverlay.querySelector("#cy-html-modal-confirm") as HTMLButtonElement;
-  iconEl.innerHTML = options.icon || "📌";
-  titleEl.textContent = options.title;
-  bodyEl.innerHTML = options.htmlBody;
-  confirmBtn.textContent = options.confirmText || "知道了";
-  _cyHtmlModalOverlay.classList.remove("is-hidden");
-  return new Promise((resolve) => {
-    const cleanup = () => {
-      _cyHtmlModalOverlay?.classList.add("is-hidden");
-      confirmBtn.removeEventListener("click", onConfirm);
-      resolve();
-    };
-    const onConfirm = () => cleanup();
-    confirmBtn.addEventListener("click", onConfirm);
-  });
-}
 
 // escapeHtml() 已定义在文件下方（settings.ts:3738），此处复用即可。
 
 // Inline input modal (Electron 禁用了 window.prompt，所以自己实现)
-let _cyInputOverlay: HTMLElement | null = null;
-function _initInputOverlay(): void {
-  if (_cyInputOverlay) return;
-  _cyInputOverlay = document.createElement("div");
-  _cyInputOverlay.id = "cy-input-overlay";
-  _cyInputOverlay.className = "cy-modal-overlay is-hidden";
-  _cyInputOverlay.innerHTML = [
-    '<div class="cy-modal" role="dialog" aria-modal="true" style="width:min(420px,90vw);">',
-    '  <div class="cy-modal__head">',
-    '    <span class="cy-modal__icon" id="cy-input-icon"><svg width="24" height="24" viewBox="0 0 48 48" fill="none" aria-hidden="true" style="display:inline;vertical-align:-2px"><path d="M5.32497 43.4996L13.81 43.4998L44.9227 12.3871L36.4374 3.90186L5.32471 35.0146L5.32497 43.4996Z" fill="none" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/><path d="M27.9521 12.3872L36.4374 20.8725" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></svg></span>',
-    '    <h3 class="cy-modal__title" id="cy-input-title">请输入</h3>',
-    '  </div>',
-    '  <hr class="cy-modal__divider">',
-    '  <p class="cy-modal__body" id="cy-input-message"></p>',
-    '  <input type="text" id="cy-input-field" autocomplete="off" spellcheck="false"',
-    '    style="width:100%;box-sizing:border-box;padding:8px 10px;border-radius:8px;border:1px solid rgba(255,255,255,0.18);background:rgba(0,0,0,0.32);color:var(--rb-text-strong,#fff);font-family:inherit;font-size:13px;outline:none;margin-bottom:12px;" />',
-    '  <div class="cy-modal__actions">',
-    '    <button type="button" class="ghost-btn" id="cy-input-cancel">取消</button>',
-    '    <button type="button" class="btn-primary" id="cy-input-confirm">確定</button>',
-    '  </div>',
-    '</div>',
-  ].join("\n");
-  document.body.appendChild(_cyInputOverlay);
-}
-
-function showInputModal(options: {
-  title: string;
-  message: string;
-  placeholder?: string;
-  defaultValue?: string;
-  icon?: string;
-  confirmText?: string;
-  cancelText?: string;
-}): Promise<string | null> {
-  _initInputOverlay();
-  if (!_cyInputOverlay) return Promise.resolve(null);
-  const iconEl = _cyInputOverlay.querySelector("#cy-input-icon") as HTMLElement;
-  const titleEl = _cyInputOverlay.querySelector("#cy-input-title") as HTMLElement;
-  const msgEl = _cyInputOverlay.querySelector("#cy-input-message") as HTMLElement;
-  const inputEl = _cyInputOverlay.querySelector("#cy-input-field") as HTMLInputElement;
-  const cancelBtn = _cyInputOverlay.querySelector("#cy-input-cancel") as HTMLButtonElement;
-  const confirmBtn = _cyInputOverlay.querySelector("#cy-input-confirm") as HTMLButtonElement;
-  iconEl.textContent = options.icon || `<svg width="22" height="22" viewBox="0 0 48 48" fill="none" aria-hidden="true" style="display:inline;vertical-align:-2px"><path d="M5.32497 43.4996L13.81 43.4998L44.9227 12.3871L36.4374 3.90186L5.32471 35.0146L5.32497 43.4996Z" fill="none" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/><path d="M27.9521 12.3872L36.4374 20.8725" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
-  titleEl.textContent = options.title;
-  msgEl.textContent = options.message;
-  inputEl.value = options.defaultValue || "";
-  inputEl.placeholder = options.placeholder || "";
-  cancelBtn.textContent = options.cancelText || "取消";
-  confirmBtn.textContent = options.confirmText || "確定";
-  _cyInputOverlay.classList.remove("is-hidden");
-  setTimeout(() => inputEl.focus(), 30);
-  return new Promise((resolve) => {
-    const cleanup = (result: string | null) => {
-      _cyInputOverlay?.classList.add("is-hidden");
-      cancelBtn.removeEventListener("click", onCancel);
-      confirmBtn.removeEventListener("click", onConfirm);
-      inputEl.removeEventListener("keydown", onKey);
-      resolve(result);
-    };
-    const onCancel = () => cleanup(null);
-    const onConfirm = () => cleanup(inputEl.value);
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Enter") {
-        if (e.isComposing) return;
-        e.preventDefault();
-        onConfirm();
-      }
-      else if (e.key === "Escape") { e.preventDefault(); onCancel(); }
-    };
-    cancelBtn.addEventListener("click", onCancel);
-    confirmBtn.addEventListener("click", onConfirm);
-    inputEl.addEventListener("keydown", onKey);
-  });
-}
 
 
-interface ProviderProfile {
-  baseUrl: string;
-  model: string;
-  apiKey: string;
-  displayName?: string;
-  /**
-   * 用户在 settings 显式指定的 transport；"auto" = 按 baseUrl 启发式 + capabilities fallback。
-   * main 进程的 resolveTransport() 负责把 "auto" 解析为具体 transport。
-   */
-  explicitTransport?: "openai" | "anthropic" | "auto";
-  reasoning?: ReasoningPreference;
-}
 
-interface ModelSettings {
-  mode: "auto" | "manual";
-  provider: string;
-  // 用户给模型起的自定义昵称，留空时用厂商 shortName。状态栏"正在喂养"显示它。
-  displayName?: string;
-  baseUrl: string;
-  model: string;
-  apiKey: string;
-  /**
-   * 当前厂商的 explicitTransport 镜像（顶层字段是 main 进程 perProvider[currentProvider] 的视图）。
-   * UI 改动 transport-select 时，saveConfig 把这个值带给 main 进程折叠回 perProvider。
-   */
-  explicitTransport?: "openai" | "anthropic" | "auto";
-  /** 当前厂商 reasoning 偏好的顶层镜像。 */
-  reasoning?: ReasoningPreference;
-  // 按厂商缓存：切回该厂商时，从这里恢复 baseUrl / model / apiKey
-  perProvider?: Record<string, ProviderProfile>;
-  runtimeSync: "off" | "local" | "llm";
-  stickerEnabled: boolean;
-  stickerSize: "small" | "standard" | "large";
-  stickerSimilarityThreshold: number;
-  vision?: {
-    baseUrl: string;
-    apiKey: string;
-    model: string;
-  };
-  multimodal: boolean;
-}
-
-type ScheduleConfig =
-  | { kind: "once"; runAt: string }
-  | { kind: "daily"; timeOfDay: string }
-  | { kind: "weekly"; dayOfWeek: 0 | 1 | 2 | 3 | 4 | 5 | 6; timeOfDay: string }
-  | { kind: "interval"; every: number; unit: "minutes" | "hours" };
-
-type SchedulerToolMode = "all-enabled" | "allow-list";
-
-interface ScheduledTask {
-  id: string;
-  title: string;
-  prompt: string;
-  enabled: boolean;
-  schedule: ScheduleConfig;
-  nextFireAt: string | null;
-  lastFiredAt?: string;
-  toolMode: SchedulerToolMode;
-  allowedToolIds: string[];
-  managedBy?: "daily-ritual";
-  ritualId?: "morning" | "afternoon" | "evening";
-  createdAt: string;
-  updatedAt: string;
-}
-
-interface ScheduledTaskHistoryEntry {
-  id: string;
-  taskId: string;
-  taskTitle: string;
-  firedAt: string;
-  finishedAt?: string;
-  durationMs?: number;
-  status: "running" | "success" | "failed" | "skipped";
-  reason?: string;
-  outputPreview?: string;
-  errorMessage?: string;
-  effectiveToolIds: string[];
-}
-
-interface SchedulerToolInfo {
-  id: string;
-  name: string;
-  description: string;
-  enabled: boolean;
-  risk: string;
-}
-
-interface SchedulerResult<T> {
-  ok: boolean;
-  value?: T;
-  error?: string;
-  reason?: string;
-}
-
-interface SchedulerApi {
-  list: () => Promise<SchedulerResult<ScheduledTask[]>>;
-  add: (input: unknown) => Promise<SchedulerResult<ScheduledTask>>;
-  update: (id: string, patch: unknown) => Promise<SchedulerResult<ScheduledTask>>;
-  delete: (id: string) => Promise<SchedulerResult<boolean>>;
-  toggle: (id: string, enabled: boolean) => Promise<SchedulerResult<ScheduledTask>>;
-  fireNow: (id: string) => Promise<SchedulerResult<boolean>>;
-  getHistory: (taskId: string, limit?: number) => Promise<SchedulerResult<ScheduledTaskHistoryEntry[]>>;
-  getTools: () => Promise<SchedulerResult<SchedulerToolInfo[]>>;
-}
-
-interface ModelPreset {
-  providerName: string;
-  // 厂商短名（去括号后缀），用于状态栏"正在喂养"显示和昵称默认值。
-  // 如 "MiniMax（稀宇科技）" → shortName "MiniMax"。
-  shortName: string;
-  baseUrl: string;
-  mainModels: string[];
-  iconUrl: string;
-  // 厂商官网链接，显示在预设下拉框旁边，方便用户直接跳转注册/查看文档。
-  websiteUrl?: string;
-  // 视觉模型的 OpenAI 兼容 baseUrl。主模型与视觉模型入口不同时使用。
-  visionBaseUrl?: string;
-  // 该厂商默认主模型是否支持视觉。true 时设置页加载默认勾选"同步主模型"，
-  // 多模态用户开箱即用。与 capabilities.ts 的 supportsVision 镜像，需手动同步。
-  supportsVision?: boolean;
-  // 标记为 true 时，该项在 <select> 里显示但不可选；
-  // 用于"已列出但 vendor adapter 还没接好"的情况，避免用户选到后调用直接报错。
-  disabled?: boolean;
-  // 视觉模型与主模型本质不同（如 MiMo 主 mimo-v2.5-pro、视觉 mimo-v2.5），
-  // 强制独立配置，无法"与主聊天模型相同"。与 supportsVision 正交。
-  independentVision?: boolean;
-  // 独立视觉模型的默认值（applyPreset 在没有保存值时使用）。
-  defaultVisionModel?: string;
-  // 独立视觉模型的候选列表（用于视觉模型输入框的 datalist）。
-  visionModels?: string[];
-  // 自定义端点的云端/本地变体共用一张可见卡片，但分别持久化配置。
-  customEndpointMode?: CustomEndpointMode;
-  hiddenInPresetList?: boolean;
-}
-
-interface GeneralSettings {
-  citaEnabled: boolean;
-  citaSemanticEngine: "remote" | "local";
-  chatSocialContextEnabled: boolean;
-  musicEnabled: boolean;
-  musicVolume: number;
-  soundEnabled: boolean;
-  soundVolume: number;
-  petAlwaysOnTop: boolean;
-  petVisible: boolean;
-  petChatInputEnabled: boolean;
-  petZoom: number;
-  sidebarVisible: boolean;
-  tasksVisible: boolean;
-  launchAtLogin: boolean;
-  language: "zh-CN";
-  uiTheme: UiTheme;
-  uiFont: UiFont;
-  uiIcon: UiIcon;
-  defaultChatMode: DefaultChatMode;
-  currentStyleId?: string;
-  customStyle: CustomStyleConfig;
-  segmentedOutputMode: SegmentedOutputMode;
-  mobileMessageSegmentation: MobileMessageSegmentationMode;
-  proactiveChatMode: ProactiveChatMode;
-  proactiveDeliveryTarget: ProactiveDeliveryTarget;
-  screenshotHotkey?: string;
-}
-
-interface UserApi {
-  getProfile: () => Promise<{ nickname: string; callPreference: string; birthday: string; timezone: string; avatarPath: string; defaultCity: string; gender: string }>;
-  saveProfile: (profile: Record<string, unknown>) => Promise<unknown>;
-  uploadAvatar: () => Promise<{ avatarPath: string } | null>;
-  getAvatar: () => Promise<string | null>;
-  onAvatarChanged: (callback: () => void) => () => void;
-}
-
-interface MemoryPanelPayload {
-  l0: {
-    preferredName: string;
-    occupation: string;
-    longTermInterests: string;
-    language: string;
-    permanentNote: string;
-  };
-  l1: {
-    recentGoals: string;
-    recentPreferences: string;
-    currentProject: string;
-  };
-  l2: Array<{
-    id: string;
-    content: string;
-    triggerText: string;
-    status: "active" | "aging" | "archived" | "superseded" | "merged";
-    weight: number;
-    createdAt: number;
-    lastAccessedAt: number;
-    accessCount: number;
-    isPinned: boolean;
-    sourceConversationId: string;
-    isSummary: boolean;
-    conflictCount: number;
-    supersededBy?: string;
-    mergedInto?: string;
-    evidence: Array<{
-      id: string;
-      quoteSnippet: string;
-      contextBeforeSnippet?: string;
-      contextAfterSnippet?: string;
-      conversationId?: string;
-      createdAt: number;
-      sourceStatus: "active" | "archived" | "deleted";
-    }>;
-  }>;
-  graph: {
-    nodes: Array<{
-      id: string;
-      name: string;
-      type: "user" | "person" | "place" | "concept" | "preference" | "organization";
-      mentionCount: number;
-      firstMentionedAt: number;
-      lastMentionedAt: number;
-    }>;
-    edges: Array<{
-      id: string;
-      sourceId: string;
-      targetId: string;
-      relation: string;
-      strength: number;
-      confidence: number;
-      inferred: boolean;
-    }>;
-  };
-  importedDocs: Array<{
-    importId: string | null;
-    fileName: string;
-    chunkCount: number;
-    lastImportedAt: number;
-  }>;
-  reflections: Array<{
-    id: string;
-    title: string;
-    body: string;
-    meta: string;
-  }>;
-}
-
-interface MemoryPanelApi {
-  getData: () => Promise<MemoryPanelPayload>;
-  deleteImportedDoc: (importId: string, fileName?: string) => Promise<{ ok: boolean; deleted: number }>;
-  saveL0: (patch: Record<string, unknown>) => Promise<{ ok: boolean }>;
-  saveL1: (patch: Record<string, unknown>) => Promise<{ ok: boolean }>;
-  pinL2: (id: string, pinned: boolean) => Promise<{ ok: boolean; error?: string }>;
-  deleteL2: (id: string) => Promise<{ ok: boolean; error?: string }>;
-}
-
-interface SettingsApi {
-  minimize: () => void;
-  close: () => void;
-  getConfig: () => Promise<ModelSettings>;
-  saveConfig: (config: Partial<ModelSettings>) => Promise<ModelSettings>;
-  getGeneral: () => Promise<GeneralSettings>;
-  saveGeneral: (config: Partial<GeneralSettings>) => Promise<GeneralSettings>;
-  openCustomStylePrompt?: () => Promise<{ ok: boolean; filePath?: string; error?: string }>;
-  pickUiFont: () => Promise<string | null>;
-  importUiFont: (sourcePath: string) => Promise<UiFont>;
-  resetUiFont: () => Promise<UiFont>;
-  openSidebar: () => void;
-  closeSidebar: () => void;
-  openTasks: () => void;
-  closeTasks: () => void;
-  setPetAlwaysOnTop: (value: boolean) => void;
-  setPetVisible: (value: boolean) => void;
-  setPetZoom: (value: number) => void;
-  previewRuntimeSync: (value: "off" | "local" | "llm") => void;
-  openStickerManager: () => Promise<{ ok: boolean; error?: string }>;
-  securityGetStatus: () => Promise<{ available: boolean; backend: string; protectedCount: number; plaintextCount: number; lockedCount: number }>;
-  securityMigrate: () => Promise<{ available: boolean; backend: string; protectedCount: number; plaintextCount: number; lockedCount: number }>;
-  securityRestartApp: () => void;
-  backupGetConfig: () => Promise<{ autoEnabled: boolean; retentionDays: 7 | 30; lastAutoBackupAt?: string }>;
-  backupSaveConfig: (patch: { autoEnabled?: boolean; retentionDays?: 7 | 30 }) => Promise<{ autoEnabled: boolean; retentionDays: 7 | 30; lastAutoBackupAt?: string }>;
-  backupCreate: (categories: string[]) => Promise<BackupSummary | null>;
-  backupPickInspect: () => Promise<BackupSummary | null>;
-  backupRestore: (payload: { filePath: string; categories: string[] }) => Promise<{ restoredFiles: number; safetyBackupPath: string }>;
-  stickerPickFile?: () => Promise<string | null>;
-  stickerAdd?: (payload: { sourcePath: string; id: string; description: string; phrases: string[] }) => Promise<unknown>;
-  getEmbeddingStatus?: () => Promise<Record<string, { installed: boolean; sizeBytes: number }>>;
-  downloadEmbeddingModel?: (model: string, mirror: string) => Promise<{ ok: boolean; error?: string }>;
-  deleteEmbeddingModel?: (model: string) => Promise<{ ok: boolean; error?: string }>;
-  embeddingSetModel?: (model: string) => Promise<{ ok: boolean; clearedEntries?: number; error?: string }>;
-  rerankerSetMode?: (mode: string) => Promise<boolean>;
-  setToolEnabled?: (id: string, enabled: boolean) => Promise<{ ok: boolean; error?: string }>;
-  getToolEnabled?: () => Promise<Record<string, boolean>>;
-  listSkills?: () => Promise<Array<{ id: string; name: string; description: string; tools: string[]; enabled: boolean; source: string; version?: string; references: string[] }>>;
-  setSkillEnabled?: (id: string, enabled: boolean) => Promise<{ ok: boolean; error?: string }>;
-  addMcpServer?: (config: unknown) => Promise<{ ok: boolean; toolIds?: string[]; error?: string }>;
-  removeMcpServer?: (serverId: string) => Promise<{ ok: boolean; error?: string }>;
-  listMcpServers?: () => Promise<Array<{ id: string; name: string; connected: boolean; toolCount: number; toolIds: string[] }>>;
-  getPermissionLevel?: () => Promise<{ level: "read-only" | "scoped" | "per-action" | "full" }>;
-  setPermissionLevel?: (level: string) => Promise<{ ok: boolean; level?: string; error?: string }>;
-  testConnection?: (config: { provider: string; baseUrl: string; model: string; apiKey: string; explicitTransport?: "openai" | "anthropic" | "auto"; reasoning?: ReasoningPreference }) => Promise<{ ok: boolean; latency: number; sample?: string; error?: string }>;
-  testVision?: (config: { baseUrl: string; apiKey: string; model: string }) => Promise<{ ok: boolean; latency: number; sample?: string; error?: string }>;
-  // main → settings：要求切到指定标签（窗口已打开时由 main 发这个事件）
-  onSwitchSection?: (callback: (section: string) => void) => (() => void) | void;
-  channelsGetStatus: () => Promise<Record<string, { phase?: string; message?: string }>>;
-  onChannelsStatusChanged: (callback: (status: unknown) => void) => (() => void) | void;
-  beginScreenshotHotkeyCapture: () => Promise<boolean>;
-  endScreenshotHotkeyCapture: () => Promise<boolean>;
-}
 
 declare global {
   interface Window {
@@ -560,120 +170,6 @@ declare global {
 const MIMO_ICON_URL =
   "https://raw.githubusercontent.com/lobehub/lobe-icons/refs/heads/master/packages/static-png/light/xiaomimimo.png";
 
-const MODEL_PRESETS: ModelPreset[] = [
-  // 当前已适配 9 家：MiniMax / DeepSeek / 豆包 / 智谱 GLM / Kimi / Qwen / ChatGPT / Claude / MiMo
-  // 顺序按使用频率 + 适配优先级；未在此清单内的厂商已硬删，需要时再补回。
-  {
-    providerName: "MiniMax（稀宇科技）",
-    shortName: "MiniMax",
-    baseUrl: "https://api.minimaxi.com/v1",
-    mainModels: ["MiniMax-M3", "MiniMax-M2.7", "MiniMax-M2.5"],
-    iconUrl: "../icons/providers/minimax.svg",
-    websiteUrl: "https://platform.minimaxi.com/",
-    // 主模型和视觉模型默认都走 OpenAI 兼容入口。
-    visionBaseUrl: "https://api.minimaxi.com/v1",
-    supportsVision: true,
-  },
-  {
-    // DeepSeek：v1 vendor adapter 不为它做协议层强制，仅作为 OpenAI 兼容厂商列出。
-    // 已确认（来自官方定价文档）：支持 Tool Calls / JSON Output；后端原生缓存（命中后输入价跌至 1/50~1/120）。
-    // 缓存能力等 v2 vendor adapter 接入时再利用，v1 不动。
-    providerName: "DeepSeek（深度求索）",
-    shortName: "DeepSeek",
-    baseUrl: "https://api.deepseek.com",
-    mainModels: ["deepseek-v4-pro", "deepseek-v4-flash"],
-    iconUrl: "../icons/providers/deepseek.svg",
-    websiteUrl: "https://platform.deepseek.com/",
-  },
-  {
-    providerName: "豆包（火山方舟）",
-    shortName: "豆包",
-    baseUrl: "https://ark.cn-beijing.volces.com/api/v3",
-    mainModels: [
-      "doubao-seed-2-1-pro-260628",
-      "doubao-seed-2-0-pro-260215",
-      "doubao-seed-2-0-lite-260428",
-      "doubao-seed-2-0-mini-260428",
-    ],
-    iconUrl: "../icons/providers/volcengine.svg",
-    websiteUrl: "https://www.volcengine.com/product/ark",
-    supportsVision: true,
-  },
-  {
-    providerName: "GLM（智谱）",
-    shortName: "GLM",
-    baseUrl: "https://open.bigmodel.cn/api/paas/v4",
-    mainModels: ["glm-5.1", "glm-5-turbo", "glm-4.7"],
-    iconUrl: "../icons/providers/glm.svg",
-    websiteUrl: "https://open.bigmodel.cn/",
-  },
-  {
-    providerName: "Kimi（月之暗面）",
-    shortName: "Kimi",
-    baseUrl: "https://api.moonshot.cn/v1",
-    mainModels: ["kimi-k2.6", "kimi-k2.5", "kimi-k2-thinking"],
-    iconUrl: "../icons/providers/kimi.svg",
-    websiteUrl: "https://platform.moonshot.cn/",
-    // k2.6 / k2.7-code 支持 image_url 多模态
-    supportsVision: true,
-  },
-  {
-    providerName: "Qwen（通义千问）",
-    shortName: "Qwen",
-    baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
-    mainModels: ["qwen-max", "qwen-plus", "qwen-turbo"],
-    iconUrl: "../icons/providers/qwen.svg",
-    websiteUrl: "https://bailian.console.aliyun.com/",
-  },
-  {
-    providerName: "ChatGPT（OpenAI）",
-    shortName: "ChatGPT",
-    baseUrl: "https://api.openai.com/v1",
-    // 官方入口只推荐已纳入结构化输出 Profile 的型号；代理与自定义型号走“自定义端点”。
-    mainModels: ["gpt-5.6"],
-    iconUrl: "../icons/providers/openai.svg",
-    websiteUrl: "https://platform.openai.com/",
-  },
-  {
-    providerName: "Claude（Anthropic）",
-    shortName: "Claude",
-    baseUrl: "https://api.anthropic.com/v1",
-    mainModels: ["claude-fable-5", "claude-opus-4-8", "claude-sonnet-4-6"],
-    iconUrl: "../icons/providers/claude.svg",
-    websiteUrl: "https://console.anthropic.com/",
-  },
-  {
-    providerName: "MiMo（小米）",
-    shortName: "MiMo",
-    baseUrl: "https://api.xiaomimimo.com/v1",
-    mainModels: ["mimo-v2.5-pro"],
-    iconUrl: "../icons/providers/xiaomimimo.svg",
-    websiteUrl: "https://mimo.mi.com/",
-    visionBaseUrl: "https://api.xiaomimimo.com/v1",
-    supportsVision: true,
-    // 主模型 mimo-v2.5-pro 不适合做视觉（视觉模型是 mimo-v2.5），强制独立配置
-    independentVision: true,
-    defaultVisionModel: "mimo-v2.5",
-    visionModels: ["mimo-v2.5"],
-  },
-  {
-    providerName: CUSTOM_ENDPOINT_PROVIDERS.cloud,
-    shortName: "自定义",
-    baseUrl: "",
-    mainModels: [],
-    iconUrl: "../icons/providers/custom-endpoint.svg",
-    customEndpointMode: "cloud",
-  },
-  {
-    providerName: CUSTOM_ENDPOINT_PROVIDERS.local,
-    shortName: "本地模型",
-    baseUrl: "",
-    mainModels: [],
-    iconUrl: "../icons/providers/custom-endpoint.svg",
-    customEndpointMode: "local",
-    hiddenInPresetList: true,
-  },
-];
 
 if (!window.settings) {
   (window as unknown as { settings: SettingsApi }).settings = {
@@ -689,22 +185,29 @@ if (!window.settings) {
         runtimeSync: "off",
         stickerEnabled: true,
         stickerSize: "standard",
+        chatRequestTimeoutSec: 300,
+        maxIterations: 12,
+        maxReplans: 2,
+        maxRefresh: 1,
+        perCallTimeoutSec: 75,
+        citaRepairBudgetSec: 8,
+        actionGateRepairBudgetSec: 10,
       }),
     saveConfig: (c) => Promise.resolve(c as ModelSettings),
     getGeneral: () => Promise.resolve({
-      musicEnabled: false,
-      musicVolume: 60,
-      soundEnabled: true,
-      soundVolume: 70,
       petAlwaysOnTop: true,
       petVisible: true,
       petZoom: 1,
+      chatLineHeight: 1.75,
+      assistantBubbleEnabled: true,
+      chatParaSpacing: 0.5,
       sidebarVisible: true,
       tasksVisible: true,
       launchAtLogin: false,
       language: "zh-CN",
-      uiTheme: "classic",
-      defaultChatMode: "work",
+      uiTheme: "pearl-white",
+      windowCornerRadius: DEFAULT_WINDOW_CORNER_RADIUS,
+      defaultChatMode: "chat",
       currentStyleId: "default",
       customStyle: DEFAULT_CUSTOM_STYLE,
       segmentedOutputMode: "off",
@@ -716,24 +219,19 @@ if (!window.settings) {
     }),
     saveGeneral: (c) => Promise.resolve(c as GeneralSettings),
     openCustomStylePrompt: async () => ({ ok: false, error: "settings api unavailable" }),
+    channelsGetStatus: () => Promise.resolve({}),
+    onChannelsStatusChanged: () => () => {},
     beginScreenshotHotkeyCapture: () => Promise.resolve(true),
     endScreenshotHotkeyCapture: () => Promise.resolve(true),
     openSidebar: () => {},
     closeSidebar: () => {},
     openTasks: () => {},
     closeTasks: () => {},
+    openChromeGpu: () => {},
     setPetAlwaysOnTop: () => {},
     setPetVisible: () => {},
     setPetZoom: () => {},
     openStickerManager: async () => ({ ok: false, error: "settings api unavailable" }),
-    securityGetStatus: async () => ({ available: false, backend: "不可用", protectedCount: 0, plaintextCount: 0, lockedCount: 0 }),
-    securityMigrate: async () => ({ available: false, backend: "不可用", protectedCount: 0, plaintextCount: 0, lockedCount: 0 }),
-    securityRestartApp: () => {},
-    backupGetConfig: async () => ({ autoEnabled: false, retentionDays: 7 }),
-    backupSaveConfig: async (patch) => ({ autoEnabled: patch.autoEnabled ?? false, retentionDays: patch.retentionDays ?? 7 }),
-    backupCreate: async () => null,
-    backupPickInspect: async () => null,
-    backupRestore: async () => ({ restoredFiles: 0, safetyBackupPath: "" }),
     stickerPickFile: async () => null,
     stickerAdd: async () => { throw new Error("settings api unavailable"); },
     setToolEnabled: async () => ({ ok: false, error: "settings api unavailable" }),
@@ -743,60 +241,8 @@ if (!window.settings) {
     addMcpServer: async () => ({ ok: false, error: "settings api unavailable" }),
     removeMcpServer: async () => ({ ok: false, error: "settings api unavailable" }),
     listMcpServers: async () => [],
-    channelsDiscordGetProfile: async () => ({ connected: false, guildCount: 0, guilds: [], voiceActive: false }),
-    channelsDiscordGetMusicState: async () => ({ active: false, paused: false, current: null, queue: [], volume: 100, repeat: "off", shuffle: false, autoplay: false, elapsed: 0 }),
-    channelsDiscordGetMusicHistory: async () => [],
-    channelsDiscordGetMusicFavorites: async () => [],
-    channelsDiscordControlMusic: async () => ({ ok: false, message: "settings api unavailable" }),
-    channelsDiscordUpdateProfile: async () => ({ ok: false, error: "settings api unavailable" }),
-    channelsDiscordPickAvatar: async () => null,
-    channelsDiscordPickBanner: async () => null,
-    channelsSpotifyAuthorize: async () => ({ ok: false, error: "settings api unavailable" }),
-    channelsSpotifyGetStatus: async () => ({ configured: false, connected: false, devices: [] }),
-    channelsSpotifyControl: async () => ({ ok: false, message: "settings api unavailable" }),
-    channelsSpotifyDisconnect: async () => ({ ok: false, error: "settings api unavailable" }),
-    channelsBilibiliConnect: async () => ({ ok: false, error: "settings api unavailable" }),
-    channelsBilibiliGetStatus: async () => ({ connected: false, browser: "Opera GX", profilePath: "" }),
-    channelsBilibiliDisconnect: async () => ({ ok: false, error: "settings api unavailable" }),
-    channelsGetConfig: async () => ({
-      wechat: { enabled: false },
-      feishu: { enabled: false },
-      discord: { enabled: false, requireMention: true, voiceEnabled: true },
-      spotify: { enabled: false },
-      bilibili: { enabled: false, browser: "opera-gx" },
-      rateLimitPerUser: 10,
-      rateLimitPerChannel: 100,
-      ttsEnabled: true,
-      stickerEnabled: true,
-      mirrorToDesktop: true,
-      toolSandbox: "safe-only",
-    }),
-    channelsSaveConfig: async () => ({}),
-    channelsList: async () => [],
-    channelsGetStatus: async () => ({
-      wechat: { phase: "offline", message: "預覽模式" },
-      feishu: { phase: "offline", message: "預覽模式" },
-      discord: { phase: "offline", message: "預覽模式" },
-    }),
-    channelsRestart: async () => ({ ok: false, error: "settings api unavailable" }),
-    channelsWechatInstall: async () => ({ ok: false, error: "settings api unavailable" }),
-    channelsWechatLoginStart: async () => ({ ok: false, error: "settings api unavailable" }),
-    channelsWechatLoginCancel: async () => ({ ok: false, error: "settings api unavailable" }),
-    channelsWechatPairingList: async () => [],
-    channelsWechatPairingApprove: async () => ({ ok: false, error: "settings api unavailable" }),
-    channelsWechatLogout: async () => ({ ok: false, error: "settings api unavailable" }),
-    channelsWechatRuntimeDetect: async () => ({ available: false }),
-    channelsWechatRuntimeInstall: async () => ({ ok: false, error: "settings api unavailable" }),
-    channelsWechatRuntimeUpdate: async () => ({ ok: false, error: "settings api unavailable" }),
-    channelsFeishuTestConnection: async () => ({ ok: false, error: "settings api unavailable" }),
-    channelsFeishuTestWebhookReachable: async () => ({ ok: false, error: "settings api unavailable" }),
-    channelsDiscordTestConnection: async () => ({ ok: false, error: "settings api unavailable" }),
-    channelsLogGet: async () => [],
-    channelsLogClear: async () => ({}),
-    onChannelsInstallProgress: () => () => {},
-    onChannelsStatusChanged: () => () => {},
-    onChannelsWechatQrcode: () => () => {},
-    onChannelsWechatLoginDone: () => () => {},
+    getTimeoutSettings: async () => DEFAULT_TIMEOUT_SETTINGS,
+    saveTimeoutSettings: async c => (c as TimeoutSettings),
   };
 }
 
@@ -813,152 +259,43 @@ if (!window.cyreneScheduler) {
   };
 }
 
-const minBtn = document.getElementById("min-btn") as HTMLButtonElement;
-const closeBtn = document.getElementById("close-btn") as HTMLButtonElement;
-const clickSound = new Audio("/audio/click.mp3");
-clickSound.preload = "auto";
-
-const bgmAudio = new Audio("/audio/bgm.mp3");
-bgmAudio.preload = "auto";
-bgmAudio.loop = true;
-const apiForm = document.getElementById("api-form") as HTMLFormElement;
-const appearanceForm = document.getElementById("appearance-form") as HTMLFormElement;
-const generalForm = document.getElementById("general-form") as HTMLFormElement;
-const preferencesForm = document.getElementById("preferences-form") as HTMLFormElement;
-const sectionTitle = document.getElementById("section-title") as HTMLElement;
-const sectionHint = document.getElementById("section-hint") as HTMLElement;
-const placeholderPanel = document.getElementById("placeholder-panel") as HTMLElement;
-const cyrenePanel = document.getElementById("cyrene-panel") as HTMLFormElement;
-const disclaimerPanel = document.getElementById("disclaimer-panel") as HTMLElement;
-const pluginsPanel = document.getElementById("plugins-panel") as HTMLElement;
 document.querySelectorAll<HTMLImageElement>("[data-music-logo]").forEach((image) => {
   image.src = neteaseLogoUrl;
 });
-const placeholderIcon = document.getElementById("placeholder-icon") as HTMLElement;
-const placeholderTitle = document.getElementById("placeholder-title") as HTMLElement;
-const placeholderCopy = document.getElementById("placeholder-copy") as HTMLElement;
-const saveStatus = document.getElementById("save-status") as HTMLElement;
-const appearanceSaveStatus = document.getElementById("appearance-save-status") as HTMLElement;
-const generalSaveStatus = document.getElementById("general-save-status") as HTMLElement;
-const preferencesSaveStatus = document.getElementById("preferences-save-status") as HTMLElement;
-const cyreneSaveStatus = document.getElementById("cyrene-save-status") as HTMLElement;
 
-const schedulerNewBtn = document.getElementById("scheduler-new-btn") as HTMLButtonElement | null;
-const schedulerEmpty = document.getElementById("scheduler-empty") as HTMLDivElement | null;
-const schedulerList = document.getElementById("scheduler-list") as HTMLDivElement | null;
-const schedulerEditor = document.getElementById("scheduler-editor") as HTMLDivElement | null;
-const schedulerEditorTitle = document.getElementById("scheduler-editor-title") as HTMLHeadingElement | null;
-const schedulerEditorClose = document.getElementById("scheduler-editor-close") as HTMLButtonElement | null;
-const schedulerTitleInput = document.getElementById("scheduler-title") as HTMLInputElement | null;
-const schedulerPromptInput = document.getElementById("scheduler-prompt") as HTMLTextAreaElement | null;
-const schedulerEnabledInput = document.getElementById("scheduler-enabled") as HTMLInputElement | null;
-const schedulerKindInput = document.getElementById("scheduler-kind") as HTMLSelectElement | null;
-const schedulerOnceRunAtInput = document.getElementById("scheduler-once-run-at") as HTMLInputElement | null;
-const schedulerTimeOfDayInput = document.getElementById("scheduler-time-of-day") as HTMLInputElement | null;
-const schedulerDayOfWeekInput = document.getElementById("scheduler-day-of-week") as HTMLSelectElement | null;
-const schedulerIntervalEveryInput = document.getElementById("scheduler-interval-every") as HTMLInputElement | null;
-const schedulerIntervalUnitInput = document.getElementById("scheduler-interval-unit") as HTMLSelectElement | null;
-const schedulerToolLimitInput = document.getElementById("scheduler-tool-limit") as HTMLInputElement | null;
-const schedulerToolPicker = document.getElementById("scheduler-tool-picker") as HTMLDivElement | null;
-const schedulerToolEmptyHint = document.getElementById("scheduler-tool-empty-hint") as HTMLDivElement | null;
-const schedulerSaveStatus = document.getElementById("scheduler-save-status") as HTMLDivElement | null;
-const schedulerCancelBtn = document.getElementById("scheduler-cancel-btn") as HTMLButtonElement | null;
-const schedulerSaveBtn = document.getElementById("scheduler-save-btn") as HTMLButtonElement | null;
 
-let schedulerTasks: ScheduledTask[] = [];
-let schedulerTools: SchedulerToolInfo[] = [];
-let editingSchedulerTaskId: string | null = null;
 
-const presetCards = document.getElementById("preset-cards") as HTMLElement;
-const presetWebsiteLink = document.getElementById("preset-website-link") as HTMLAnchorElement;
 // 模式按钮已删除——baseUrl 永远可改、模型名永远可手填（datalist 出预设建议）
 // provider 不再暴露给用户（从预设内部拿，保证 capabilities 匹配不出错）。
 // 用户看到的是"昵称"框——给模型起自定义名字，状态栏"正在喂养"显示它。
-const displayNameInput = document.getElementById("display-name") as HTMLInputElement;
-const baseUrlInput = document.getElementById("base-url") as HTMLInputElement;
-const baseUrlResetBtn = document.getElementById("base-url-reset-btn") as HTMLButtonElement;
-const modelInput = document.getElementById("model-input") as HTMLInputElement;
-const modelInputSuggestions = document.getElementById("model-input-suggestions") as HTMLDataListElement;
-const apiKeyInput = document.getElementById("api-key") as HTMLInputElement;
-const apiKeyLabel = document.getElementById("api-key-label") as HTMLElement;
-const apiKeyHint = document.getElementById("api-key-hint") as HTMLElement;
-const testConnectionBtn = document.getElementById("test-connection-btn") as HTMLButtonElement | null;
-// API 协议下拉（auto / openai / anthropic）—— 用户显式 override transport
-const transportSelect = document.getElementById("transport-select") as HTMLSelectElement;
-const transportHint = document.getElementById("transport-hint") as HTMLElement;
-const customEndpointControls = document.getElementById("custom-endpoint-controls") as HTMLElement;
-const customEndpointSummary = document.getElementById("custom-endpoint-summary") as HTMLElement;
-const customEndpointGuideBtn = document.getElementById("custom-endpoint-guide-btn") as HTMLButtonElement;
-const workFlowAdaptBtn = document.getElementById("work-flow-adapt-btn") as HTMLButtonElement | null;
-const apiNoteText = document.getElementById("api-note-text") as HTMLElement;
+// API 协议下拉（openai / anthropic）—— 不根据 URL 自动猜测。
 
 // 视觉模型配置区元素
-const multimodalToggle = document.getElementById("multimodal-toggle") as HTMLInputElement;
-const visionBaseUrlInput = document.getElementById("vision-base-url") as HTMLInputElement;
-const visionApiKeyInput = document.getElementById("vision-api-key") as HTMLInputElement;
-const visionModelInput = document.getElementById("vision-model") as HTMLInputElement;
-const visionFieldsWrap = document.getElementById("vision-fields-wrap") as HTMLElement;
-const testVisionBtn = document.getElementById("test-vision-btn") as HTMLButtonElement;
-const visionTestStatus = document.getElementById("vision-test-status") as HTMLElement;
+
+// 高级运行设置
+
+// Embedding 维度（可选，仅 cloud 模式）
 
 // 渲染端内存缓存：保存每个厂商上一次填写的 baseUrl / model / apiKey
 // 切厂商时从这里读，保存时同步进去；持久化由 main 进程的 saveModelSettings 负责（perProvider 字段）。
 const providerProfileCache: Record<string, ProviderProfile> = {};
 
 // 当前激活的厂商：每次 applyPreset 后更新；用于"切到下一家厂商前先把当前那家的输入框值缓存住"
-let activeProvider: string = "";
-let customEndpointMode: CustomEndpointMode = "cloud";
-const runtimeSyncSelect = document.getElementById("runtime-sync") as HTMLElement;
-const runtimeSyncNote = document.getElementById("runtime-sync-note") as HTMLElement;
-const stickerEnabledInput = document.getElementById("sticker-enabled") as HTMLInputElement;
-const stickerSizeSelect = document.getElementById("sticker-size") as HTMLElement;
-const musicEnabledInput = document.getElementById("music-enabled") as HTMLInputElement;
-const musicVolumeInput = document.getElementById("music-volume") as HTMLInputElement;
-const soundEnabledInput = document.getElementById("sound-enabled") as HTMLInputElement;
-const soundVolumeInput = document.getElementById("sound-volume") as HTMLInputElement;
-const petAlwaysOnTopInput = document.getElementById("pet-always-on-top") as HTMLInputElement;
-const petVisibleInput = document.getElementById("pet-visible") as HTMLInputElement;
-const petChatInputEnabledInput = document.getElementById("pet-chat-input-enabled") as HTMLInputElement;
-const petZoomInput = document.getElementById("pet-zoom") as HTMLInputElement;
-const petZoomVal = document.getElementById("pet-zoom-val") as HTMLElement;
-const launchAtLoginInput = document.getElementById("launch-at-login") as HTMLInputElement;
-const uiThemeSelect = document.getElementById("ui-theme-select") as HTMLElement;
-const uiFontCurrent = document.getElementById("ui-font-current") as HTMLElement;
-const uiFontImportButton = document.getElementById("ui-font-import") as HTMLButtonElement;
-const uiFontResetButton = document.getElementById("ui-font-reset") as HTMLButtonElement;
-const uiIconSelect = document.getElementById("ui-icon-select") as HTMLElement;
-const languageSelect = document.getElementById("language-select") as HTMLElement;
-const defaultChatModeSelect = document.getElementById("default-chat-mode-select") as HTMLElement;
-const segmentedOutputSelect = document.getElementById("segmented-output-select") as HTMLElement;
-const mobileMessageSegmentationSelect = document.getElementById("mobile-message-segmentation-select") as HTMLElement;
-const proactiveChatSelect = document.getElementById("proactive-chat-select") as HTMLElement;
-const proactiveDeliveryRow = document.getElementById("proactive-delivery-row") as HTMLElement;
-const proactiveDeliverySelect = document.getElementById("proactive-delivery-select") as HTMLElement;
-const chatSocialContextEnabledInput = document.getElementById("chat-social-context-enabled") as HTMLInputElement;
-const citaEnabledInput = document.getElementById("cita-enabled") as HTMLInputElement;
-const citaEngineSelect = document.getElementById("cita-engine-select") as HTMLElement;
-const screenshotHotkeyInput = document.getElementById("screenshot-hotkey-input") as HTMLInputElement | null;
-const customStyleSamplingBtn = document.getElementById("custom-style-sampling-btn") as HTMLButtonElement | null;
-const customStylePromptBtn = document.getElementById("custom-style-prompt-btn") as HTMLButtonElement | null;
-const sidebarVisibleInput = document.getElementById("sidebar-visible") as HTMLInputElement;
-const tasksVisibleInput = document.getElementById("tasks-visible") as HTMLInputElement;
-const clearChatHistoryBtn = document.getElementById("clear-chat-history-btn") as HTMLButtonElement;
-const openStickerManagerBtn = document.getElementById("open-sticker-manager-btn") as HTMLButtonElement;
-const addStickerBtn = document.getElementById("add-sticker-btn") as HTMLButtonElement;
-const stickerThresholdInput = document.getElementById("sticker-threshold") as HTMLInputElement;
-const stickerThresholdVal = document.getElementById("sticker-threshold-val") as HTMLElement;
+
+
 
 const NAV_LABELS: Record<string, { emoji: string; title: string; hint: string }> = {
   memory: { emoji: `<img src="../icons/mimi.png" width="24" height="24" alt="" aria-hidden="true" style="vertical-align:-3px" />`, title: "记忆", hint: "管理长期记忆与画像" },
   chat: { emoji: `<svg style="vertical-align:-3px" width="24" height="24" viewBox="0 0 48 48" fill="none" aria-hidden="true"><path d="M33 38H22V30H36V22H44V38H39L36 41L33 38Z" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 6H36V30H17L13 34L9 30H4V6Z" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><path d="M19 18H20" stroke="currentColor" stroke-width="4" stroke-linecap="round"/><path d="M26 18H27" stroke="currentColor" stroke-width="4" stroke-linecap="round"/><path d="M12 18H13" stroke="currentColor" stroke-width="4" stroke-linecap="round"/></svg>`, title: "聊天", hint: "管理聊天窗口与会话" },
   user: { emoji: `<svg style="vertical-align:-3px" width="24" height="24" viewBox="0 0 48 48" fill="none" aria-hidden="true"><path d="M44 8H4V38H19L24 43L29 38H44V8Z" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><circle cx="24" cy="19" r="5" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><path d="M33 32C33 27.5817 28.9706 24 24 24C19.0294 24 15 27.5817 15 32" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></svg>`, title: "用户信息", hint: "编辑你的个人资料" },
   tasks: { emoji: `<svg style="vertical-align:-3px" width="24" height="24" viewBox="0 0 48 48" fill="none" aria-hidden="true"><path d="M23.9998 44.3332C34.1251 44.3332 42.3332 36.1251 42.3332 25.9999C42.3332 15.8747 34.1251 7.66656 23.9998 7.66656C13.8746 7.66656 5.6665 15.8747 5.6665 25.9999C5.6665 36.1251 13.8746 44.3332 23.9998 44.3332Z" fill="none" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/><path d="M23.7594 15.3536L23.7582 26.3624L31.5305 34.1347" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 9.00001L11 4.00001" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><path d="M44 9.00001L37 4.00001" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></svg>`, title: "定时任务", hint: "管理定时提醒与日程" },
-	  skills: { emoji: `<svg width="24" height="24" viewBox="0 0 48 48" fill="none" aria-hidden="true" style="vertical-align:-3px"><title>Skills</title><rect x="9" y="8" width="30" height="36" rx="2" fill="none" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/><path d="M18 4V10" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><path d="M30 4V10" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><path d="M16 19L32 19" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><path d="M16 27L28 27" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><path d="M16 35H24" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></svg>`, title: "Skills", hint: "管理 agent 的 skill 指令（约束如何用工具）" },
+  skills: { emoji: `<svg width="24" height="24" viewBox="0 0 48 48" fill="none" aria-hidden="true" style="vertical-align:-3px"><title>Skills</title><rect x="9" y="8" width="30" height="36" rx="2" fill="none" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/><path d="M18 4V10" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><path d="M30 4V10" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><path d="M16 19L32 19" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><path d="M16 27L28 27" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><path d="M16 35H24" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></svg>`, title: "Skills", hint: "管理 agent 的 skill 指令（约束如何用工具）" },
   plugins: { emoji: "🔌", title: "MCP", hint: "扩展功能与第三方集成" },
-	  preferences: { emoji: `<svg width="24" height="24" viewBox="0 0 48 48" fill="none" aria-hidden="true" style="vertical-align:-3px"><title>偏好设置</title><path d="M12 35.0137H9H4V8.01273C4 6.90868 4.89543 6.01367 6 6.01367H42C43.1046 6.01367 44 6.90868 44 8.01273V35.0137H36" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><path d="M24 32L14 42H34L24 32Z" fill="none" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/></svg>`, title: "偏好设置", hint: "设置聊天窗口和输出行为的默认偏好" },
-	  appearance: { emoji: `<svg width="24" height="24" viewBox="0 0 48 48" fill="none" aria-hidden="true" style="vertical-align:-3px"><title>外观设置</title><path d="M24 44C29.9601 44 26.3359 35.136 30 31C33.1264 27.4709 44 29.0856 44 24C44 12.9543 35.0457 4 24 4C12.9543 4 4 12.9543 4 24C4 35.0457 12.9543 44 24 44Z" fill="none" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/><path d="M28 17C29.6569 17 31 15.6569 31 14C31 12.3431 29.6569 11 28 11C26.3431 11 25 12.3431 25 14C25 15.6569 26.3431 17 28 17Z" fill="none" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/><path d="M16 21C17.6569 21 19 19.6569 19 18C19 16.3431 17.6569 15 16 15C14.3431 15 13 16.3431 13 18C13 19.6569 14.3431 21 16 21Z" fill="none" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/><path d="M17 34C18.6569 34 20 32.6569 20 31C20 29.3431 18.6569 28 17 28C15.3431 28 14 29.3431 14 31C14 32.6569 15.3431 34 17 34Z" fill="none" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/></svg>`, title: "外观设置", hint: "调整窗口布局、界面主题与昔涟桌宠" },
-	  general: { emoji: `<svg width="24" height="24" viewBox="0 0 48 48" fill="none" aria-hidden="true" style="vertical-align:-3px"><title>通用设置</title><path d="M18.2838 43.1713C14.9327 42.1736 11.9498 40.3213 9.58787 37.867C10.469 36.8227 11 35.4734 11 34.0001C11 30.6864 8.31371 28.0001 5 28.0001C4.79955 28.0001 4.60139 28.01 4.40599 28.0292C4.13979 26.7277 4 25.3803 4 24.0001C4 21.9095 4.32077 19.8938 4.91579 17.9995C4.94381 17.9999 4.97188 18.0001 5 18.0001C8.31371 18.0001 11 15.3138 11 12.0001C11 11.0488 10.7786 10.1493 10.3846 9.35011C12.6975 7.1995 15.5205 5.59002 18.6521 4.72314C19.6444 6.66819 21.6667 8.00013 24 8.00013C26.3333 8.00013 28.3556 6.66819 29.3479 4.72314C32.4795 5.59002 35.3025 7.1995 37.6154 9.35011C37.2214 10.1493 37 11.0488 37 12.0001C37 15.3138 39.6863 18.0001 43 18.0001C43.0281 18.0001 43.0562 17.9999 43.0842 17.9995C43.6792 19.8938 44 21.9095 44 24.0001C44 25.3803 43.8602 26.7277 43.594 28.0292C43.3986 28.01 43.2005 28.0001 43 28.0001C39.6863 28.0001 37 30.6864 37 34.0001C37 35.4734 37.531 36.8227 38.4121 37.867C36.0502 40.3213 33.0673 42.1736 29.7162 43.1713C28.9428 40.752 26.676 39.0001 24 39.0001C21.324 39.0001 19.0572 40.752 18.2838 43.1713Z" fill="none" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/><path d="M24 31C27.866 31 31 27.866 31 24C31 20.134 27.866 17 24 17C20.134 17 17 20.134 17 24C17 27.866 20.134 31 24 31Z" fill="none" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/></svg>`, title: "通用设置", hint: "管理窗口、音频和系统行为" },
-	  api: { emoji: `<svg width="24" height="24" viewBox="0 0 48 48" fill="none" aria-hidden="true" style="vertical-align:-3px"><title>API 设置</title><g clip-path="url(#api-key-nav-clip)"><circle cx="15" cy="33" r="8" fill="none" stroke="currentColor" stroke-width="4"/><path d="M29 16L35.5 22" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 26L37 7" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><path d="M35 11L42 17.5" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></g><defs><clipPath id="api-key-nav-clip"><rect width="48" height="48" fill="none"/></clipPath></defs></svg>`, title: "API 设置", hint: "选择预设后只需要填写 API Key。" },
+  preferences: { emoji: `<svg width="24" height="24" viewBox="0 0 48 48" fill="none" aria-hidden="true" style="vertical-align:-3px"><title>偏好设置</title><path d="M12 35.0137H9H4V8.01273C4 6.90868 4.89543 6.01367 6 6.01367H42C43.1046 6.01367 44 6.90868 44 8.01273V35.0137H36" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><path d="M24 32L14 42H34L24 32Z" fill="none" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/></svg>`, title: "偏好设置", hint: "设置聊天窗口和输出行为的默认偏好" },
+  appearance: { emoji: `<svg width="24" height="24" viewBox="0 0 48 48" fill="none" aria-hidden="true" style="vertical-align:-3px"><title>外观设置</title><path d="M24 44C29.9601 44 26.3359 35.136 30 31C33.1264 27.4709 44 29.0856 44 24C44 12.9543 35.0457 4 24 4C12.9543 4 4 12.9543 4 24C4 35.0457 12.9543 44 24 44Z" fill="none" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/><path d="M28 17C29.6569 17 31 15.6569 31 14C31 12.3431 29.6569 11 28 11C26.3431 11 25 12.3431 25 14C25 15.6569 26.3431 17 28 17Z" fill="none" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/><path d="M16 21C17.6569 21 19 19.6569 19 18C19 16.3431 17.6569 15 16 15C14.3431 15 13 16.3431 13 18C13 19.6569 14.3431 21 16 21Z" fill="none" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/><path d="M17 34C18.6569 34 20 32.6569 20 31C20 29.3431 18.6569 28 17 28C15.3431 28 14 29.3431 14 31C14 32.6569 15.3431 34 17 34Z" fill="none" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/></svg>`, title: "外观设置", hint: "调整窗口布局、界面主题与昔涟桌宠" },
+  general: { emoji: `<svg width="24" height="24" viewBox="0 0 48 48" fill="none" aria-hidden="true" style="vertical-align:-3px"><title>通用设置</title><path d="M18.2838 43.1713C14.9327 42.1736 11.9498 40.3213 9.58787 37.867C10.469 36.8227 11 35.4734 11 34.0001C11 30.6864 8.31371 28.0001 5 28.0001C4.79955 28.0001 4.60139 28.01 4.40599 28.0292C4.13979 26.7277 4 25.3803 4 24.0001C4 21.9095 4.32077 19.8938 4.91579 17.9995C4.94381 17.9999 4.97188 18.0001 5 18.0001C8.31371 18.0001 11 15.3138 11 12.0001C11 11.0488 10.7786 10.1493 10.3846 9.35011C12.6975 7.1995 15.5205 5.59002 18.6521 4.72314C19.6444 6.66819 21.6667 8.00013 24 8.00013C26.3333 8.00013 28.3556 6.66819 29.3479 4.72314C32.4795 5.59002 35.3025 7.1995 37.6154 9.35011C37.2214 10.1493 37 11.0488 37 12.0001C37 15.3138 39.6863 18.0001 43 18.0001C43.0281 18.0001 43.0562 17.9999 43.0842 17.9995C43.6792 19.8938 44 21.9095 44 24.0001C44 25.3803 43.8602 26.7277 43.594 28.0292C43.3986 28.01 43.2005 28.0001 43 28.0001C39.6863 28.0001 37 30.6864 37 34.0001C37 35.4734 37.531 36.8227 38.4121 37.867C36.0502 40.3213 33.0673 42.1736 29.7162 43.1713C28.9428 40.752 26.676 39.0001 24 39.0001C21.324 39.0001 19.0572 40.752 18.2838 43.1713Z" fill="none" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/><path d="M24 31C27.866 31 31 27.866 31 24C31 20.134 27.866 17 24 17C20.134 17 17 20.134 17 24C17 27.866 20.134 31 24 31Z" fill="none" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/></svg>`, title: "通用设置", hint: "管理窗口、音频和系统行为" },
+  api: { emoji: `<svg width="24" height="24" viewBox="0 0 48 48" fill="none" aria-hidden="true" style="vertical-align:-3px"><title>API 设置</title><g clip-path="url(#api-key-nav-clip)"><circle cx="15" cy="33" r="8" fill="none" stroke="currentColor" stroke-width="4"/><path d="M29 16L35.5 22" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 26L37 7" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><path d="M35 11L42 17.5" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></g><defs><clipPath id="api-key-nav-clip"><rect width="48" height="48" fill="none"/></clipPath></defs></svg>`, title: "API 设置", hint: "选择预设后只需要填写 API Key。" },
+  "api-advanced": { emoji: `<svg width="24" height="24" viewBox="0 0 48 48" fill="none" aria-hidden="true" style="vertical-align:-3px"><title>高级设置</title><path d="M34.0003 41L44 24L34.0003 7H14.0002L4 24L14.0002 41H34.0003Z" fill="none" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/><path d="M24 29C26.7614 29 29 26.7614 29 24C29 21.2386 26.7614 19 24 19C21.2386 19 19 21.2386 19 24C19 26.7614 21.2386 29 24 29Z" fill="none" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/></svg>`, title: "高级设置", hint: "配置 API 超时时间、调用模式．" },
   cyrene: { emoji: "🌸", title: "昔涟设置", hint: "管理 Agent 行为、记忆、RAG 与权限" },
   tts: { emoji: "🎙️", title: "TTS 设置", hint: "语音合成与朗读偏好" },
   asr: { emoji: "🎧", title: "ASR 设置", hint: "语音识别与通话配置" },
@@ -969,52 +306,18 @@ const NAV_LABELS: Record<string, { emoji: string; title: string; hint: string }>
 minBtn.addEventListener("click", () => window.settings?.minimize());
 closeBtn.addEventListener("click", () => window.settings?.close());
 
-document.addEventListener("click", (event) => {
-  const target = event.target as HTMLElement | null;
-  if (!target) return;
-  if (target.closest("button, input, select, .switch, .option-block, .language-option, .nav-item")) {
-    playSettingsClickSound();
-  }
-}, true);
 
-function setSaveStatus(text: string, cls?: string): void {
-  saveStatus.textContent = text;
-  saveStatus.className = "save-status";
-  if (cls) saveStatus.classList.add(cls);
-}
 
-function setCyreneSaveStatus(text: string, cls?: string): void {
-  cyreneSaveStatus.textContent = text;
-  cyreneSaveStatus.className = "save-status";
-  if (cls) cyreneSaveStatus.classList.add(cls);
-}
 
-function setPreferencesSaveStatus(text: string, cls?: string): void {
-  preferencesSaveStatus.textContent = text;
-  preferencesSaveStatus.className = "save-status";
-  if (cls) preferencesSaveStatus.classList.add(cls);
-}
 
-function setAppearanceSaveStatus(text: string, cls?: string): void {
-  appearanceSaveStatus.textContent = text;
-  appearanceSaveStatus.className = "save-status";
-  if (cls) appearanceSaveStatus.classList.add(cls);
-}
-
-function playSettingsClickSound(): void {
-  if (!soundEnabledInput.checked) return;
-  clickSound.pause();
-  clickSound.currentTime = 0;
-  clickSound.volume = Math.max(0, Math.min(1, Number(soundVolumeInput.value) / 100));
-  void clickSound.play().catch(() => {});
-}
-
-function syncMusicPlayback(): void {
-  bgmAudio.volume = Math.max(0, Math.min(1, Number(musicVolumeInput.value) / 100));
-  if (musicEnabledInput.checked) {
-    void bgmAudio.play().catch(() => {});
-  } else {
-    bgmAudio.pause();
+async function saveAppearancePatch(patch: Partial<GeneralSettings>, successText = "已自动应用"): Promise<void> {
+  try {
+    setAppearanceSaveStatus("应用中…");
+    await window.settings!.saveGeneral(patch);
+    setAppearanceSaveStatus(successText, "is-ok");
+  } catch (error) {
+    console.error("自动应用外观设置失败:", error);
+    setAppearanceSaveStatus("自动应用失败", "is-error");
   }
 }
 
@@ -1056,11 +359,6 @@ function applyLanguageSelection(language: "zh-CN"): void {
   });
 }
 
-function getUiThemeValue(): GeneralSettings["uiTheme"] {
-  const value = uiThemeSelect.querySelector<HTMLButtonElement>(".option-block.is-active")?.dataset.theme;
-  return normalizeUiTheme(value);
-}
-
 function applyOptionGroupValue(group: HTMLElement, value: string): void {
   group.querySelectorAll<HTMLButtonElement>(".option-block").forEach((button) => {
     const active = button.dataset.value === value;
@@ -1078,7 +376,7 @@ function applyDefaultChatModeSelection(mode: DefaultChatMode): void {
 }
 
 function getDefaultChatModeValue(): DefaultChatMode {
-  return normalizeDefaultChatMode(getOptionGroupValue(defaultChatModeSelect, "work"));
+  return normalizeDefaultChatMode(getOptionGroupValue(defaultChatModeSelect, "chat"));
 }
 
 function applySegmentedOutputSelection(mode: SegmentedOutputMode): void {
@@ -1113,31 +411,19 @@ function getProactiveDeliveryValue(): ProactiveDeliveryTarget {
   return normalizeProactiveDeliveryTarget(getOptionGroupValue(proactiveDeliverySelect, "local"));
 }
 
-let currentCustomStyleConfig: CustomStyleConfig = DEFAULT_CUSTOM_STYLE;
-let customStyleOverlay: HTMLElement | null = null;
-
-function diversityDriverOf(config: CustomStyleConfig): DiversityPreference["driver"] {
-  return config.diversity.driver;
-}
-
-function diversityValueOf(config: CustomStyleConfig): number {
-  return config.diversity.driver === "temperature" || config.diversity.driver === "top-p"
-    ? config.diversity.value
-    : 0.65;
-}
 
 function buildCustomStyleConfigFromModal(): CustomStyleConfig {
-  if (!customStyleOverlay) return currentCustomStyleConfig;
+  if (!preferencesState.customStyleOverlay) return preferencesState.currentCustomStyleConfig;
   const diversityDriver = (
-    customStyleOverlay.querySelector<HTMLInputElement>('input[name="custom-diversity"]:checked')?.value
+    preferencesState.customStyleOverlay.querySelector<HTMLInputElement>('input[name="custom-diversity"]:checked')?.value
     ?? "model-default"
   ) as DiversityPreference["driver"];
   const rawValue = Number((
-    customStyleOverlay.querySelector<HTMLInputElement>("#custom-diversity-value")?.value
+    preferencesState.customStyleOverlay.querySelector<HTMLInputElement>("#custom-diversity-value")?.value
     ?? ""
   ).trim());
   const repetition = (
-    customStyleOverlay.querySelector<HTMLInputElement>('input[name="custom-repetition"]:checked')?.value
+    preferencesState.customStyleOverlay.querySelector<HTMLInputElement>('input[name="custom-repetition"]:checked')?.value
     ?? "model-default"
   ) as RepetitionLevel;
   return normalizeCustomStyleConfig({
@@ -1149,11 +435,11 @@ function buildCustomStyleConfigFromModal(): CustomStyleConfig {
 }
 
 function ensureCustomStyleModal(): HTMLElement {
-  if (customStyleOverlay) return customStyleOverlay;
-  customStyleOverlay = document.createElement("div");
-  customStyleOverlay.id = "custom-style-overlay";
-  customStyleOverlay.className = "cy-modal-overlay is-hidden custom-style-overlay";
-  customStyleOverlay.innerHTML = [
+  if (preferencesState.customStyleOverlay) return preferencesState.customStyleOverlay;
+  preferencesState.customStyleOverlay = document.createElement("div");
+  preferencesState.customStyleOverlay.id = "custom-style-overlay";
+  preferencesState.customStyleOverlay.className = "cy-modal-overlay is-hidden custom-style-overlay";
+  preferencesState.customStyleOverlay.innerHTML = [
     '<div class="cy-modal custom-style-modal" role="dialog" aria-modal="true">',
     '  <div class="cy-modal__head"><span class="cy-modal__icon">🖊️</span><h3 class="cy-modal__title">自定义风格采样</h3></div>',
     '  <hr class="cy-modal__divider">',
@@ -1178,41 +464,41 @@ function ensureCustomStyleModal(): HTMLElement {
     '  </div>',
     '</div>',
   ].join("\n");
-  document.body.appendChild(customStyleOverlay);
+  document.body.appendChild(preferencesState.customStyleOverlay);
 
   const updateDiversityRow = () => {
-    const driver = customStyleOverlay!.querySelector<HTMLInputElement>(
+    const driver = preferencesState.customStyleOverlay!.querySelector<HTMLInputElement>(
       'input[name="custom-diversity"]:checked',
     )?.value ?? "model-default";
-    const row = customStyleOverlay!.querySelector<HTMLElement>("#custom-diversity-row");
-    const label = customStyleOverlay!.querySelector<HTMLElement>("#custom-diversity-label");
-    const value = customStyleOverlay!.querySelector<HTMLInputElement>("#custom-diversity-value");
+    const row = preferencesState.customStyleOverlay!.querySelector<HTMLElement>("#custom-diversity-row");
+    const label = preferencesState.customStyleOverlay!.querySelector<HTMLElement>("#custom-diversity-label");
+    const value = preferencesState.customStyleOverlay!.querySelector<HTMLInputElement>("#custom-diversity-value");
     if (!row || !label || !value) return;
     row.hidden = driver === "model-default";
     label.textContent = driver === "top-p" ? "Top-P" : "Temperature";
     value.min = "0";
     value.max = driver === "top-p" ? "1" : "2";
   };
-  customStyleOverlay.querySelectorAll<HTMLInputElement>('input[name="custom-diversity"]').forEach((input) => {
+  preferencesState.customStyleOverlay.querySelectorAll<HTMLInputElement>('input[name="custom-diversity"]').forEach((input) => {
     input.addEventListener("change", updateDiversityRow);
   });
-  customStyleOverlay.querySelector<HTMLButtonElement>("#custom-style-cancel")?.addEventListener("click", () => {
-    customStyleOverlay?.classList.add("is-hidden");
+  preferencesState.customStyleOverlay.querySelector<HTMLButtonElement>("#custom-style-cancel")?.addEventListener("click", () => {
+    preferencesState.customStyleOverlay?.classList.add("is-hidden");
   });
-  customStyleOverlay.querySelector<HTMLButtonElement>("#custom-style-reset")?.addEventListener("click", () => {
+  preferencesState.customStyleOverlay.querySelector<HTMLButtonElement>("#custom-style-reset")?.addEventListener("click", () => {
     renderCustomStyleModal(DEFAULT_CUSTOM_STYLE);
   });
-  customStyleOverlay.querySelector<HTMLButtonElement>("#custom-style-save")?.addEventListener("click", async () => {
+  preferencesState.customStyleOverlay.querySelector<HTMLButtonElement>("#custom-style-save")?.addEventListener("click", async () => {
     try {
-      currentCustomStyleConfig = buildCustomStyleConfigFromModal();
-      await window.settings!.saveGeneral({ customStyle: currentCustomStyleConfig });
-      customStyleOverlay?.classList.add("is-hidden");
+      preferencesState.currentCustomStyleConfig = buildCustomStyleConfigFromModal();
+      await window.settings!.saveGeneral({ customStyle: preferencesState.currentCustomStyleConfig });
+      preferencesState.customStyleOverlay?.classList.add("is-hidden");
       setPreferencesSaveStatus("自定义风格已保存", "is-ok");
     } catch {
       setPreferencesSaveStatus("自定义风格保存失败", "is-error");
     }
   });
-  return customStyleOverlay;
+  return preferencesState.customStyleOverlay;
 }
 
 function renderCustomStyleModal(config: CustomStyleConfig): void {
@@ -1237,7 +523,7 @@ function renderCustomStyleModal(config: CustomStyleConfig): void {
 
 function openCustomStyleModal(): void {
   const overlay = ensureCustomStyleModal();
-  renderCustomStyleModal(currentCustomStyleConfig);
+  renderCustomStyleModal(preferencesState.currentCustomStyleConfig);
   overlay.classList.remove("is-hidden");
 }
 
@@ -1245,30 +531,10 @@ function renderProactiveDeliveryVisibility(): void {
   proactiveDeliveryRow.hidden = getProactiveChatValue() !== "on";
 }
 
-function renderProactiveDeliveryAvailability(statuses: Record<string, { phase?: string }>): void {
-  proactiveDeliverySelect.querySelectorAll<HTMLButtonElement>(".option-block").forEach((button) => {
-    const target = normalizeProactiveDeliveryTarget(button.dataset.value);
-    const status = target === "local" ? undefined : statuses[target];
-    button.disabled = !isProactiveDeliveryTargetSelectable(target, status);
-  });
-}
-
-function applyUiThemeSelection(theme: GeneralSettings["uiTheme"]): void {
-  uiThemeSelect.querySelectorAll<HTMLButtonElement>(".option-block").forEach((button) => {
-    const active = button.dataset.theme === theme;
-    button.classList.toggle("is-active", active);
-    button.setAttribute("aria-pressed", String(active));
-  });
-  document.documentElement.dataset.uiTheme = theme;
-}
 
 function renderUiFont(font: UiFont): void {
   uiFontCurrent.textContent = font.kind === "custom" ? font.displayName : "思源黑体（默认）";
   uiFontResetButton.hidden = font.kind !== "custom";
-}
-
-function getUiIconValue(): UiIcon {
-  return normalizeUiIcon(uiIconSelect.querySelector<HTMLButtonElement>(".is-active")?.dataset.icon);
 }
 
 function renderUiIcon(icon: UiIcon): void {
@@ -1279,11 +545,8 @@ function renderUiIcon(icon: UiIcon): void {
   });
 }
 
-function setGeneralSaveStatus(text: string, cls?: string): void {
-  generalSaveStatus.textContent = text;
-  generalSaveStatus.className = "save-status";
-  if (cls) generalSaveStatus.classList.add(cls);
-}
+
+
 
 function fillPresetOptions(): void {
   if (!presetCards) return;
@@ -1355,21 +618,21 @@ function fillModelOptions(preset: ModelPreset, preferredModel?: string): void {
     modelInputSuggestions.appendChild(option);
   }
 
-  // 選中值：preferredModel 命中預設則用之；否則用預設首項；
-  // preferredModel 不在預設裡（用戶自填型號）也保留顯示，不強行清空。
+  // 选中值：preferredModel 命中预设则用之；否则用预设首项；
+  // preferredModel 不在预设里（用户自填型号）也保留显示，不强行清空。
   const fallback = preset.mainModels[0] ?? "";
   modelInput.value = preferredModel ?? fallback;
 }
 
 /**
- * 把"當前輸入框裡的值"快照到內存緩存裡（perProvider）。
- * 切廠商前調用一次，避免覆蓋丟失。
+ * 把"当前输入框里的值"快照到内存缓存里（perProvider）。
+ * 切厂商前调用一次，避免覆盖丢失。
  */
 function captureActiveProviderProfile(): void {
-  if (!activeProvider) return;
-  const cached = providerProfileCache[activeProvider];
+  if (!apiState.activeProvider) return;
+  const cached = providerProfileCache[apiState.activeProvider];
   // reasoning 仍由 renderReasoningControls 写入 cache；这里只保留它（不动 mode/effort）
-  providerProfileCache[activeProvider] = {
+  providerProfileCache[apiState.activeProvider] = {
     baseUrl: baseUrlInput.value.trim(),
     model: getCurrentModelValue().trim(),
     apiKey: apiKeyInput.value.trim(),
@@ -1406,13 +669,13 @@ const LOCAL_ENDPOINT_AUTH_FALLBACK = "__CYRENE_LOCAL_NO_AUTH__";
 
 function getApiKeyForRequest(): string {
   const value = apiKeyInput.value.trim();
-  return getCustomEndpointMode(activeProvider) === "local" && !value
+  return getCustomEndpointMode(apiState.activeProvider) === "local" && !value
     ? LOCAL_ENDPOINT_AUTH_FALLBACK
     : value;
 }
 
 function validateActiveCustomEndpoint(): string | null {
-  const mode = getCustomEndpointMode(activeProvider);
+  const mode = getCustomEndpointMode(apiState.activeProvider);
   if (!mode) return null;
   return validateCustomEndpointConfig(mode, {
     baseUrl: baseUrlInput.value,
@@ -1421,10 +684,27 @@ function validateActiveCustomEndpoint(): string | null {
   });
 }
 
+function updateEndpointPreview(): void {
+  const transport = transportSelect.value as ApiTransport;
+  const baseUrl = baseUrlInput.value.trim();
+  const defaultSuffix = transport === "anthropic" ? "/v1/messages" : "/chat/completions";
+
+  if (!baseUrl) {
+    endpointPreview.textContent = `程序会按所选协议自动追加请求路径（默认 ${defaultSuffix}）。`;
+    return;
+  }
+
+  const endpoint = resolveApiEndpoint(baseUrl, transport);
+  endpointPreview.textContent = endpoint.appendedSuffix
+    ? `程序会自动追加 ${endpoint.appendedSuffix}；最终请求地址：${endpoint.url}`
+    : `已填写完整接口地址，不再追加后缀；最终请求地址：${endpoint.url}`;
+}
+
 function applyCustomEndpointUI(preset: ModelPreset): void {
   const mode = getCustomEndpointMode(preset.providerName);
   customEndpointControls.hidden = mode === null;
-  transportSelect.disabled = mode !== null;
+  customEndpointOverrides.hidden = mode === null;
+  transportSelect.disabled = false;
 
   if (!mode) {
     apiKeyLabel.textContent = "API Key";
@@ -1432,23 +712,23 @@ function applyCustomEndpointUI(preset: ModelPreset): void {
     apiKeyInput.placeholder = "sk-...";
     baseUrlInput.placeholder = "https://api.deepseek.com";
     modelInput.placeholder = "选厂商后自动填入，可手填覆盖";
-    transportHint.textContent = "默认按 Base URL 推断；如有歧义可手动指定";
+    transportHint.textContent = "请按服务商提供的接口类型明确选择，程序不会自动识别协议。";
     baseUrlResetBtn.title = "重置为厂商默认 URL";
     apiNoteText.textContent = "选择模型预设后会自动填入 Provider、Base URL 和模型名；你只需要填写对应平台的 API Key。配置只保存在本机 Electron 用户数据目录。";
     return;
   }
 
-  customEndpointMode = mode;
+  apiState.customEndpointMode = mode;
   const presentation = getCustomEndpointPresentation(mode);
   customEndpointControls.querySelectorAll<HTMLButtonElement>("[data-custom-endpoint-mode]").forEach((button) => {
-    const active = button.dataset.customEndpointMode === mode;
+    const active = button.dataset.apiState.customEndpointMode === mode;
     button.classList.toggle("is-active", active);
     button.setAttribute("aria-pressed", String(active));
   });
 
   customEndpointSummary.textContent = mode === "local"
-    ? "填写本机 OpenAI 兼容服务地址；不扫描端口，也不探测模型能力。"
-    : "接入 OpenAI 兼容的云端服务或第三方代理，能力由服务提供方决定。";
+    ? "填写本机模型服务地址并明确选择接口协议；不扫描端口，也不探测模型能力。"
+    : "接入兼容 OpenAI 或 Anthropic 协议的云端服务，能力由服务提供方决定。";
   apiKeyLabel.textContent = presentation.apiKeyOptional ? "API Key（可选）" : "API Key";
   apiKeyHint.textContent = presentation.apiKeyOptional
     ? "本地服务无需鉴权时可留空；如网关要求令牌，请在此填写"
@@ -1456,19 +736,18 @@ function applyCustomEndpointUI(preset: ModelPreset): void {
   apiKeyInput.placeholder = presentation.apiKeyOptional ? "无需鉴权时留空" : "sk-...";
   baseUrlInput.placeholder = presentation.baseUrlPlaceholder;
   modelInput.placeholder = "填写服务实际提供的模型 ID";
-  transportSelect.value = presentation.transport;
-  transportHint.textContent = "自定义端点仅提供 OpenAI 兼容协议；不会探测或自动升级能力档位";
+  transportHint.textContent = "请按自定义服务实际提供的 O 口或 A 口选择；程序不会自动探测。";
   baseUrlResetBtn.title = "清空自定义 Base URL";
   apiNoteText.textContent = "自定义端点按保守兼容模式运行。保存后请先测试连接；连接成功不代表结构化输出、工具调用或思考模式一定可用。";
 }
 
-function applyPreset(
+export function applyPreset(
   providerName: string,
   preferredModel?: string,
   preferredApiKey?: string,
   preferredBaseUrl?: string,
   preferredDisplayName?: string,
-  preferredExplicitTransport?: "openai" | "anthropic" | "auto",
+  preferredExplicitTransport?: ApiTransport,
   preferredVision?: { baseUrl: string; apiKey: string; model: string },
   preferredMultimodal?: boolean,
 ): void {
@@ -1483,8 +762,18 @@ function applyPreset(
   // 留空显示厂商短名——但这里主动填 shortName 让用户看到默认值，可改可清。
   displayNameInput.value = preferredDisplayName ?? preset.shortName;
 
-  // baseUrl：优先用缓存（用户自定义过），其次用 preset 默认
-  baseUrlInput.value = preferredBaseUrl ?? preset.baseUrl;
+  // baseUrl：仅对官方已确认的 A 口预设做协议配套切换；自定义 URL 永远不猜、不覆盖。
+  const selectedTransport = preferredExplicitTransport ?? preset.transport;
+  const restoredBaseUrl = preferredBaseUrl ?? preset.baseUrl;
+  baseUrlInput.value = selectedTransport === "anthropic"
+    && restoredBaseUrl === preset.baseUrl
+    && preset.anthropicBaseUrl
+      ? preset.anthropicBaseUrl
+      : selectedTransport === "openai"
+        && preset.anthropicBaseUrl
+        && restoredBaseUrl === preset.anthropicBaseUrl
+          ? preset.baseUrl
+          : restoredBaseUrl;
 
   fillModelOptions(preset, preferredModel);
 
@@ -1495,10 +784,10 @@ function applyPreset(
     ? ""
     : (preferredApiKey ?? "");
 
-  // explicitTransport：优先用缓存（用户自定义过），其次默认 "auto"
-  // （切厂商时上一家的 explicitTransport 不应该延续，preset 自带 capabilities transport 兜底）
-  transportSelect.value = preferredExplicitTransport ?? "auto";
+  // 协议优先恢复用户保存值，否则使用预设的明确默认值；永远不按 URL 猜测。
+  transportSelect.value = selectedTransport;
   applyCustomEndpointUI(preset);
+  updateEndpointPreview();
 
   if (preferredMultimodal !== undefined) {
     multimodalToggle.checked = preset.independentVision === true ? false : preferredMultimodal;
@@ -1528,7 +817,7 @@ function applyPreset(
     presetWebsiteLink.style.display = "none";
   }
 
-  activeProvider = preset.providerName;
+  apiState.activeProvider = preset.providerName;
   applyMultimodalUI();
 }
 
@@ -1548,7 +837,7 @@ async function loadConfig(): Promise<void> {
             displayName: typeof (value as { displayName?: unknown }).displayName === "string"
               ? (value as { displayName: string }).displayName
               : undefined,
-            explicitTransport: (value as { explicitTransport?: "openai" | "anthropic" | "auto" }).explicitTransport,
+            explicitTransport: (value as { explicitTransport?: ApiTransport }).explicitTransport,
             reasoning: (value as { reasoning?: ReasoningPreference }).reasoning,
           };
         }
@@ -1577,6 +866,19 @@ async function loadConfig(): Promise<void> {
     const threshold = cfg.stickerSimilarityThreshold ?? 0.55;
     stickerThresholdInput.value = String(threshold);
     stickerThresholdVal.textContent = threshold.toFixed(2);
+    chatRequestTimeoutSecInput.value = String(cfg.chatRequestTimeoutSec ?? 300);
+    maxIterationsInput.value = String(cfg.maxIterations ?? 12);
+    maxReplansInput.value = String(cfg.maxReplans ?? 2);
+    maxRefreshInput.value = String(cfg.maxRefresh ?? 1);
+    perCallTimeoutSecInput.value = String(cfg.perCallTimeoutSec ?? 75);
+    actionGateRepairBudgetSecInput.value = String(cfg.actionGateRepairBudgetSec ?? 10);
+    if (embeddingDimensionsInput) {
+      embeddingDimensionsInput.value = cfg.embeddingDimensions ? String(cfg.embeddingDimensions) : "";
+    }
+    toggleEnableThinking.checked = cfg.thinkingOverride === 1;
+    toggleDisableThinking.checked = cfg.thinkingOverride === -1;
+    toggleDisableMaxToken.checked = !!cfg.disableMaxToken;
+    contextWindowInput.value = String(cfg.contextWindowTokens ?? 256000);
 
     // 视觉模型配置已并入 applyPreset（preferredVision 参数）。
 
@@ -1584,9 +886,10 @@ async function loadConfig(): Promise<void> {
     setCyreneSaveStatus("等待保存");
   } catch {
     fillPresetOptions();
-    applyPreset("Custom");
-    setSaveStatus("讀取配置失敗", "is-error");
-    setCyreneSaveStatus("讀取配置失敗", "is-error");
+    // 默认厂商已从 DeepSeek 改为 MiniMax（v1 vendor adapter 第一家落地的）
+    applyPreset("MiniMax（稀宇科技）");
+    setSaveStatus("读取配置失败", "is-error");
+    setCyreneSaveStatus("读取配置失败", "is-error");
   }
 }
 
@@ -1601,24 +904,29 @@ async function loadGeneralSettings(): Promise<void> {
       button.classList.toggle("is-active", selected);
       button.setAttribute("aria-pressed", String(selected));
     });
-    musicEnabledInput.checked = cfg.musicEnabled;
-    musicVolumeInput.value = String(cfg.musicVolume);
-    syncMusicPlayback();
-    soundEnabledInput.checked = cfg.soundEnabled;
-    soundVolumeInput.value = String(cfg.soundVolume);
+    const windowCornerRadius = normalizeWindowCornerRadius(cfg.windowCornerRadius);
+    windowCornerRadiusInput.value = String(windowCornerRadius);
+    windowCornerRadiusVal.textContent = `${windowCornerRadius}px`;
+    applyWindowCornerRadius(windowCornerRadius);
     petAlwaysOnTopInput.checked = cfg.petAlwaysOnTop;
     petVisibleInput.checked = cfg.petVisible;
-    petChatInputEnabledInput.checked = cfg.petChatInputEnabled ?? false;
     petZoomInput.value = String(cfg.petZoom ?? 1);
     petZoomVal.textContent = Math.round((cfg.petZoom ?? 1) * 100) + "%";
+    chatLineHeightInput.value = String(cfg.chatLineHeight ?? 1.75);
+    chatLineHeightVal.textContent = (cfg.chatLineHeight ?? 1.75).toFixed(2);
+    document.documentElement.style.setProperty("--rb-chat-line-height", String(cfg.chatLineHeight ?? 1.75));
+    assistantBubbleEnabledInput.checked = cfg.assistantBubbleEnabled ?? true;
+    chatParaSpacingInput.value = String(cfg.chatParaSpacing ?? 0.5);
+    chatParaSpacingVal.textContent = (cfg.chatParaSpacing ?? 0.5).toFixed(2) + "em";
+    document.documentElement.style.setProperty("--rb-chat-para-spacing", (cfg.chatParaSpacing ?? 0.5) + "em");
+    disableGpuInput.checked = cfg.disableGpuElectron ?? false;
     sidebarVisibleInput.checked = cfg.sidebarVisible ?? true;
     tasksVisibleInput.checked = cfg.tasksVisible ?? true;
     launchAtLoginInput.checked = cfg.launchAtLogin;
-    applyUiThemeSelection(normalizeUiTheme(cfg.uiTheme));
     renderUiFont(normalizeUiFont(cfg.uiFont));
     renderUiIcon(normalizeUiIcon(cfg.uiIcon));
     applyDefaultChatModeSelection(normalizeDefaultChatMode(cfg.defaultChatMode));
-    currentCustomStyleConfig = normalizeCustomStyleConfig(cfg.customStyle);
+    preferencesState.currentCustomStyleConfig = normalizeCustomStyleConfig(cfg.customStyle);
     applySegmentedOutputSelection(normalizeSegmentedOutputMode(cfg.segmentedOutputMode));
     applyMobileMessageSegmentationSelection(normalizeMobileMessageSegmentationMode(cfg.mobileMessageSegmentation));
     applyProactiveChatSelection(normalizeProactiveChatMode(cfg.proactiveChatMode));
@@ -1641,6 +949,18 @@ async function loadGeneralSettings(): Promise<void> {
   }
 }
 
+
+toggleEnableThinking.addEventListener("change", () => {
+  if (toggleEnableThinking.checked) {
+    toggleDisableThinking.checked = false;
+  }
+});
+toggleDisableThinking.addEventListener("change", () => {
+  if (toggleDisableThinking.checked) {
+    toggleEnableThinking.checked = false;
+  }
+});
+
 runtimeSyncSelect.querySelectorAll<HTMLButtonElement>(".option-block").forEach((button) => {
   button.addEventListener("click", () => {
     const value = button.dataset.value as "off" | "local" | "llm";
@@ -1652,6 +972,14 @@ runtimeSyncSelect.querySelectorAll<HTMLButtonElement>(".option-block").forEach((
 
 stickerEnabledInput.addEventListener("change", () => {
   setCyreneSaveStatus("有未保存的更改");
+});
+
+// 任何高级字段改动都标记"有未保存的更改"
+[
+  chatRequestTimeoutSecInput, maxIterationsInput, maxReplansInput, maxRefreshInput,
+  perCallTimeoutSecInput, actionGateRepairBudgetSecInput,
+].forEach((el) => {
+  el.addEventListener("input", () => setCyreneSaveStatus("有未保存的更改"));
 });
 
 stickerSizeSelect.querySelectorAll<HTMLButtonElement>(".option-block").forEach((button) => {
@@ -1667,6 +995,14 @@ stickerThresholdInput.addEventListener("input", () => {
   setCyreneSaveStatus("有未保存的更改");
 });
 
+openChromeGpu.addEventListener("click", () => {
+  window.settings?.openChromeGpu();
+});
+
+disableGpuInput.addEventListener("change", () => {
+  void window.settings?.saveGeneral({ disableGpuElectron: disableGpuInput.checked });
+});
+
 sidebarVisibleInput.addEventListener("change", () => {
   if (sidebarVisibleInput.checked) window.settings?.openSidebar();
   else window.settings?.closeSidebar();
@@ -1679,18 +1015,16 @@ tasksVisibleInput.addEventListener("change", () => {
   void window.settings?.saveGeneral({ tasksVisible: tasksVisibleInput.checked });
 });
 
-musicEnabledInput.addEventListener("change", () => {
-  syncMusicPlayback();
-  setGeneralSaveStatus("有未保存的更改");
+windowCornerRadiusInput.addEventListener("input", () => {
+  const radius = applyWindowCornerRadius(windowCornerRadiusInput.value);
+  windowCornerRadiusVal.textContent = `${radius}px`;
+  setAppearanceSaveStatus("松开后自动应用");
 });
 
-musicVolumeInput.addEventListener("input", () => {
-  syncMusicPlayback();
-  setGeneralSaveStatus("有未保存的更改");
+windowCornerRadiusInput.addEventListener("change", () => {
+  const windowCornerRadius = normalizeWindowCornerRadius(windowCornerRadiusInput.value);
+  void saveAppearancePatch({ windowCornerRadius });
 });
-
-soundEnabledInput.addEventListener("change", () => setGeneralSaveStatus("有未保存的更改"));
-soundVolumeInput.addEventListener("input", () => setGeneralSaveStatus("有未保存的更改"));
 
 petAlwaysOnTopInput.addEventListener("change", () => {
   window.settings?.setPetAlwaysOnTop(petAlwaysOnTopInput.checked);
@@ -1754,12 +1088,28 @@ petZoomInput.addEventListener("change", () => {
   setAppearanceSaveStatus("已应用", "is-ok");
 });
 
-uiThemeSelect.querySelectorAll<HTMLButtonElement>(".option-block").forEach((button) => {
-  button.addEventListener("click", () => {
-    const theme = normalizeUiTheme(button.dataset.theme);
-    applyUiThemeSelection(theme);
-    setAppearanceSaveStatus("有未保存的更改");
-  });
+// 行间距滑块
+chatLineHeightInput.addEventListener("input", () => {
+  const val = Number(chatLineHeightInput.value);
+  chatLineHeightVal.textContent = val.toFixed(2);
+  document.documentElement.style.setProperty("--rb-chat-line-height", String(val));
+  setAppearanceSaveStatus("松开后自动应用");
+});
+chatLineHeightInput.addEventListener("change", () => {
+  void saveAppearancePatch({ chatLineHeight: Number(chatLineHeightInput.value) });
+});
+assistantBubbleEnabledInput.addEventListener("change", () => {
+  void saveAppearancePatch({ assistantBubbleEnabled: assistantBubbleEnabledInput.checked });
+});
+// 段间距滑块
+chatParaSpacingInput.addEventListener("input", () => {
+  const val = Number(chatParaSpacingInput.value);
+  chatParaSpacingVal.textContent = val.toFixed(2) + "em";
+  document.documentElement.style.setProperty("--rb-chat-para-spacing", val + "em");
+  setAppearanceSaveStatus("松开后自动应用");
+});
+chatParaSpacingInput.addEventListener("change", () => {
+  void saveAppearancePatch({ chatParaSpacing: Number(chatParaSpacingInput.value) });
 });
 
 defaultChatModeSelect.querySelectorAll<HTMLButtonElement>(".option-block").forEach((button) => {
@@ -1803,827 +1153,46 @@ citaEnabledInput.addEventListener("change", () => {
   setPreferencesSaveStatus("有未保存的更改");
 });
 
-// ── 截图热键捕获 ──
-// 聚焦时临时挂起全局快捷键（防止录入时触发截图），失焦恢复。
-const MODIFIER_KEYS = new Set(["Control", "Alt", "Shift", "Meta"]);
-
-screenshotHotkeyInput?.addEventListener("focus", async () => {
-  await window.settings!.beginScreenshotHotkeyCapture();
-});
-
-screenshotHotkeyInput?.addEventListener("blur", async () => {
-  await window.settings!.endScreenshotHotkeyCapture();
-});
-
-screenshotHotkeyInput?.addEventListener("keydown", (e) => {
-  e.preventDefault();
-
-  if (e.key === "Escape") {
-    screenshotHotkeyInput!.blur();
-    return;
-  }
-  if (e.key === "Enter") {
-    screenshotHotkeyInput!.blur();
-    return;
-  }
-
-  const parts: string[] = [];
-  if (e.ctrlKey) parts.push("Ctrl");
-  if (e.altKey) parts.push("Alt");
-  if (e.shiftKey) parts.push("Shift");
-  if (e.metaKey) parts.push("Super");
-
-  // 纯修饰键不提交
-  if (MODIFIER_KEYS.has(e.key)) return;
-
-  const keyName = e.key.length === 1 ? e.key.toUpperCase() : e.key;
-  parts.push(keyName);
-
-  // 至少需要一个修饰键
-  if (parts.length < 2) return;
-
-  screenshotHotkeyInput!.value = parts.join("+");
-  setPreferencesSaveStatus("有未保存的更改");
-});
-
-chatSocialContextEnabledInput.addEventListener("change", () => {
-  setPreferencesSaveStatus("有未保存的更改");
-});
-
-customStyleSamplingBtn?.addEventListener("click", () => {
-  openCustomStyleModal();
-});
-
-customStylePromptBtn?.addEventListener("click", async () => {
-  try {
-    const result = await window.settings?.openCustomStylePrompt?.();
-    if (!result?.ok) {
-      setPreferencesSaveStatus("打开 Prompt 文件失败", "is-error");
-      return;
-    }
-    setPreferencesSaveStatus("已打开 Prompt 文件位置", "is-ok");
-  } catch {
-    setPreferencesSaveStatus("打开 Prompt 文件失败", "is-error");
-  }
-});
-
-preferencesForm.addEventListener("submit", async (e) => {
-  e.preventDefault();
-  setPreferencesSaveStatus("保存中…");
-  try {
-    await window.settings!.saveGeneral({
-      citaEnabled: citaEnabledInput.checked,
-      citaSemanticEngine: "remote",
-      chatSocialContextEnabled: chatSocialContextEnabledInput.checked,
-      defaultChatMode: getDefaultChatModeValue(),
-      segmentedOutputMode: getSegmentedOutputValue(),
-      mobileMessageSegmentation: getMobileMessageSegmentationValue(),
-      proactiveChatMode: getProactiveChatValue(),
-      proactiveDeliveryTarget: getProactiveDeliveryValue(),
-      screenshotHotkey: screenshotHotkeyInput?.value || "Alt+Shift+S",
-    });
-    setPreferencesSaveStatus("已保存", "is-ok");
-  } catch {
-    setPreferencesSaveStatus("保存失败", "is-error");
-  }
-});
-
-openStickerManagerBtn.addEventListener("click", async () => {
-  console.log("[settings] open sticker manager clicked");
-  try {
-    const result = await window.settings?.openStickerManager();
-    if (!result?.ok) {
-      console.error("[settings] open sticker manager failed", result?.error);
-      window.alert("表情包管理窗口打開失敗，請查看終端日誌。" + (result?.error ? `\n${result.error}` : ""));
-    }
-  } catch (error) {
-    console.error("[settings] open sticker manager error", error);
-    window.alert("表情包管理窗口打開失敗，請查看終端日誌。");
-  }
-});
-
-// ── 添加表情包彈窗 ──
-const stickerAddOverlay = document.getElementById("sticker-add-overlay") as HTMLElement;
-const stickerAddPickBtn = document.getElementById("sticker-add-pick-btn") as HTMLButtonElement;
-const stickerAddFileName = document.getElementById("sticker-add-file-name") as HTMLElement;
-const stickerAddId = document.getElementById("sticker-add-id") as HTMLInputElement;
-const stickerAddDesc = document.getElementById("sticker-add-desc") as HTMLInputElement;
-const stickerAddPhrases = document.getElementById("sticker-add-phrases") as HTMLTextAreaElement;
-const stickerAddError = document.getElementById("sticker-add-error") as HTMLElement;
-const stickerAddConfirm = document.getElementById("sticker-add-confirm") as HTMLButtonElement;
-const stickerAddCancel = document.getElementById("sticker-add-cancel") as HTMLButtonElement;
-
-let stickerAddPickedPath: string | null = null;
-
-function openStickerAddModal(): void {
-  stickerAddPickedPath = null;
-  stickerAddFileName.textContent = "未選擇";
-  stickerAddId.value = "";
-  stickerAddDesc.value = "";
-  stickerAddPhrases.value = "";
-  stickerAddError.classList.add("is-hidden");
-  stickerAddOverlay.classList.remove("is-hidden");
-}
-
-function closeStickerAddModal(): void {
-  stickerAddOverlay.classList.add("is-hidden");
-}
-
-addStickerBtn.addEventListener("click", openStickerAddModal);
-stickerAddCancel.addEventListener("click", closeStickerAddModal);
-
-stickerAddPickBtn.addEventListener("click", async () => {
-  const filePath = await window.settings?.stickerPickFile?.();
-  if (filePath) {
-    stickerAddPickedPath = filePath;
-    const name = filePath.split(/[\\/]/).pop() || filePath;
-    stickerAddFileName.textContent = name;
-    if (!stickerAddId.value) {
-      const baseName = name.replace(/\.[^.]+$/, "");
-      stickerAddId.value = baseName.replace(/[^a-zA-Z0-9_-]/g, "");
-    }
-  }
-});
-
-stickerAddConfirm.addEventListener("click", async () => {
-  stickerAddError.classList.add("is-hidden");
-
-  if (!stickerAddPickedPath) {
-    stickerAddError.textContent = "請先選擇圖片文件";
-    stickerAddError.classList.remove("is-hidden");
-    return;
-  }
-  const id = stickerAddId.value.trim();
-  if (!id) {
-    stickerAddError.textContent = "請填寫英文名稱";
-    stickerAddError.classList.remove("is-hidden");
-    return;
-  }
-  if (!/^[a-zA-Z0-9_-]+$/.test(id)) {
-    stickerAddError.textContent = "名稱只能用英文字母、數字、下劃線和連字符";
-    stickerAddError.classList.remove("is-hidden");
-    return;
-  }
-  const description = stickerAddDesc.value.trim();
-  if (!description) {
-    stickerAddError.textContent = "請填寫圖片描述";
-    stickerAddError.classList.remove("is-hidden");
-    return;
-  }
-  const phrases = stickerAddPhrases.value.split("\n").map((s) => s.trim()).filter(Boolean);
-  if (phrases.length === 0) {
-    stickerAddError.textContent = "請至少寫一行相近語義";
-    stickerAddError.classList.remove("is-hidden");
-    return;
-  }
-
-  try {
-    await window.settings?.stickerAdd?.({ sourcePath: stickerAddPickedPath, id, description, phrases });
-    closeStickerAddModal();
-  } catch (err) {
-    stickerAddError.textContent = "添加失敗：" + (err as Error).message;
-    stickerAddError.classList.remove("is-hidden");
-  }
-});
-
-// ── 插件開關事件 ──────────────────────────────────────────
-// 文檔檢索/用戶記憶/世界書/聯網搜索為常駐工具，無開關，顯示綠燈。
-// 天氣查詢/聯網搜索有獨立配置卡片（下方）。
-
-// ── 天氣插件（Open-Meteo / 高德天氣）──
-const weatherEnabledCheckbox = document.getElementById("plugin-weather-enabled") as HTMLInputElement | null;
-const weatherConfig = document.getElementById("plugin-weather-config") as HTMLElement | null;
-const weatherSourceSelect = document.getElementById("weather-source") as HTMLSelectElement | null;
-const amapFields = document.getElementById("amap-fields");
-const amapKeyInput = document.getElementById("amap-key") as HTMLInputElement | null;
-
-// 啟用開關：勾上才展開配置區
-function syncWeatherConfigVisibility(): void {
-  if (weatherConfig) weatherConfig.style.display = weatherEnabledCheckbox?.checked ? "block" : "none";
-  syncWeatherFieldsVisibility();
-}
-function syncWeatherFieldsVisibility(): void {
-  const src = weatherSourceSelect?.value ?? "open-meteo";
-  // 選高德才顯示高德 Key 輸入框
-  if (amapFields) amapFields.style.display = src === "amap" ? "block" : "none";
-}
-weatherEnabledCheckbox?.addEventListener("change", () => {
-  syncWeatherConfigVisibility();
-  void saveWeatherField("weatherEnabled", weatherEnabledCheckbox.checked);
-});
-weatherSourceSelect?.addEventListener("change", () => {
-  syncWeatherFieldsVisibility();
-  void saveWeatherField("weatherSource", weatherSourceSelect.value);
-});
-amapKeyInput?.addEventListener("change", () => {
-  void saveWeatherField("amapKey", amapKeyInput.value.trim());
-});
-// 防抖保存：粘貼後 800ms 自動保存
-amapKeyInput?.addEventListener("input", () => {
-  clearTimeout(amapKeyDebounceTimer);
-  amapKeyDebounceTimer = setTimeout(() => {
-    void saveWeatherField("amapKey", amapKeyInput.value.trim());
-  }, 800);
-});
-let amapKeyDebounceTimer: ReturnType<typeof setTimeout> | undefined;
-
-async function saveWeatherField(field: string, value: unknown): Promise<void> {
-  if (!window.tts) return;
-  try {
-    await window.tts.saveSettings({ [field]: value });
-  } catch (err) {
-    console.warn("[plugins] 保存天氣配置失敗:", field, err);
-  }
-}
-
-async function loadWeatherConfig(): Promise<void> {
-  try {
-    const cfg = await window.tts?.loadSettings();
-    if (cfg && weatherEnabledCheckbox) {
-      weatherEnabledCheckbox.checked = Boolean(cfg.weatherEnabled);
-    }
-    if (cfg && weatherSourceSelect) {
-      weatherSourceSelect.value = cfg.weatherSource === "amap" ? "amap" : "open-meteo";
-    }
-    if (cfg && amapKeyInput) {
-      amapKeyInput.value = String(cfg.amapKey ?? "");
-    }
-    syncWeatherConfigVisibility();
-  } catch (err) {
-    console.warn("[plugins] 加載天氣配置失敗", err);
-  }
-}
-void loadWeatherConfig();
-
-// ── 🚗出行工具 ──
-const travelEnabledCheckbox = document.getElementById("plugin-travel-enabled") as HTMLInputElement | null;
-const travelConfig = document.getElementById("plugin-travel-config") as HTMLElement | null;
-const travelAmapKeyInput = document.getElementById("travel-amap-key") as HTMLInputElement | null;
-
-function syncTravelConfigVisibility(): void {
-  if (travelConfig) travelConfig.style.display = travelEnabledCheckbox?.checked ? "block" : "none";
-}
-travelEnabledCheckbox?.addEventListener("change", () => {
-  syncTravelConfigVisibility();
-  void saveTravelField("travelEnabled", travelEnabledCheckbox.checked);
-});
-travelAmapKeyInput?.addEventListener("change", () => {
-  // 存到同一個 amapKey 字段（與天氣查詢共用）
-  void saveTravelField("amapKey", travelAmapKeyInput.value.trim());
-});
-// 防抖保存：粘貼後 800ms 自動保存
-let travelAmapKeyDebounceTimer: ReturnType<typeof setTimeout> | undefined;
-travelAmapKeyInput?.addEventListener("input", () => {
-  clearTimeout(travelAmapKeyDebounceTimer);
-  travelAmapKeyDebounceTimer = setTimeout(() => {
-    void saveTravelField("amapKey", travelAmapKeyInput.value.trim());
-  }, 800);
-});
-
-async function saveTravelField(field: string, value: unknown): Promise<void> {
-  if (!window.tts) return;
-  try {
-    await window.tts.saveSettings({ [field]: value });
-  } catch (err) {
-    console.warn("[plugins] 保存出行配置失敗:", field, err);
-  }
-}
-
-async function loadTravelConfig(): Promise<void> {
-  try {
-    const cfg = await window.tts?.loadSettings();
-    if (cfg && travelEnabledCheckbox) {
-      travelEnabledCheckbox.checked = Boolean(cfg.travelEnabled);
-    }
-    if (cfg && travelAmapKeyInput) {
-      travelAmapKeyInput.value = String(cfg.amapKey ?? "");
-    }
-    syncTravelConfigVisibility();
-  } catch (err) {
-    console.warn("[plugins] 加載出行配置失敗", err);
-  }
-}
-void loadTravelConfig();
-
-// ── ✉️郵件發送插件 ──
-const emailEnabledCheckbox = document.getElementById("plugin-email-enabled") as HTMLInputElement | null;
-const emailConfig = document.getElementById("plugin-email-config") as HTMLElement | null;
-const emailSmtpHostInput = document.getElementById("email-smtp-host") as HTMLInputElement | null;
-const emailSmtpPortInput = document.getElementById("email-smtp-port") as HTMLInputElement | null;
-const emailSmtpSecureInput = document.getElementById("email-smtp-secure") as HTMLInputElement | null;
-const emailSmtpUserInput = document.getElementById("email-smtp-user") as HTMLInputElement | null;
-const emailSmtpPassInput = document.getElementById("email-smtp-pass") as HTMLInputElement | null;
-const emailFromNameInput = document.getElementById("email-from-name") as HTMLInputElement | null;
-
-function syncEmailConfigVisibility(): void {
-  if (emailConfig) emailConfig.style.display = emailEnabledCheckbox?.checked ? "block" : "none";
-}
-emailEnabledCheckbox?.addEventListener("change", () => {
-  syncEmailConfigVisibility();
-  void saveEmailField("emailEnabled", emailEnabledCheckbox.checked);
-});
-
-// 防抖保存：每個字段獨立 timer，避免連續填寫多個字段時只有最後一個被保存
-let emailSmtpHostTimer: ReturnType<typeof setTimeout> | undefined;
-let emailSmtpPortTimer: ReturnType<typeof setTimeout> | undefined;
-let emailSmtpUserTimer: ReturnType<typeof setTimeout> | undefined;
-let emailSmtpPassTimer: ReturnType<typeof setTimeout> | undefined;
-let emailFromNameTimer: ReturnType<typeof setTimeout> | undefined;
-
-emailSmtpHostInput?.addEventListener("input", () => { clearTimeout(emailSmtpHostTimer); emailSmtpHostTimer = setTimeout(() => void saveEmailField("emailSmtpHost", emailSmtpHostInput.value.trim()), 800); });
-emailSmtpPortInput?.addEventListener("input", () => { clearTimeout(emailSmtpPortTimer); emailSmtpPortTimer = setTimeout(() => void saveEmailField("emailSmtpPort", Number(emailSmtpPortInput.value) || 465), 800); });
-emailSmtpSecureInput?.addEventListener("change", () => void saveEmailField("emailSmtpSecure", emailSmtpSecureInput.checked));
-emailSmtpUserInput?.addEventListener("input", () => { clearTimeout(emailSmtpUserTimer); emailSmtpUserTimer = setTimeout(() => void saveEmailField("emailSmtpUser", emailSmtpUserInput.value.trim()), 800); });
-emailSmtpPassInput?.addEventListener("input", () => { clearTimeout(emailSmtpPassTimer); emailSmtpPassTimer = setTimeout(() => void saveEmailField("emailSmtpPass", emailSmtpPassInput.value.trim()), 800); });
-emailFromNameInput?.addEventListener("input", () => { clearTimeout(emailFromNameTimer); emailFromNameTimer = setTimeout(() => void saveEmailField("emailFromName", emailFromNameInput.value.trim()), 800); });
-
-async function saveEmailField(field: string, value: unknown): Promise<void> {
-  if (!window.tts) return;
-  try {
-    await window.tts.saveSettings({ [field]: value });
-  } catch (err) {
-    console.warn("[plugins] 保存郵件配置失敗:", field, err);
-  }
-}
-
-async function loadEmailConfig(): Promise<void> {
-  try {
-    const cfg = await window.tts?.loadSettings();
-    if (cfg && emailEnabledCheckbox) {
-      emailEnabledCheckbox.checked = Boolean(cfg.emailEnabled);
-    }
-    if (cfg && emailSmtpHostInput) {
-      emailSmtpHostInput.value = String(cfg.emailSmtpHost ?? "");
-    }
-    if (cfg && emailSmtpPortInput) {
-      emailSmtpPortInput.value = String(cfg.emailSmtpPort ?? 465);
-    }
-    if (cfg && emailSmtpSecureInput) {
-      emailSmtpSecureInput.checked = Boolean(cfg.emailSmtpSecure);
-    }
-    if (cfg && emailSmtpUserInput) {
-      emailSmtpUserInput.value = String(cfg.emailSmtpUser ?? "");
-    }
-    if (cfg && emailSmtpPassInput) {
-      emailSmtpPassInput.value = String(cfg.emailSmtpPass ?? "");
-    }
-    if (cfg && emailFromNameInput) {
-      emailFromNameInput.value = String(cfg.emailFromName ?? "");
-    }
-    syncEmailConfigVisibility();
-  } catch (err) {
-    console.warn("[plugins] 加載郵件配置失敗", err);
-  }
-}
-void loadEmailConfig();
-
-// ── 🎧ASR 設置 ──
-const asrEngineSelect = document.getElementById("asr-engine") as HTMLSelectElement | null;
-const asrAliyunConfig = document.getElementById("asr-aliyun-config");
-const asrAliyunAppKeyInput = document.getElementById("asr-aliyun-app-key") as HTMLInputElement | null;
-const asrAliyunAccessKeyIdInput = document.getElementById("asr-aliyun-access-key-id") as HTMLInputElement | null;
-const asrAliyunAccessKeySecretInput = document.getElementById("asr-aliyun-access-key-secret") as HTMLInputElement | null;
-const asrLanguageSelect = document.getElementById("asr-language") as HTMLSelectElement | null;
-const asrVadSilenceInput = document.getElementById("asr-vad-silence") as HTMLInputElement | null;
-const asrVadThresholdInput = document.getElementById("asr-vad-threshold") as HTMLInputElement | null;
-const asrVadThresholdValue = document.getElementById("asr-vad-threshold-value");
-const asrShowTranscriptCheckbox = document.getElementById("asr-show-transcript") as HTMLInputElement | null;
-
-function syncAsrVisibility(): void {
-  if (asrAliyunConfig) {
-    (asrAliyunConfig as HTMLElement).style.display = asrEngineSelect?.value === "aliyun" ? "block" : "none";
-  }
-}
-
-asrEngineSelect?.addEventListener("change", () => {
-  syncAsrVisibility();
-  void saveAsrField("asrEngine", asrEngineSelect.value);
-});
-// 防抖保存：每個字段獨立 timer，避免連續填寫多個字段時只有最後一個被保存
-let asrAliyunAppKeyTimer: ReturnType<typeof setTimeout> | undefined;
-let asrAliyunAccessKeyIdTimer: ReturnType<typeof setTimeout> | undefined;
-let asrAliyunAccessKeySecretTimer: ReturnType<typeof setTimeout> | undefined;
-
-asrAliyunAppKeyInput?.addEventListener("input", () => { clearTimeout(asrAliyunAppKeyTimer); asrAliyunAppKeyTimer = setTimeout(() => void saveAsrField("asrAliyunAppKey", asrAliyunAppKeyInput.value.trim()), 800); });
-asrAliyunAccessKeyIdInput?.addEventListener("input", () => { clearTimeout(asrAliyunAccessKeyIdTimer); asrAliyunAccessKeyIdTimer = setTimeout(() => void saveAsrField("asrAliyunAccessKeyId", asrAliyunAccessKeyIdInput.value.trim()), 800); });
-asrAliyunAccessKeySecretInput?.addEventListener("input", () => { clearTimeout(asrAliyunAccessKeySecretTimer); asrAliyunAccessKeySecretTimer = setTimeout(() => void saveAsrField("asrAliyunAccessKeySecret", asrAliyunAccessKeySecretInput.value.trim()), 800); });
-asrLanguageSelect?.addEventListener("change", () => void saveAsrField("asrLanguage", asrLanguageSelect.value));
-asrVadSilenceInput?.addEventListener("input", () => {
-  void saveAsrField("asrVadSilenceMs", Number(asrVadSilenceInput.value) || 1000);
-});
-asrVadThresholdInput?.addEventListener("input", () => {
-  const v = Number(asrVadThresholdInput.value) || 0.01;
-  if (asrVadThresholdValue) asrVadThresholdValue.textContent = String(v);
-  void saveAsrField("asrVadThreshold", v);
-});
-asrShowTranscriptCheckbox?.addEventListener("change", () => void saveAsrField("asrShowTranscript", asrShowTranscriptCheckbox.checked));
-
-async function saveAsrField(field: string, value: unknown): Promise<void> {
-  if (!window.tts) return;
-  try {
-    await window.tts.saveSettings({ [field]: value });
-  } catch (err) {
-    console.warn("[asr] 保存 ASR 配置失败:", field, err);
-  }
-}
-
-async function loadAsrConfig(): Promise<void> {
-  try {
-    const cfg = await window.tts?.loadSettings();
-    if (cfg) {
-      if (asrEngineSelect) asrEngineSelect.value = String(cfg.asrEngine ?? "off");
-      if (asrAliyunAppKeyInput) asrAliyunAppKeyInput.value = String(cfg.asrAliyunAppKey ?? "");
-      if (asrAliyunAccessKeyIdInput) asrAliyunAccessKeyIdInput.value = String(cfg.asrAliyunAccessKeyId ?? "");
-      if (asrAliyunAccessKeySecretInput) asrAliyunAccessKeySecretInput.value = String(cfg.asrAliyunAccessKeySecret ?? "");
-      if (asrLanguageSelect) asrLanguageSelect.value = String(cfg.asrLanguage ?? "zh");
-      if (asrVadSilenceInput) asrVadSilenceInput.value = String(cfg.asrVadSilenceMs ?? 1000);
-      if (asrVadThresholdInput) {
-        const v = Number(cfg.asrVadThreshold) || 0.01;
-        asrVadThresholdInput.value = String(v);
-        if (asrVadThresholdValue) asrVadThresholdValue.textContent = String(v);
-      }
-      if (asrShowTranscriptCheckbox) asrShowTranscriptCheckbox.checked = Boolean(cfg.asrShowTranscript);
-    }
-    syncAsrVisibility();
-  } catch (err) {
-    console.warn("[asr] 加载 ASR 配置失败", err);
-  }
-}
-void loadAsrConfig();
-
-// ── 联网搜索插件（博查/Tavily/火山/MiniMax）──
-const searchEnabledCheckbox = document.getElementById("plugin-search-enabled") as HTMLInputElement | null;
-const searchConfig = document.getElementById("plugin-search-config") as HTMLElement | null;
-const searchEngineSelect = document.getElementById("search-engine") as HTMLSelectElement | null;
-const searchBochaKeyInput = document.getElementById("search-bocha-key") as HTMLInputElement | null;
-const searchTavilyKeyInput = document.getElementById("search-tavily-key") as HTMLInputElement | null;
-const searchMinimaxKeyInput = document.getElementById("search-minimax-key") as HTMLInputElement | null;
-const searchBochaRow = document.getElementById("search-bocha-row");
-const searchTavilyRow = document.getElementById("search-tavily-row");
-const searchMinimaxRow = document.getElementById("search-minimax-row");
-
-const SEARCH_ROW_MAP: Record<string, HTMLElement | null> = {
-  bocha: searchBochaRow,
-  tavily: searchTavilyRow,
-  minimax: searchMinimaxRow,
-};
-
-const SEARCH_KEY_INPUT_MAP: Record<string, HTMLInputElement | null> = {
-  bocha: searchBochaKeyInput,
-  tavily: searchTavilyKeyInput,
-  minimax: searchMinimaxKeyInput,
-};
-
-const SEARCH_KEY_FIELD_MAP: Record<string, string> = {
-  bocha: "searchBochaKey",
-  tavily: "searchTavilyKey",
-  minimax: "searchMinimaxKey",
-};
-
-function syncSearchConfigVisibility(): void {
-  if (searchConfig) searchConfig.style.display = searchEnabledCheckbox?.checked ? "block" : "none";
-  syncSearchEngineRows();
-}
-
-function syncSearchEngineRows(): void {
-  const engine = searchEngineSelect?.value ?? "off";
-  for (const [key, row] of Object.entries(SEARCH_ROW_MAP)) {
-    if (row) row.style.display = key === engine ? "flex" : "none";
-  }
-}
-
-searchEnabledCheckbox?.addEventListener("change", () => {
-  syncSearchConfigVisibility();
-  // 開關變化時，若開啟則把 searchEngine 從 off 改成第一個有 key 的源（或 bocha）
-  if (searchEnabledCheckbox.checked && searchEngineSelect?.value === "off") {
-    searchEngineSelect.value = "bocha";
-    syncSearchEngineRows();
-    void saveSearchField("searchEngine", "bocha");
-  } else {
-    void saveSearchField("searchEngine", searchEngineSelect?.value ?? "off");
-  }
-});
-
-searchEngineSelect?.addEventListener("change", () => {
-  syncSearchEngineRows();
-  void saveSearchField("searchEngine", searchEngineSelect.value);
-});
-
-// 各源 key 輸入：失焦保存 + 輸入時防抖保存（防粘貼後未失焦就丟失）
-const searchKeyDebounceTimers: Record<string, ReturnType<typeof setTimeout> | undefined> = {};
-for (const [engine, input] of Object.entries(SEARCH_KEY_INPUT_MAP)) {
-  if (!input) continue;
-  const field = SEARCH_KEY_FIELD_MAP[engine];
-  input.addEventListener("change", () => { void saveSearchField(field, input.value.trim()); });
-  input.addEventListener("blur", () => { void saveSearchField(field, input.value.trim()); });
-  // 輸入時防抖保存：粘貼或打字後 800ms 自動保存，不依賴失焦
-  input.addEventListener("input", () => {
-    clearTimeout(searchKeyDebounceTimers[engine]);
-    searchKeyDebounceTimers[engine] = setTimeout(() => {
-      void saveSearchField(field, input.value.trim());
-    }, 800);
-  });
-}
-
-async function saveSearchField(field: string, value: unknown): Promise<void> {
-  if (!window.tts) return;
-  try {
-    await window.tts.saveSettings({ [field]: value });
-  } catch (err) {
-    console.warn("[plugins] 保存搜索配置失敗:", field, err);
-  }
-}
-
-async function loadSearchConfig(): Promise<void> {
-  try {
-    const cfg = await window.tts?.loadSettings();
-    if (!cfg) return;
-    const engine = String(cfg.searchEngine ?? "off");
-    if (searchEngineSelect) searchEngineSelect.value = engine;
-    if (searchBochaKeyInput) searchBochaKeyInput.value = String(cfg.searchBochaKey ?? "");
-    if (searchTavilyKeyInput) searchTavilyKeyInput.value = String(cfg.searchTavilyKey ?? "");
-    if (searchMinimaxKeyInput) searchMinimaxKeyInput.value = String(cfg.searchMinimaxKey ?? "");
-    // 開關狀態：engine 不是 off 就算啟用
-    if (searchEnabledCheckbox) searchEnabledCheckbox.checked = engine !== "off";
-    syncSearchConfigVisibility();
-  } catch (err) {
-    console.warn("[plugins] 加載搜索配置失敗", err);
-  }
-}
-void loadSearchConfig();
-
-// ── 🌐 內置 MCP 工具開關 ──────────────────────────────────────
-// Playwright MCP（瀏覽器自動化）通過 playwrightMcpEnabled 控制，
-// main 端的 syncPlaywrightMcp() 會監聽字段變化自動註冊 / 移除 MCP server。
-const playwrightMcpCheckbox = document.getElementById("plugin-playwright-mcp-enabled") as HTMLInputElement | null;
-
-async function saveBuiltinMcpField(field: string, value: unknown): Promise<void> {
-  if (!window.tts) return;
-  try {
-    await window.tts.saveSettings({ [field]: value });
-  } catch (err) {
-    console.warn(`[settings] 保存 ${field} 失敗:`, err);
-  }
-}
-
-playwrightMcpCheckbox?.addEventListener("change", () => {
-  void saveBuiltinMcpField("playwrightMcpEnabled", playwrightMcpCheckbox.checked);
-});
-
-async function loadBuiltinMcpToggles(): Promise<void> {
-  try {
-    const cfg = await window.tts?.loadSettings();
-    if (cfg && playwrightMcpCheckbox) {
-      // 默認關閉 —— 啟用會下載 Chromium，約 150MB
-      playwrightMcpCheckbox.checked = Boolean(cfg.playwrightMcpEnabled);
-    }
-  } catch (err) {
-    console.warn("[settings] 加載內置 MCP 開關失敗:", err);
-  }
-}
-void loadBuiltinMcpToggles();
-
-// ── MCP Server 管理 UI ──────────────────────────────────────
-const pluginAddBtn = document.querySelector(".plugin-add-btn") as HTMLButtonElement | null;
-console.log("[settings] plugin-add-btn 查詢結果:", pluginAddBtn ? "找到" : "未找到");
-
-
-// 簡易命令行解析：支持引號包裹的參數
-function parseCommandLine(input: string): { command: string; args: string[] } {
-  const trimmed = input.trim();
-  if (!trimmed) return { command: "", args: [] };
-  const parts: string[] = [];
-  let current = "";
-  let inQuote = false;
-  let quoteChar = "";
-  for (const ch of trimmed) {
-    if (inQuote) {
-      if (ch === quoteChar) {
-        inQuote = false;
-      } else {
-        current += ch;
-      }
-    } else if (ch === '"' || ch === "'") {
-      inQuote = true;
-      quoteChar = ch;
-    } else if (ch === " ") {
-      if (current) {
-        parts.push(current);
-        current = "";
-      }
-    } else {
-      current += ch;
-    }
-  }
-  if (current) parts.push(current);
-  return { command: parts[0] || "", args: parts.slice(1) };
-}
-pluginAddBtn?.addEventListener("click", async () => {
-  console.log("[settings] ＋ 按鈕被點擊，彈出輸入框…");
-  const command = await showInputModal({
-    title: "添加 MCP Server",
-    message: "輸入啟動命令，例如：node C:\\my-mcp-server\\index.js",
-    placeholder: "node path\\to\\server.js --flag",
-    icon: "🧩",
-  });
-  if (!command || !command.trim()) {
-    console.log("[settings] 用戶取消或命令為空");
-    return;
-  }
-
-  const nameInput = await showInputModal({
-    title: "MCP Server 名稱",
-    message: "給這個 MCP server 起個名字（僅用於展示）",
-    placeholder: "例如：天氣工具",
-    icon: "🏷️",
-  });
-  const name = (nameInput && nameInput.trim()) || "未命名 MCP";
-  const serverId = "mcp-" + Date.now();
-  const parsed = parseCommandLine(command.trim());
-  if (!parsed.command) {
-    await showModal({ title: "添加失敗", message: "請輸入有效的啟動命令", icon: "⚠️" });
-    return;
-  }
-
-  console.log("[settings] 添加 MCP server:", name, serverId, command.trim());
-
-  try {
-    const result = await window.settings?.addMcpServer?.({
-      id: serverId,
-      name: name,
-      transport: "stdio",
-      command: parsed.command,
-      args: parsed.args,
-    });
-
-    if (result?.ok) {
-      console.log("[settings] MCP server 添加成功，工具数:", result.toolIds?.length);
-      await showModal({
-        title: "添加成功",
-        message: '"' + name + '" 已连接，发现 ' + (result.toolIds?.length || 0) + " 个工具。详情见终端日志。",
-        icon: "✅",
-      });
-    } else {
-      console.error("[settings] MCP server 添加失败:", result?.error);
-      await showModal({
-        title: "添加失败",
-        message: (result?.error || "未知错误") + "（详情见终端日志）",
-        icon: "⚠️",
-      });
-    }
-  } catch (err) {
-    console.error("[settings] MCP server 添加异常:", err);
-    await showModal({
-      title: "添加异常",
-      message: "调用过程中发生错误，详情见终端日志。",
-      icon: "⚠️",
-    });
-  }
-});
-
-clearChatHistoryBtn.addEventListener("click", async () => {
-  if (!window.confirm("清空所有聊天会话？\n此操作会删除全部历史对话，无法恢复。")) return;
-  try {
-    const sessions = await window.chatStore?.list();
-    if (sessions && sessions.length > 0) {
-      // 串行删除（store 不支持批量删除；会话数量不会大，可接受）
-      for (const s of sessions) {
-        await window.chatStore?.delete(s.id);
-      }
-    }
-    setGeneralSaveStatus("所有聊天会话已清空", "is-ok");
-  } catch (err) {
-    console.warn("[settings] 清空聊天会话失败:", err);
-    setGeneralSaveStatus("清空失败，请查看终端日志", "is-error");
-  }
-});
-
-presetCards?.addEventListener("click", (e) => {
-  const card = (e.target as HTMLElement).closest(".preset-card") as HTMLElement | null;
-  if (!card || card.classList.contains("is-disabled")) return;
-  const cardProviderName = card.dataset.provider;
-  if (!cardProviderName) return;
-
-  // 切厂商前先把当前厂商的输入值快照进缓存，避免覆盖丢失
-  captureActiveProviderProfile();
-
-  const providerName = getCustomEndpointMode(cardProviderName)
-    ? getCustomEndpointProvider(customEndpointMode)
-    : cardProviderName;
-  // 从缓存里取目标厂商的旧配置；没有缓存就用 preset 默认值
-  const cached = providerProfileCache[providerName];
-  applyPreset(
-    providerName,
-    cached?.model,
-    cached?.apiKey,
-    cached?.baseUrl,
-    cached?.displayName,
-    cached?.explicitTransport,
-  );
-  setSaveStatus(cached ? "已切回上次配置" : "已应用预设，填写 API Key 后保存");
-});
-
-customEndpointControls?.addEventListener("click", (e) => {
-  const button = (e.target as HTMLElement).closest<HTMLButtonElement>("[data-custom-endpoint-mode]");
-  const nextMode = button?.dataset.customEndpointMode as CustomEndpointMode | undefined;
-  if (!nextMode || nextMode === customEndpointMode) return;
-
-  captureActiveProviderProfile();
-  customEndpointMode = nextMode;
-  const providerName = getCustomEndpointProvider(nextMode);
-  const cached = providerProfileCache[providerName];
-  applyPreset(
-    providerName,
-    cached?.model,
-    cached?.apiKey,
-    cached?.baseUrl,
-    cached?.displayName,
-    cached?.explicitTransport,
-  );
-  setSaveStatus(cached ? "已切回上次配置" : nextMode === "local"
-    ? "请填写本地服务地址和模型 ID"
-    : "请填写云端服务地址、API Key 和模型 ID");
-});
-
-const CUSTOM_ENDPOINT_GUIDE_BODY = [
-  '<section class="custom-endpoint-guide-section">',
-  '  <h4>官方云端模型</h4>',
-  '  <p>从列表选择已适配厂商（OpenAI、Claude、Kimi、DeepSeek、MiniMax、智谱 GLM、通义千问、豆包、小米 MiMo），填写对应平台获取的 API Key 即可。Base URL 与推荐模型 ID 已预填。</p>',
-  '  <p class="custom-endpoint-guide-note">同一厂商的不同模型在结构化输出、工具调用和思考模式等能力上可能存在差异，请优先使用列表内的推荐型号。</p>',
-  '</section>',
-  '<section class="custom-endpoint-guide-section">',
-  '  <h4>自定义端点 <span>高级</span></h4>',
-  '  <p>可接入提供 OpenAI 兼容接口的云端服务、本地推理服务或第三方代理。请自行填写完整 Base URL 和服务实际提供的模型 ID。</p>',
-  '  <div class="custom-endpoint-guide-warning"><strong>本地模型与自定义端点不在官方技术支持范围内。</strong>实际能力取决于推理服务的具体实现，系统不会扫描端口、探测模型或自动升级能力档位。接入第三方代理前，请自行评估隐私和数据安全风险。</div>',
-  '  <p>建议保存后点击“<strong>测试连接</strong>”进行基础验证。连接成功仅表示服务能够响应，不代表结构化输出、工具调用和思考模式一定可用。</p>',
-  '  <p class="custom-endpoint-guide-security">🔒 你的 API Key 仅存储在本地设备，不会上传至昔涟的服务器。</p>',
-  '</section>',
-  '<section class="custom-endpoint-guide-section custom-endpoint-faq">',
-  '  <h4>常见问题</h4>',
-  '  <details>',
-  '    <summary>本地模型回复格式异常</summary>',
-  '    <p>许多本地推理服务缺少稳定的约束解码或完整协议实现，偶尔输出多余文本、Markdown 围栏或不完整 JSON 属于常见情况。系统会使用本地校验与自动修复兜底；如需更高稳定性，建议选择官方云端模型。</p>',
-  '  </details>',
-  '  <details>',
-  '    <summary>MiniMax 思考模式失效</summary>',
-  '    <p>MiniMax 在 JSON 模式下不建议同时启用思考。系统会依据已验证的配置自动处理这一冲突，以结构化结果的稳定性为优先。</p>',
-  '  </details>',
-  '  <details>',
-  '    <summary>Claude 配置项比其他厂商少</summary>',
-  '    <p>Claude 的接口规范与 OpenAI 兼容接口不同，部分参数和结构化输出档位并不适用，因此页面显示的配置项会更少。这属于正常差异，不影响已适配能力的使用。</p>',
-  '  </details>',
-  '</section>',
-].join("\n");
-
-customEndpointGuideBtn?.addEventListener("click", () => {
-  void showHtmlModal({
-    title: "模型服务接入说明",
-    icon: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.8"/><path d="M12 10.5V17" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="12" cy="7.25" r="1.1" fill="currentColor"/></svg>',
-    htmlBody: CUSTOM_ENDPOINT_GUIDE_BODY,
-  });
-});
 
 // ── 模型厂商 Work 流程适配说明 ──────────────────────────────
 // 展示各厂商结构化输出档位与实测兼容性；「详细文档」在 app 内本地渲染完整实测报告。
-const WORK_FLOW_COMPAT_MD = `## 模型兼容性
-
-> Cyrene 会根据不同厂商自动选择对应的 Structured Output Profile。
-
-| 厂商 | 支持状态 | 档位 | 已实测模型 | 说明 |
-|------|:-------:|:---:|------------|------|
-| OpenAI | ⚠️ 文档适配 | A | - | 已完成官方协议适配，等待实测。 |
-| Claude | ⚠️ 文档适配 | A | - | 已完成官方协议适配，等待实测。 |
-| 豆包 | ✅ 已实测 | A | Seed 2.1 Turbo / Pro | 推荐使用，完整 Work 流程稳定。 |
-| Kimi | ✅ 已实测 | A | K2.6、K2.7 Code | 推荐普通 API，Coding 端点不建议用于 Work。 |
-| DeepSeek | ✅ 已实测 | B | V4 Flash、V4 Pro | 推荐，速度快、稳定。 |
-| Qwen | ✅ 已实测 | B | Qwen3.7 Max | 推荐，表现稳定。 |
-| GLM | ✅ 已实测 | B | GLM 5.1、5.2 | 推荐，4.7 不建议。 |
-| MiMo | ✅ 已实测 | B | MiMo 2.5、2.5 Pro | 推荐，表现稳定。 |
-| MiniMax | ✅ 已实测 | M | MiniMax M3 | 推荐，需使用 M 档适配。 |
-| 其他模型 | ⚠️ 文档适配 | D | - | 使用通用兼容模式，请自行验证。 |
-
-### 档位说明
-
-- **A**：原生 JSON Schema / Function Calling
-- **B**：JSON Object + 本地校验
-- **M**：MiniMax 专用适配
-- **D**：通用兼容模式（未知模型 / 自定义端点）
-`;
+// 模型厂商 Work 流程适配（手写 HTML，避免引入 markdown 渲染依赖）
+const WORK_FLOW_COMPAT_MD = `
+<h2>模型兼容性</h2>
+<blockquote>Cyrene 会根据不同厂商自动选择对应的 Structured Output Profile。</blockquote>
+<table>
+  <thead>
+    <tr><th>厂商</th><th>支持状态</th><th>档位</th><th>已实测模型</th><th>说明</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>OpenAI</td><td>⚠️ 文档适配</td><td>A</td><td>-</td><td>已完成官方协议适配，等待实测。</td></tr>
+    <tr><td>Claude</td><td>⚠️ 文档适配</td><td>A</td><td>-</td><td>已完成官方协议适配，等待实测。</td></tr>
+    <tr><td>豆包</td><td>✅ 已实测</td><td>A</td><td>Seed 2.1 Turbo / Pro</td><td>推荐使用，完整 Work 流程稳定。</td></tr>
+    <tr><td>Kimi</td><td>✅ 已实测</td><td>A</td><td>K2.6、K2.7 Code</td><td>推荐普通 API，Coding 端点不建议用于 Work。</td></tr>
+    <tr><td>DeepSeek</td><td>✅ 已实测</td><td>B</td><td>V4 Flash、V4 Pro</td><td>推荐，速度快、稳定。</td></tr>
+    <tr><td>Qwen</td><td>✅ 已实测</td><td>B</td><td>Qwen3.7 Max</td><td>推荐，表现稳定。</td></tr>
+    <tr><td>GLM</td><td>✅ 已实测</td><td>B</td><td>GLM 5.1、5.2</td><td>推荐，4.7 不建议。</td></tr>
+    <tr><td>MiMo</td><td>✅ 已实测</td><td>B</td><td>MiMo 2.5、2.5 Pro</td><td>推荐，表现稳定。</td></tr>
+    <tr><td>MiniMax</td><td>✅ 已实测</td><td>M</td><td>MiniMax M3</td><td>推荐，需使用 M 档适配。</td></tr>
+    <tr><td>其他模型</td><td>⚠️ 文档适配</td><td>D</td><td>-</td><td>使用通用兼容模式，请自行验证。</td></tr>
+  </tbody>
+</table>
+<h3>档位说明</h3>
+<ul>
+  <li><strong>A</strong>：原生 JSON Schema / Function Calling</li>
+  <li><strong>B</strong>：JSON Object + 本地校验</li>
+  <li><strong>M</strong>：MiniMax 专用适配</li>
+  <li><strong>D</strong>：通用兼容模式（未知模型 / 自定义端点）</li>
+</ul>
+`.trim();
 
 function buildWorkFlowAdaptBody(): string {
-  const rendered = renderMarkdown(WORK_FLOW_COMPAT_MD);
-  const tableHtml = rendered.mode === "html" ? rendered.content : "";
   return [
     '<div class="custom-endpoint-guide-warning work-flow-adapt-meta">',
     "  <strong>模型厂商 Work 流程适配</strong>",
     '  <span class="work-flow-adapt-date">最新更新于 2026/7/24</span>',
-    '  <p class="work-flow-adapt-disclaimer">本项目为个人业余开发项目，以下兼容性结论基于有限实测，仅供参考；完整测试方法与判定规则见详细文档。</p>',
     "</div>",
-    '<p class="work-flow-adapt-doc-line">',
-    '  完整实测链路与判定规则见',
-    '  <button type="button" class="work-flow-adapt-doc-link" id="work-flow-adapt-doc-link">详细文档 ↗</button>',
-    "</p>",
-    `<div class="work-flow-adapt-table">${tableHtml}</div>`,
+    `<div class="work-flow-adapt-table">${WORK_FLOW_COMPAT_MD}</div>`,
   ].join("\n");
 }
 
@@ -2633,42 +1202,12 @@ workFlowAdaptBtn?.addEventListener("click", () => {
     icon: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.8"/><path d="M12 10.5V17" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="12" cy="7.25" r="1.1" fill="currentColor"/></svg>',
     htmlBody: buildWorkFlowAdaptBody(),
   });
-  // 「详细文档」在 app 内本地渲染完整实测报告（?raw 内联 md + renderMarkdown）
-  const docLink = document.querySelector(
-    "#cy-html-modal-body #work-flow-adapt-doc-link",
-  ) as HTMLButtonElement | null;
-  docLink?.addEventListener("click", () => {
-    const rendered = renderMarkdown(workFlowDocMd);
-    const docHtml = rendered.mode === "html" ? rendered.content : "";
-    void showHtmlModal({
-      title: "详细文档",
-      icon: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M14 3v4a1 1 0 0 0 1 1h4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M6 3h9l5 5v11a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>',
-      htmlBody: `<div class="work-flow-doc">${docHtml}</div>`,
-    });
-    // 代码块复制按钮（设置窗未初始化 chat 的 code-block controller，这里就近绑定）
-    const copyBtns = document.querySelectorAll<HTMLButtonElement>(
-      "#cy-html-modal-body .code-block__copy",
-    );
-    copyBtns.forEach((btn) => {
-      btn.addEventListener("click", () => {
-        const code =
-          btn.closest(".code-block")?.querySelector(".code-block__code")?.textContent ?? "";
-        void navigator.clipboard.writeText(code).then(() => {
-          const orig = btn.textContent;
-          btn.textContent = "已复制";
-          window.setTimeout(() => {
-            btn.textContent = orig;
-          }, 1200);
-        });
-      });
-    });
-  });
 });
 
 // 测试连接按钮：调用厂商 adapter 的真实连接测试
 if (testConnectionBtn) {
   testConnectionBtn.addEventListener("click", async () => {
-    const provider = activeProvider;
+    const provider = apiState.activeProvider;
     const baseUrl = baseUrlInput.value;
     const model = getCurrentModelValue().trim();
     const customValidationError = validateActiveCustomEndpoint();
@@ -2677,8 +1216,11 @@ if (testConnectionBtn) {
       return;
     }
     const apiKey = getApiKeyForRequest();
-    if (!apiKey) { setSaveStatus("请先填写 API Key 再测试", "is-error"); return; }
+    if (!baseUrl) { setSaveStatus("请先填写 API URL 再测试", "is-error"); return; }
     if (!model) { setSaveStatus("请先选择/填写模型再测试", "is-error"); return; }
+    if (!await saveTimeoutSettings(true)) {
+      return;
+    }
     setSaveStatus("测试连接中…");
     testConnectionBtn.disabled = true;
     try {
@@ -2688,7 +1230,7 @@ if (testConnectionBtn) {
         model,
         apiKey,
         explicitTransport: transportSelect.value as ProviderProfile["explicitTransport"],
-        reasoning: providerProfileCache[activeProvider]?.reasoning,
+        reasoning: providerProfileCache[apiState.activeProvider]?.reasoning,
       });
       if (result.ok) setSaveStatus("连接成功 " + result.latency + "ms · " + (result.sample ?? ""), "is-ok");
       else setSaveStatus("连接失败：" + (result.error ?? "未知错误"), "is-error");
@@ -2709,19 +1251,44 @@ multimodalToggle.addEventListener("change", () => {
 
 // Base URL 重置按钮：一键复原厂商默认 baseUrl
 baseUrlResetBtn.addEventListener("click", () => {
-  const preset = findPreset(activeProvider);
+  const preset = findPreset(apiState.activeProvider);
   if (preset) {
-    baseUrlInput.value = preset.baseUrl;
+    baseUrlInput.value = transportSelect.value === "anthropic" && preset.anthropicBaseUrl
+      ? preset.anthropicBaseUrl
+      : preset.baseUrl;
+    updateEndpointPreview();
     setSaveStatus("已重置为厂商默认 URL");
   }
 });
 
+baseUrlInput.addEventListener("input", updateEndpointPreview);
+transportSelect.addEventListener("change", () => {
+  const preset = findPreset(apiState.activeProvider);
+  const currentBaseUrl = baseUrlInput.value.trim().replace(/\/$/, "");
+  const knownPresetUrls = [preset.baseUrl, preset.anthropicBaseUrl]
+    .filter((value): value is string => Boolean(value))
+    .map((value) => value.replace(/\/$/, ""));
+  if (knownPresetUrls.includes(currentBaseUrl)) {
+    if (transportSelect.value === "anthropic" && preset.anthropicBaseUrl) {
+      baseUrlInput.value = preset.anthropicBaseUrl;
+    } else if (transportSelect.value === "openai") {
+      baseUrlInput.value = preset.baseUrl;
+    }
+  }
+  updateEndpointPreview();
+  if (transportSelect.value === "anthropic" && !preset.anthropicBaseUrl && preset.transport !== "anthropic") {
+    transportHint.textContent = "该厂商的 A口地址未内置；请按服务商文档填写 A口 Base URL，程序只追加 /v1/messages。";
+  }
+  setSaveStatus("有未保存的更改");
+});
+
 // 测试视觉模型按钮（仅在多模态开关 OFF 时可见）
 testVisionBtn.addEventListener("click", async () => {
-  const baseUrl = visionBaseUrlInput.value;
-  const apiKey = visionApiKeyInput.value;
-  const model = visionModelInput.value;
-  if (!apiKey) { visionTestStatus.textContent = "请先填写 API Key"; return; }
+  const synced = multimodalToggle.checked;
+  const baseUrl = synced ? baseUrlInput.value : visionBaseUrlInput.value;
+  const apiKey = synced ? apiKeyInput.value : visionApiKeyInput.value;
+  const model = synced ? getCurrentModelValue() : visionModelInput.value;
+  if (!baseUrl) { visionTestStatus.textContent = "请先填写 API URL"; return; }
   if (!model) { visionTestStatus.textContent = "请先填写视觉型号"; return; }
   visionTestStatus.textContent = "测试中…";
   testVisionBtn.disabled = true;
@@ -2736,138 +1303,54 @@ testVisionBtn.addEventListener("click", async () => {
   }
 });
 
-function toLocalDateTimeInputValue(value: string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
-}
 
-function isValidTimeOfDay(value: string): boolean {
-  return /^([01]\d|2[0-3]):[0-5]\d$/.test(value);
-}
 
-function formatSchedulerDate(value: string | null | undefined): string {
-  if (!value) return "未安排";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "時間無效";
-  return date.toLocaleString();
-}
 
-function describeSchedule(schedule: ScheduleConfig): string {
-  if (schedule.kind === "once") return "僅一次 " + formatSchedulerDate(schedule.runAt);
-  if (schedule.kind === "daily") return "每天 " + schedule.timeOfDay;
-  if (schedule.kind === "weekly") {
-    const names = ["週日", "週一", "週二", "週三", "週四", "週五", "週六"];
-    return `${names[schedule.dayOfWeek]} ${schedule.timeOfDay}`;
-  }
-  return `每隔 ${schedule.every} ${schedule.unit === "minutes" ? "分鐘" : "小時"}`;
-}
-
-function setSchedulerStatus(text: string, className = ""): void {
-  if (!schedulerSaveStatus) return;
-  schedulerSaveStatus.textContent = text;
-  schedulerSaveStatus.className = "save-status" + (className ? " " + className : "");
-}
-
-function renderSchedulerTools(selectedIds: string[] = []): void {
-  if (!schedulerToolPicker) return;
-  schedulerToolPicker.replaceChildren();
-  const selected = new Set(selectedIds);
-  for (const tool of schedulerTools) {
-    const label = document.createElement("label");
-    label.className = "scheduler-tool-option";
-    const checkbox = document.createElement("input");
-    checkbox.type = "checkbox";
-    checkbox.value = tool.id;
-    checkbox.checked = selected.has(tool.id);
-    checkbox.addEventListener("change", updateSchedulerConditionalFields);
-    const copy = document.createElement("span");
-    copy.textContent = `${tool.name} (${tool.id}) · ${tool.risk}${tool.enabled ? "" : " · 已全局禁用"}`;
-    label.appendChild(checkbox);
-    label.appendChild(copy);
-    schedulerToolPicker.appendChild(label);
-  }
-}
-
-async function renderSchedulerList(): Promise<void> {
-  if (!schedulerList || !schedulerEmpty) return;
-  schedulerList.replaceChildren();
-  schedulerEmpty.classList.toggle("is-hidden", schedulerTasks.length > 0);
-  for (const task of schedulerTasks) {
-    const card = document.createElement("article");
-    card.className = "scheduler-card";
-    card.innerHTML = `
-      <div class="scheduler-card__head">
-        <div class="scheduler-card__title"><span><svg width="16" height="16" viewBox="0 0 48 48" fill="none" aria-hidden="true"><path d="M23.9998 44.3332C34.1251 44.3332 42.3332 36.1251 42.3332 25.9999C42.3332 15.8747 34.1251 7.66656 23.9998 7.66656C13.8746 7.66656 5.6665 15.8747 5.6665 25.9999C5.6665 36.1251 13.8746 44.3332 23.9998 44.3332Z" fill="none" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/><path d="M23.7594 15.3536L23.7582 26.3624L31.5305 34.1347" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 9.00001L11 4.00001" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><path d="M44 9.00001L37 4.00001" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></svg></span><strong></strong><span class="scheduler-badge"></span></div>
-      </div>
-      <div class="scheduler-card__meta"></div>
-      <div class="scheduler-card__actions"></div>
-      <div class="scheduler-history is-hidden"></div>
-    `;
-    const strong = card.querySelector("strong");
-    if (strong) strong.textContent = task.title;
-    const badge = card.querySelector(".scheduler-badge") as HTMLSpanElement | null;
-    if (badge) {
-      badge.textContent = task.managedBy === "daily-ritual"
-        ? `每日儀式 · ${task.enabled ? "已啟用" : "已停用"}`
-        : task.enabled ? "已啟用" : "已停用";
-      badge.classList.toggle("is-disabled", !task.enabled);
-    }
-    const meta = card.querySelector(".scheduler-card__meta");
-    if (meta) meta.textContent = `${describeSchedule(task.schedule)} · 下次運行：${formatSchedulerDate(task.nextFireAt)} · 工具：${task.toolMode === "all-enabled" ? "全部已啟用工具" : task.allowedToolIds.join(", ") || "無"}`;
-    const actions = card.querySelector(".scheduler-card__actions") as HTMLDivElement | null;
-    if (actions) {
-      const fireBtn = document.createElement("button");
-      fireBtn.type = "button";
-      fireBtn.className = "ghost-btn";
-      fireBtn.textContent = "立即運行";
-      fireBtn.addEventListener("click", () => void fireSchedulerTask(task.id));
-      const editBtn = document.createElement("button");
-      editBtn.type = "button";
-      editBtn.className = "ghost-btn";
-      editBtn.textContent = "編輯";
-      editBtn.addEventListener("click", () => void openSchedulerEditor(task));
-      const toggleBtn = document.createElement("button");
-      toggleBtn.type = "button";
-      toggleBtn.className = "ghost-btn";
-      toggleBtn.textContent = task.enabled ? "停用" : "啟用";
-      toggleBtn.addEventListener("click", () => void toggleSchedulerTask(task.id, !task.enabled));
-      const historyBtn = document.createElement("button");
-      historyBtn.type = "button";
-      historyBtn.className = "ghost-btn";
-      historyBtn.textContent = "歷史";
-      historyBtn.addEventListener("click", () => void toggleSchedulerHistory(task.id, card));
-      const deleteBtn = document.createElement("button");
-      deleteBtn.type = "button";
-      deleteBtn.className = "ghost-btn";
-      deleteBtn.textContent = "刪除";
-      deleteBtn.addEventListener("click", () => void deleteSchedulerTask(task.id));
-      if (task.managedBy === "daily-ritual") {
-        actions.append(fireBtn, historyBtn);
-      } else {
-        actions.append(fireBtn, editBtn, toggleBtn, historyBtn, deleteBtn);
-      }
-    }
-    schedulerList.appendChild(card);
-  }
-}
-
-appearanceForm.addEventListener("submit", async (e) => {
+apiRuntimeForm.addEventListener("submit", async (e) => {
   e.preventDefault();
-  setAppearanceSaveStatus("保存中…");
+  setRuntimeSaveStatus("保存中…");
   try {
-    await window.settings!.saveGeneral(buildAppearanceSettingsPatch({
-      uiTheme: getUiThemeValue(),
-      uiIcon: getUiIconValue(),
-      petAlwaysOnTop: petAlwaysOnTopInput.checked,
-      petVisible: petVisibleInput.checked,
-      petZoom: Number(petZoomInput.value),
-    }));
-    setAppearanceSaveStatus("已保存", "is-ok");
+    const parsedTimeoutSec = Math.max(30, Math.min(1800, parseInt(chatRequestTimeoutSecInput.value, 10) || 300));
+    const parsedMaxIterations = Math.max(5, Math.min(30, parseInt(maxIterationsInput.value, 10) || 12));
+    const parsedMaxReplans = Math.max(1, Math.min(5, parseInt(maxReplansInput.value, 10) || 2));
+    const parsedMaxRefresh = Math.max(0, Math.min(3, parseInt(maxRefreshInput.value, 10) || 1));
+    const parsedPerCallSec = Math.max(30, Math.min(120, parseInt(perCallTimeoutSecInput.value, 10) || 75));
+    const parsedAgSec = Math.max(5, Math.min(40, parseInt(actionGateRepairBudgetSecInput.value, 10) || 10));
+    await window.settings!.saveConfig({
+      chatRequestTimeoutSec: parsedTimeoutSec,
+      maxIterations: parsedMaxIterations,
+      maxReplans: parsedMaxReplans,
+      maxRefresh: parsedMaxRefresh,
+      perCallTimeoutSec: parsedPerCallSec,
+      actionGateRepairBudgetSec: parsedAgSec,
+    });
+    // 同步超时到 TimeoutSettings（秒→毫秒）
+    await window.settings!.saveTimeoutSettings({
+      chatRequestTimeout: parsedTimeoutSec * 1000,
+      perRoundTimeout: parsedPerCallSec * 1000,
+      profileTotalBudgetMs: parseN1SecToMsOrThrow(timeoutProfileTotalBudgetInput.value, "Action Gate 总阶段时限"),
+      profilePerAttemptTimeoutMs: parseN1SecToMsOrThrow(timeoutProfilePerAttemptInput.value, "阶段内单次尝试超时"),
+      profileMinimumRemainingBudgetMs: parseN1SecToMsOrThrow(timeoutProfileRemainingInput.value, "最小剩余时间"),
+    });
+    setRuntimeSaveStatus("已保存", "is-ok");
   } catch {
-    setAppearanceSaveStatus("保存失败", "is-error");
+    setRuntimeSaveStatus("保存失败", "is-error");
   }
+});
+
+apiTimeoutForm.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  setTimeoutSaveStatus("保存中…");
+  try {
+    await saveTimeoutSettings(false);
+    setTimeoutSaveStatus("已保存", "is-ok");
+  } catch {
+    setTimeoutSaveStatus("保存失败", "is-error");
+  }
+});
+
+appearanceForm.addEventListener("submit", (e) => {
+  e.preventDefault();
 });
 
 generalForm.addEventListener("submit", async (e) => {
@@ -2875,10 +1358,7 @@ generalForm.addEventListener("submit", async (e) => {
   setGeneralSaveStatus("保存中…");
   try {
     await window.settings!.saveGeneral({
-      musicEnabled: musicEnabledInput.checked,
-      musicVolume: Number(musicVolumeInput.value),
-      soundEnabled: soundEnabledInput.checked,
-      soundVolume: Number(soundVolumeInput.value),
+      disableGpuElectron: disableGpuInput.checked,
       sidebarVisible: sidebarVisibleInput.checked,
       tasksVisible: tasksVisibleInput.checked,
       launchAtLogin: launchAtLoginInput.checked,
@@ -2886,7 +1366,7 @@ generalForm.addEventListener("submit", async (e) => {
     });
     setGeneralSaveStatus("已保存", "is-ok");
   } catch {
-    setGeneralSaveStatus("保存失敗", "is-error");
+    setGeneralSaveStatus("保存失败", "is-error");
   }
 });
 
@@ -2894,7 +1374,30 @@ cyrenePanel.addEventListener("submit", async (e) => {
   e.preventDefault();
   setCyreneSaveStatus("保存中…");
   try {
-    await window.settings!.saveConfig({ runtimeSync: getRuntimeSyncValue(), stickerEnabled: stickerEnabledInput.checked, stickerSize: getStickerSizeValue(), stickerSimilarityThreshold: parseFloat(stickerThresholdInput.value) });
+    const parsedTimeoutSec = Math.max(30, Math.min(1800, parseInt(chatRequestTimeoutSecInput.value, 10) || 300));
+    const parsedMaxIterations = Math.max(5, Math.min(30, parseInt(maxIterationsInput.value, 10) || 12));
+    const parsedMaxReplans = Math.max(1, Math.min(5, parseInt(maxReplansInput.value, 10) || 2));
+    const parsedMaxRefresh = Math.max(0, Math.min(3, parseInt(maxRefreshInput.value, 10) || 1));
+    const parsedPerCallSec = Math.max(30, Math.min(120, parseInt(perCallTimeoutSecInput.value, 10) || 75));
+    const parsedAgSec = Math.max(5, Math.min(40, parseInt(actionGateRepairBudgetSecInput.value, 10) || 10));
+    const rawDim = embeddingDimensionsInput?.value?.trim();
+    const parsedNum = rawDim ? Number(rawDim) : NaN;
+    const parsedDim = Number.isFinite(parsedNum) && parsedNum > 0
+      ? Math.max(1, Math.min(65536, Math.round(parsedNum)))
+      : undefined;
+    await window.settings!.saveConfig({
+      runtimeSync: getRuntimeSyncValue(),
+      stickerEnabled: stickerEnabledInput.checked,
+      stickerSize: getStickerSizeValue(),
+      stickerSimilarityThreshold: parseFloat(stickerThresholdInput.value),
+      chatRequestTimeoutSec: parsedTimeoutSec,
+      maxIterations: parsedMaxIterations,
+      maxReplans: parsedMaxReplans,
+      maxRefresh: parsedMaxRefresh,
+      perCallTimeoutSec: parsedPerCallSec,
+      actionGateRepairBudgetSec: parsedAgSec,
+      embeddingDimensions: parsedDim && parsedDim > 0 ? parsedDim : undefined,
+    });
     setCyreneSaveStatus("已保存", "is-ok");
   } catch {
     setCyreneSaveStatus("保存失败", "is-error");
@@ -2910,6 +1413,9 @@ apiForm.addEventListener("submit", async (e) => {
   }
   setSaveStatus("保存中…");
   try {
+    if (!await saveTimeoutSettings(true)) {
+      return;
+    }
     // 保存前把当前输入快照进 perProvider 缓存（main 进程也会做一次，但渲染端先做一遍，
     // 是为了下一次切厂商再切回来不依赖磁盘往返）
     captureActiveProviderProfile();
@@ -2917,13 +1423,13 @@ apiForm.addEventListener("submit", async (e) => {
     // 默认 "manual"（baseUrl 永远可改、模型名永远可填，行为等同原 Manual）。
     await window.settings!.saveConfig({
       mode: "manual",
-      provider: activeProvider,
+      provider: apiState.activeProvider,
       displayName: displayNameInput.value.trim(),
       baseUrl: baseUrlInput.value.trim(),
       model: getCurrentModelValue().trim(),
       apiKey: getApiKeyForRequest(),
-      explicitTransport: transportSelect.value as "openai" | "anthropic" | "auto",
-      reasoning: providerProfileCache[activeProvider]?.reasoning,
+      explicitTransport: transportSelect.value as ApiTransport,
+      reasoning: providerProfileCache[apiState.activeProvider]?.reasoning,
       perProvider: { ...providerProfileCache },
       multimodal: multimodalToggle.checked,
       // 视觉配置始终传三框值，不论开关状态（开关 ON 时保留但不使用）
@@ -2932,6 +1438,9 @@ apiForm.addEventListener("submit", async (e) => {
         apiKey: visionApiKeyInput.value.trim(),
         model: visionModelInput.value.trim(),
       },
+      thinkingOverride: toggleEnableThinking.checked ? 1 : toggleDisableThinking.checked ? -1 : 0,
+      disableMaxToken: toggleDisableMaxToken.checked,
+      contextWindowTokens: Math.max(4096, parseInt(contextWindowInput.value, 10) || 256000),
     });
     setSaveStatus("已保存", "is-ok");
   } catch {
@@ -2939,166 +1448,16 @@ apiForm.addEventListener("submit", async (e) => {
   }
 });
 
-async function loadSchedulerPanel(): Promise<void> {
-  const [tasksResult, toolsResult] = await Promise.all([
-    window.cyreneScheduler!.list(),
-    window.cyreneScheduler!.getTools(),
-  ]);
-  if (tasksResult.ok) schedulerTasks = tasksResult.value ?? [];
-  if (toolsResult.ok) schedulerTools = toolsResult.value ?? [];
-  renderSchedulerTools();
-  await renderSchedulerList();
-}
 
-async function openSchedulerEditor(task?: ScheduledTask): Promise<void> {
-  editingSchedulerTaskId = task?.id ?? null;
-  schedulerEditor?.classList.remove("is-hidden");
-  // 確保工具列表已加載
-  if (schedulerTools.length === 0) {
-    const toolsResult = await window.cyreneScheduler!.getTools();
-    if (toolsResult.ok) schedulerTools = toolsResult.value ?? [];
-  }
-  if (schedulerEditorTitle) schedulerEditorTitle.textContent = task ? "編輯定時任務" : "新建定時任務";
-  if (schedulerTitleInput) schedulerTitleInput.value = task?.title ?? "";
-  if (schedulerPromptInput) schedulerPromptInput.value = task?.prompt ?? "";
-  if (schedulerEnabledInput) schedulerEnabledInput.checked = task?.enabled ?? true;
-  if (schedulerKindInput) schedulerKindInput.value = task?.schedule.kind ?? "daily";
-  if (schedulerOnceRunAtInput) schedulerOnceRunAtInput.value = "";
-  if (schedulerTimeOfDayInput) schedulerTimeOfDayInput.value = "08:00";
-  if (schedulerDayOfWeekInput) schedulerDayOfWeekInput.value = "1";
-  if (schedulerIntervalEveryInput) schedulerIntervalEveryInput.value = "1";
-  if (schedulerIntervalUnitInput) schedulerIntervalUnitInput.value = "minutes";
-  if (task?.schedule.kind === "once" && schedulerOnceRunAtInput) schedulerOnceRunAtInput.value = toLocalDateTimeInputValue(task.schedule.runAt);
-  if ((task?.schedule.kind === "daily" || task?.schedule.kind === "weekly") && schedulerTimeOfDayInput) schedulerTimeOfDayInput.value = task.schedule.timeOfDay;
-  if (task?.schedule.kind === "weekly" && schedulerDayOfWeekInput) schedulerDayOfWeekInput.value = String(task.schedule.dayOfWeek);
-  if (task?.schedule.kind === "interval") {
-    if (schedulerIntervalEveryInput) schedulerIntervalEveryInput.value = String(task.schedule.every);
-    if (schedulerIntervalUnitInput) schedulerIntervalUnitInput.value = task.schedule.unit;
-  }
-  if (schedulerToolLimitInput) schedulerToolLimitInput.checked = task?.toolMode === "allow-list";
-  renderSchedulerTools(task?.allowedToolIds ?? []);
-  updateSchedulerConditionalFields();
-  setSchedulerStatus("等待操作");
-}
 
-function closeSchedulerEditor(): void {
-  editingSchedulerTaskId = null;
-  schedulerEditor?.classList.add("is-hidden");
-}
 
-function updateSchedulerConditionalFields(): void {
-  const kind = schedulerKindInput?.value ?? "daily";
-  document.querySelectorAll(".scheduler-once-field").forEach(el => el.classList.toggle("is-hidden", kind !== "once"));
-  document.querySelectorAll(".scheduler-time-field").forEach(el => el.classList.toggle("is-hidden", kind !== "daily" && kind !== "weekly"));
-  document.querySelectorAll(".scheduler-weekly-field").forEach(el => el.classList.toggle("is-hidden", kind !== "weekly"));
-  document.querySelectorAll(".scheduler-interval-field").forEach(el => el.classList.toggle("is-hidden", kind !== "interval"));
-  const allowListEnabled = Boolean(schedulerToolLimitInput?.checked);
-  schedulerToolPicker?.classList.toggle("is-hidden", !allowListEnabled);
-  const selectedCount = collectAllowedToolIds().length;
-  schedulerToolEmptyHint?.classList.toggle("is-hidden", !allowListEnabled || selectedCount > 0);
-}
 
-function collectSchedule(): ScheduleConfig {
-  const kind = schedulerKindInput?.value ?? "daily";
-  if (kind === "once") {
-    const value = schedulerOnceRunAtInput?.value;
-    if (!value) throw new Error("請選擇一次性運行時間");
-    const runAt = new Date(value);
-    if (Number.isNaN(runAt.getTime())) throw new Error("一次性運行時間無效");
-    if (runAt.getTime() <= Date.now()) throw new Error("一次性任務時間必須晚於當前時間");
-    return { kind: "once", runAt: runAt.toISOString() };
-  }
-  if (kind === "weekly") {
-    const timeOfDay = schedulerTimeOfDayInput?.value || "08:00";
-    if (!isValidTimeOfDay(timeOfDay)) throw new Error("每週時間格式必須是 HH:mm");
-    const dayOfWeek = Number(schedulerDayOfWeekInput?.value ?? 1);
-    if (!Number.isInteger(dayOfWeek) || dayOfWeek < 0 || dayOfWeek > 6) throw new Error("星期必須是週一到週日");
-    return { kind: "weekly", dayOfWeek: dayOfWeek as 0 | 1 | 2 | 3 | 4 | 5 | 6, timeOfDay };
-  }
-  if (kind === "interval") {
-    const every = Number(schedulerIntervalEveryInput?.value ?? 1);
-    const unit = schedulerIntervalUnitInput?.value === "hours" ? "hours" : "minutes";
-    if (!Number.isInteger(every) || every <= 0) throw new Error("間隔必須是正整數");
-    if (unit === "minutes" && every > 1440) throw new Error("分鐘間隔不能超過 1440");
-    if (unit === "hours" && every > 168) throw new Error("小時間隔不能超過 168");
-    return { kind: "interval", every, unit };
-  }
-  const timeOfDay = schedulerTimeOfDayInput?.value || "08:00";
-  if (!isValidTimeOfDay(timeOfDay)) throw new Error("每日時間格式必須是 HH:mm");
-  return { kind: "daily", timeOfDay };
-}
 
-function collectAllowedToolIds(): string[] {
-  if (!schedulerToolPicker) return [];
-  return Array.from(schedulerToolPicker.querySelectorAll<HTMLInputElement>('input[type="checkbox"]:checked')).map(input => input.value);
-}
 
-async function saveSchedulerTask(): Promise<void> {
-  try {
-    setSchedulerStatus("保存中…");
-    const title = (schedulerTitleInput?.value ?? "").trim();
-    const prompt = (schedulerPromptInput?.value ?? "").trim();
-    if (!title) throw new Error("標題不能為空");
-    if (!prompt) throw new Error("提示詞不能為空");
-    const input = {
-      title,
-      prompt,
-      enabled: schedulerEnabledInput?.checked ?? true,
-      schedule: collectSchedule(),
-      toolMode: schedulerToolLimitInput?.checked ? "allow-list" : "all-enabled",
-      allowedToolIds: collectAllowedToolIds(),
-    };
-    const result = editingSchedulerTaskId
-      ? await window.cyreneScheduler!.update(editingSchedulerTaskId, input)
-      : await window.cyreneScheduler!.add(input);
-    if (!result.ok) throw new Error(result.error ?? "保存失敗");
-    await loadSchedulerPanel();
-    closeSchedulerEditor();
-  } catch (err) {
-    setSchedulerStatus(err instanceof Error ? err.message : String(err), "is-error");
-  }
-}
 
-async function toggleSchedulerTask(id: string, enabled: boolean): Promise<void> {
-  const result = await window.cyreneScheduler!.toggle(id, enabled);
-  if (!result.ok) window.alert(result.error ?? "切换失败");
-  await loadSchedulerPanel();
-}
 
-async function fireSchedulerTask(id: string): Promise<void> {
-  const result = await window.cyreneScheduler!.fireNow(id);
-  if (!result.ok) window.alert(result.reason === "task already running" ? "该任务正在运行中" : (result.error ?? result.reason ?? "立即运行失败"));
-}
 
-async function deleteSchedulerTask(id: string): Promise<void> {
-  const ok = await showModal({ title: "删除定时任务", message: "确定删除这个定时任务吗？", icon: '<svg width="18" height="18" viewBox="0 0 48 48" fill="none" aria-hidden="true" style="vertical-align:-2px"><path fill-rule="evenodd" clip-rule="evenodd" d="M8 15H40L37 44H11L8 15Z" fill="none" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/><path d="M20.002 25.0024V35.0026" stroke="currentColor" stroke-width="4" stroke-linecap="round"/><path d="M28.0024 24.9995V34.9972" stroke="currentColor" stroke-width="4" stroke-linecap="round"/><path d="M12 14.9999L28.3242 3L36 15" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></svg>', confirmText: "删除" });
-  if (!ok) return;
-  const result = await window.cyreneScheduler!.delete(id);
-  if (!result.ok) window.alert(result.error ?? "删除失败");
-  await loadSchedulerPanel();
-}
 
-async function toggleSchedulerHistory(taskId: string, card: Element): Promise<void> {
-  const box = card.querySelector(".scheduler-history") as HTMLDivElement | null;
-  if (!box) return;
-  if (!box.classList.contains("is-hidden")) {
-    box.classList.add("is-hidden");
-    return;
-  }
-  const result = await window.cyreneScheduler!.getHistory(taskId, 10);
-  const rows = result.value ?? [];
-  box.replaceChildren();
-  if (!result.ok || rows.length === 0) {
-    box.textContent = result.ok ? "暫無運行歷史" : (result.error ?? "讀取歷史失敗");
-  } else {
-    for (const row of rows) {
-      const div = document.createElement("div");
-      div.textContent = `${formatSchedulerDate(row.firedAt)} ${row.status}${row.durationMs ? ` ${Math.round(row.durationMs / 100) / 10}s` : ""}：${row.outputPreview ?? row.errorMessage ?? row.reason ?? ""}`;
-      box.appendChild(div);
-    }
-  }
-  box.classList.remove("is-hidden");
-}
 
 function switchSection(section: string): void {
   const label = NAV_LABELS[section] ?? NAV_LABELS.api;
@@ -3106,6 +1465,7 @@ function switchSection(section: string): void {
   sectionHint.textContent = label.hint;
 
   const isApi = section === "api";
+  const isApiAdvanced = section === "api-advanced";
   const isAppearance = section === "appearance";
   const isGeneral = section === "general";
   const isPreferences = section === "preferences";
@@ -3113,7 +1473,6 @@ function switchSection(section: string): void {
   const isDisclaimer = section === "disclaimer";
   const isMemory = section === "memory";
   const isUser = section === "user";
-  const isChat = section === "chat";
   const isTasks = section === "tasks";
   const isPlugins = section === "plugins";
   const isSkills = section === "skills";
@@ -3123,6 +1482,8 @@ function switchSection(section: string): void {
   const isAsr = section === "asr";
   const isMusic = section === "music";
   apiForm.classList.toggle("is-hidden", !isApi);
+  apiRuntimeForm.classList.toggle("is-hidden", !isApiAdvanced);
+  apiTimeoutForm.classList.toggle("is-hidden", !isApiAdvanced);
   appearanceForm.classList.toggle("is-hidden", !isAppearance);
   generalForm.classList.toggle("is-hidden", !isGeneral);
   preferencesForm.classList.toggle("is-hidden", !isPreferences);
@@ -3132,10 +1493,6 @@ function switchSection(section: string): void {
   if (memoryPanel) memoryPanel.classList.toggle("is-hidden", !isMemory);
   const userPanel = document.getElementById("user-panel");
   if (userPanel) userPanel.classList.toggle("is-hidden", !isUser);
-  const chatPanel = document.getElementById("chat-panel");
-  if (chatPanel) chatPanel.classList.toggle("is-hidden", !isChat);
-  // 切到 💬 聊天面板時拉一次列表（cross-window 變化由 onChanged 監聽器自己刷新）
-  if (isChat) void renderChatSessions();
   const tasksPanel = document.getElementById("tasks-panel");
   if (tasksPanel) tasksPanel.classList.toggle("is-hidden", !isTasks);
   if (isTasks) void loadSchedulerPanel();
@@ -3158,11 +1515,12 @@ function switchSection(section: string): void {
   else disposeMusicPanel();
   placeholderPanel.classList.toggle(
     "is-hidden",
-    isApi || isAppearance || isGeneral || isPreferences || isCyrene || isDisclaimer || isMemory || isUser || isChat || isTasks || isPlugins || isSkills || isTokens || isChannels || isTts || isAsr || isMusic,
+    isApi || isApiAdvanced || isAppearance || isGeneral || isPreferences || isCyrene || isDisclaimer || isMemory || isUser || isTasks || isPlugins || isSkills || isTokens || isChannels || isTts || isAsr || isMusic,
   );
 
   if (
     !isApi &&
+    !isApiAdvanced &&
     !isAppearance &&
     !isGeneral &&
     !isPreferences &&
@@ -3170,9 +1528,8 @@ function switchSection(section: string): void {
     !isDisclaimer &&
     !isMemory &&
     !isUser &&
-	    !isChat &&
-	    !isTasks &&
-	    !isPlugins &&
+    !isTasks &&
+    !isPlugins &&
     !isSkills &&
     !isTokens &&
     !isChannels &&
@@ -3186,8 +1543,11 @@ function switchSection(section: string): void {
   }
 
   document.querySelectorAll(".nav-item").forEach((el) => {
-    el.classList.toggle("is-active", (el as HTMLElement).dataset.section === section);
+    const isMatch = (el as HTMLElement).dataset.section === section;
+    el.classList.toggle("is-active", isMatch);
   });
+  const activeNav = document.querySelector(".nav-item.is-active");
+  console.log("[Settings/Trace] switchSection section=", section, "activeNav=", activeNav ? (activeNav as HTMLElement).dataset.section : null);
 }
 
 document.querySelectorAll(".nav-item").forEach((el) => {
@@ -3205,104 +1565,6 @@ schedulerKindInput?.addEventListener("change", updateSchedulerConditionalFields)
 schedulerToolLimitInput?.addEventListener("change", updateSchedulerConditionalFields);
 updateSchedulerConditionalFields();
 
-// ===== 遊戲代肝插件卡（在 plugins 面板裡，MCP 下、生活工具上）=====
-function initGameBotPluginCard(): void {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const gb = (window as any).gameBot as {
-    getConfig: () => Promise<{ enabled: boolean; exePath: string; activeRecipe: string; vlm: { baseUrl: string; apiKey: string; model: string } }>;
-    saveConfig: (c: unknown) => Promise<unknown>;
-    listRecipes: () => Promise<{ id: string; name: string }[]>;
-    listRefs: (r: string) => Promise<string[]>;
-    refsDir: (r: string) => Promise<string>;
-    start: () => Promise<{ ok: boolean; error?: string }>;
-    stop: () => Promise<unknown>;
-    onProgress: (cb: (i: unknown) => void) => (() => void) | void;
-  } | undefined;
-  if (!gb) return;
-
-  const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T | null;
-  const enabledCb = $<HTMLInputElement>("plugin-gamebot-enabled");
-  const configEl = $("plugin-gamebot-config");
-  const exe = $<HTMLInputElement>("gamebot-exe");
-  const url = $<HTMLInputElement>("gamebot-vlm-url");
-  const key = $<HTMLInputElement>("gamebot-vlm-key");
-  const model = $<HTMLInputElement>("gamebot-vlm-model");
-  const recipeSel = $<HTMLSelectElement>("gamebot-recipe");
-  const refsDirEl = $("gamebot-refs-dir");
-  const refsListEl = $("gamebot-refs-list");
-  const startBtn = $<HTMLButtonElement>("gamebot-start-btn");
-  const stopBtn = $<HTMLButtonElement>("gamebot-stop-btn");
-  const logEl = $("gamebot-log");
-  if (!enabledCb || !configEl || !exe || !url || !key || !model || !recipeSel) return;
-
-  let currentRecipe = "star-rail-daily";
-
-  function appendLog(line: string): void {
-    if (!logEl) return;
-    logEl.textContent = new Date().toLocaleTimeString() + " " + line + "\n" + (logEl.textContent ?? "");
-  }
-
-  async function refreshRefs(): Promise<void> {
-    if (refsDirEl) refsDirEl.textContent = await gb!.refsDir(currentRecipe);
-    const refs = await gb!.listRefs(currentRecipe);
-    if (refsListEl) {
-      refsListEl.innerHTML = refs.length
-        ? "已就位參考圖：" + refs.map((r) => "<code>" + r + "</code>").join(" ")
-        : "（目錄還沒有參考圖，把裁好的小圖按命名放進上方目錄）";
-    }
-  }
-
-  async function refresh(): Promise<void> {
-    const cfg = await gb!.getConfig();
-    enabledCb!.checked = cfg.enabled;
-    configEl!.style.display = cfg.enabled ? "block" : "none";
-    exe.value = cfg.exePath;
-    url.value = cfg.vlm.baseUrl;
-    key.value = cfg.vlm.apiKey;
-    model.value = cfg.vlm.model;
-    currentRecipe = cfg.activeRecipe;
-    const recipes = await gb!.listRecipes();
-    recipeSel.innerHTML = "";
-    for (const r of recipes) {
-      const opt = document.createElement("option");
-      opt.value = r.id;
-      opt.textContent = r.name + " (" + r.id + ")";
-      if (r.id === currentRecipe) opt.selected = true;
-      recipeSel.appendChild(opt);
-    }
-    await refreshRefs();
-  }
-
-  // 膠囊開關：開/關時保存 enabled 並顯隱配置區
-  enabledCb.addEventListener("change", async () => {
-    configEl.style.display = enabledCb.checked ? "block" : "none";
-    await gb.saveConfig({ enabled: enabledCb.checked });
-  });
-
-  // 配置項失焦即存
-  const saveFields = () => gb.saveConfig({
-    exePath: exe.value.trim(),
-    activeRecipe: recipeSel.value,
-    vlm: { baseUrl: url.value.trim(), apiKey: key.value.trim(), model: model.value.trim() },
-  });
-  for (const el of [exe, url, key, model]) el.addEventListener("change", () => void saveFields());
-  recipeSel.addEventListener("change", () => { currentRecipe = recipeSel.value; void saveFields().then(refreshRefs); });
-
-  startBtn?.addEventListener("click", async () => {
-    const r = await gb.start();
-    appendLog(r.ok ? "代肝已啟動" : "啟動失敗: " + (r.error ?? ""));
-  });
-  stopBtn?.addEventListener("click", () => { void gb.stop(); appendLog("已請求停止"); });
-
-  gb.onProgress((info) => {
-    const i = info as { index: number; total: number; desc: string };
-    appendLog(i.desc + (i.index >= 0 ? " (" + (i.index + 1) + "/" + i.total + ")" : ""));
-  });
-
-  void refresh();
-}
-
-initGameBotPluginCard();
 void loadConfig();
 void loadGeneralSettings();
 window.settings?.onChannelsStatusChanged((status) => {
@@ -3310,322 +1572,18 @@ window.settings?.onChannelsStatusChanged((status) => {
 });
 
 // ===== channels panel (连接手机) =====
-const channelsWechatEnabledEl = document.getElementById("channels-wechat-enabled") as HTMLInputElement | null;
-const channelsFeishuEnabledEl = document.getElementById("channels-feishu-enabled") as HTMLInputElement | null;
-const channelsWechatStatusEl = document.getElementById("channels-wechat-status");
-const channelsFeishuStatusEl = document.getElementById("channels-feishu-status");
-const channelsRateUserEl = document.getElementById("channels-rate-user") as HTMLInputElement | null;
-const channelsRateChannelEl = document.getElementById("channels-rate-channel") as HTMLInputElement | null;
-const channelsTtsEl = document.getElementById("channels-tts-enabled") as HTMLInputElement | null;
-const channelsStickerEl = document.getElementById("channels-sticker-enabled") as HTMLInputElement | null;
-const channelsMirrorEl = document.getElementById("channels-mirror-desktop") as HTMLInputElement | null;
-const channelsToolSandboxOffEl = document.getElementById("channels-tool-sandbox-off") as HTMLInputElement | null;
-const channelsToolSandboxAllEl = document.getElementById("channels-tool-sandbox-all") as HTMLInputElement | null;
-const channelsToolSandboxSafeEl = document.getElementById("channels-tool-sandbox-safe") as HTMLInputElement | null;
 // 飞书配置输入框（Phase 2 长连接版：只需 App ID + App Secret）
-const channelsFeishuAppIdEl = document.getElementById("channels-feishu-app-id") as HTMLInputElement | null;
-const channelsFeishuAppSecretEl = document.getElementById("channels-feishu-app-secret") as HTMLInputElement | null;
-const channelsFeishuAppSecretRevealBtn = document.getElementById("channels-feishu-app-secret-reveal");
-const channelsFeishuSaveBtn = document.getElementById("channels-feishu-save");
 // 微信按钮
-const channelsWechatLoginBtn = document.getElementById("channels-wechat-login");
-const channelsWechatRestartBtn = document.getElementById("channels-wechat-restart");
-const channelsWechatFeedbackEl = document.getElementById("channels-wechat-feedback");
-const channelsFeishuFeedbackEl = document.getElementById("channels-feishu-feedback");
 
-let channelsInitialized = false;
-let channelsSaveTimer: number | null = null;
 
-function renderChannelStatus(el: HTMLElement | null, phase: string, message?: string): void {
-  if (!el) return;
-  const dot = el.querySelector(".channels-status__dot");
-  const text = el.querySelector(".channels-status__text");
-  if (dot) {
-    dot.className = "channels-status__dot";
-    if (phase === "running") dot.classList.add("channels-status__dot--running");
-    else if (phase === "starting") dot.classList.add("channels-status__dot--starting");
-    else if (phase === "error") dot.classList.add("channels-status__dot--error");
-    else if (phase === "config_missing") dot.classList.add("channels-status__dot--config_missing");
-    else dot.classList.add("channels-status__dot--offline");
-  }
-  if (text) text.textContent = message ?? (phase === "running" ? "運行中" : phase === "starting" ? "啟動中" : phase === "config_missing" ? "配置缺失" : phase === "error" ? "錯誤" : "未啟用");
-}
 
-async function loadChannelsPanel(): Promise<void> {
-  if (channelsInitialized) {
-    await Promise.all([refreshDiscordProfile(), refreshDiscordMusic(), refreshSpotify(), refreshBilibili()]);
-    return;
-  }
-  channelsInitialized = true;
-  try {
-    const cfg = await window.settings.channelsGetConfig();
-    if (channelsWechatEnabledEl) channelsWechatEnabledEl.checked = !!cfg.wechat.enabled;
-    if (channelsFeishuEnabledEl) channelsFeishuEnabledEl.checked = !!cfg.feishu.enabled;
-    if (channelsDiscordEnabledEl) channelsDiscordEnabledEl.checked = !!cfg.discord.enabled;
-    if (channelsRateUserEl) channelsRateUserEl.value = String(cfg.rateLimitPerUser ?? 10);
-    if (channelsRateChannelEl) channelsRateChannelEl.value = String(cfg.rateLimitPerChannel ?? 100);
-    if (channelsTtsEl) channelsTtsEl.checked = cfg.ttsEnabled !== false;
-    if (channelsStickerEl) channelsStickerEl.checked = cfg.stickerEnabled !== false;
-    if (channelsMirrorEl) channelsMirrorEl.checked = cfg.mirrorToDesktop !== false;
-    if (channelsToolSandboxOffEl) channelsToolSandboxOffEl.checked = cfg.toolSandbox === "off";
-    if (channelsToolSandboxAllEl) channelsToolSandboxAllEl.checked = cfg.toolSandbox === "all";
-    if (channelsToolSandboxSafeEl) channelsToolSandboxSafeEl.checked = cfg.toolSandbox === "safe-only";
 
-    // 飞书字段填充（长连接模式只需要 App ID；secret 加密存盘，UI 不回填明文）
-    if (channelsFeishuAppIdEl) channelsFeishuAppIdEl.value = cfg.feishu.appId ?? "";
-    if (channelsFeishuAppSecretEl) {
-      channelsFeishuAppSecretEl.value = "";
-      channelsFeishuAppSecretEl.placeholder = cfg.feishu.appSecret
-        ? "已保存（输入新值会覆盖）"
-        : "点击保存配置时加密保存";
-    }
 
-    // 拉一次渠道状态
-    const status = (await window.settings.channelsGetStatus()) as Record<string, { phase: string; message?: string }>;
-    renderProactiveDeliveryAvailability(status);
-    renderChannelStatus(channelsWechatStatusEl, status.wechat?.phase ?? "offline", status.wechat?.message);
-    renderChannelStatus(channelsFeishuStatusEl, status.feishu?.phase ?? "offline", status.feishu?.message);
-    // Phase 3.4：拉一次消息日志
-    void refreshChannelsLog();
-  } catch (err) {
-    console.warn("[Channels] loadChannelsPanel 失败:", err);
-  }
+// ===== Phase 3.4：消息日志 =====
 
-  // 自动保存（debounce 200ms）
-  const scheduleSave = () => {
-    if (channelsSaveTimer != null) window.clearTimeout(channelsSaveTimer);
-    channelsSaveTimer = window.setTimeout(() => {
-      void window.settings.channelsSaveConfig({
-        wechat: { enabled: channelsWechatEnabledEl?.checked ?? false },
-        feishu: { enabled: channelsFeishuEnabledEl?.checked ?? false },
-        rateLimitPerUser: Number(channelsRateUserEl?.value) || 10,
-        rateLimitPerChannel: Number(channelsRateChannelEl?.value) || 100,
-        ttsEnabled: channelsTtsEl?.checked ?? true,
-        stickerEnabled: channelsStickerEl?.checked ?? true,
-        mirrorToDesktop: channelsMirrorEl?.checked ?? true,
-        toolSandbox: channelsToolSandboxOffEl?.checked
-          ? "off"
-          : channelsToolSandboxSafeEl?.checked
-            ? "safe-only"
-            : "all",
-      });
-    }, 200);
-  };
-  for (const el of [
-    channelsWechatEnabledEl,
-    channelsFeishuEnabledEl,
-    channelsRateUserEl,
-    channelsRateChannelEl,
-    channelsTtsEl,
-    channelsStickerEl,
-    channelsMirrorEl,
-    channelsToolSandboxOffEl,
-    channelsToolSandboxAllEl,
-    channelsToolSandboxSafeEl,
-  ]) {
-    el?.addEventListener("change", scheduleSave);
-  }
 
-  // 监听安装进度（Phase 1+ 才会收到）
-  window.settings.onChannelsInstallProgress((progress) => {
-    const target = progress.channel === "wechat" ? channelsWechatStatusEl : progress.channel === "feishu" ? channelsFeishuStatusEl : null;
-    if (target) renderChannelStatus(target, "starting", `${progress.phase} ${progress.pct}%`);
-  });
-  window.settings.onChannelsStatusChanged((status) => {
-    const s = status as Record<string, { phase: string; message?: string }>;
-    renderProactiveDeliveryAvailability(s);
-    renderChannelStatus(channelsWechatStatusEl, s.wechat?.phase ?? "offline", s.wechat?.message);
-    renderChannelStatus(channelsFeishuStatusEl, s.feishu?.phase ?? "offline", s.feishu?.message);
-  });
 
-  // ===== 飞书交互（Phase 2 长连接版） =====
 
-  // 显示/隐藏 App Secret
-  channelsFeishuAppSecretRevealBtn?.addEventListener("click", () => {
-    if (!channelsFeishuAppSecretEl) return;
-    channelsFeishuAppSecretEl.type =
-      channelsFeishuAppSecretEl.type === "password" ? "text" : "password";
-  });
-
-  // 保存配置（secret 用 safeStorage 加密后落盘 + 触发长连接重连）
-  channelsFeishuSaveBtn?.addEventListener("click", async () => {
-    setFeishuFeedback("info", "保存并连接中...");
-    const patch: Record<string, unknown> = {
-      feishu: {
-        enabled: channelsFeishuEnabledEl?.checked ?? false,
-        appId: channelsFeishuAppIdEl?.value.trim() || undefined,
-      },
-    };
-    // 仅在用户输入了新值时才覆盖 secret（避免误清空）
-    if (channelsFeishuAppSecretEl?.value) {
-      (patch.feishu as Record<string, unknown>).appSecret = channelsFeishuAppSecretEl.value;
-    }
-    try {
-      await window.settings.channelsSaveConfig(patch);
-      // 保存后立即触发飞书 adapter 重建 + 重连长连接
-      await window.settings.channelsRestart();
-      setFeishuFeedback("ok", "已保存，飞书长连接正在建立…");
-      // 清空输入框（已落盘），并把 placeholder 切到"已保存"
-      if (channelsFeishuAppSecretEl) {
-        channelsFeishuAppSecretEl.value = "";
-        channelsFeishuAppSecretEl.placeholder = "已保存（输入新值会覆盖）";
-      }
-    } catch (err) {
-      setFeishuFeedback("err", err instanceof Error ? err.message : String(err));
-    }
-  });
-
-  // ===== 微信交互（扫码登录走 iLink HTTP API，详见 src/main/channels/adapters/wechat/） =====
-
-  function setWechatFeedback(kind: "info" | "ok" | "err", msg: string): void {
-    if (!channelsWechatFeedbackEl) return;
-    channelsWechatFeedbackEl.textContent = msg;
-    channelsWechatFeedbackEl.className = "channels-feedback";
-    if (kind === "ok") channelsWechatFeedbackEl.classList.add("channels-feedback--ok");
-    else if (kind === "err") channelsWechatFeedbackEl.classList.add("channels-feedback--err");
-    else channelsWechatFeedbackEl.classList.add("channels-feedback--info");
-  }
-
-  // 掃碼登錄：Main Process 生成 PNG → 推到 Renderer → modal 彈窗
-  const channelsWechatQrEl = document.getElementById("channels-wechat-qr");
-  const channelsWechatQrImgEl = document.getElementById("channels-wechat-qr-img") as HTMLImageElement | null;
-  const channelsWechatQrCloseBtn = document.getElementById("channels-wechat-qr-close");
-  const channelsWechatQrBackdrop = document.getElementById("channels-wechat-qr-backdrop");
-
-  function showWechatQr(dataUrl: string): void {
-    if (channelsWechatQrImgEl) {
-      channelsWechatQrImgEl.src = dataUrl;
-      channelsWechatQrImgEl.classList.remove("is-empty");
-    }
-    channelsWechatQrEl?.removeAttribute("hidden");
-  }
-  function hideWechatQr(): void {
-    channelsWechatQrEl?.setAttribute("hidden", "");
-    if (channelsWechatQrImgEl) {
-      channelsWechatQrImgEl.src = "";
-      channelsWechatQrImgEl.classList.add("is-empty");
-    }
-  }
-
-  // 關閉交互：點按鈕 / 點背景 / 按 ESC
-  channelsWechatQrCloseBtn?.addEventListener("click", hideWechatQr);
-  channelsWechatQrBackdrop?.addEventListener("click", hideWechatQr);
-  document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && channelsWechatQrEl && !channelsWechatQrEl.hasAttribute("hidden")) {
-      hideWechatQr();
-    }
-  });
-
-  // 訂閱 Main 推送的二維碼（每次登錄會推一次）
-  window.settings.onChannelsWechatQrcode((dataUrl) => {
-    console.log("[WechatSettings] QR event received, dataUrl prefix:", dataUrl?.slice(0, 40), "len:", dataUrl?.length);
-    showWechatQr(dataUrl);
-    setWechatFeedback("info", "請用微信掃描二維碼");
-  });
-  // 訂閱 Main 推送的登錄結果（成功 / 失敗 / 二維碼過期）
-  window.settings.onChannelsWechatLoginDone((payload) => {
-    hideWechatQr();
-    if (payload.ok) {
-      setWechatFeedback("ok", `已登錄（botId=${payload.botId ?? "?"}）`);
-    } else {
-      setWechatFeedback("err", `登錄失敗：${payload.error ?? "未知錯誤"}`);
-    }
-  });
-
-  channelsWechatLoginBtn?.addEventListener("click", async () => {
-    hideWechatQr();
-    setWechatFeedback("info", "正在啟動掃碼…");
-    try {
-      const result = await window.settings.channelsWechatLoginStart();
-      if (result.ok) {
-        // 二維碼由 onChannelsWechatQrcode 推過來並顯示；這裡只刷個輕提示
-        setWechatFeedback("info", "等待二維碼推送…");
-      } else {
-        setWechatFeedback("err", result.error ?? "啟動失敗");
-      }
-    } catch (err) {
-      setWechatFeedback("err", err instanceof Error ? err.message : String(err));
-    }
-  });
-
-  // 重啟連接
-  channelsWechatRestartBtn?.addEventListener("click", async () => {
-    setWechatFeedback("info", "重啟連接中…");
-    try {
-      await window.settings.channelsRestart();
-      setWechatFeedback("ok", "已重啟");
-    } catch (err) {
-      setWechatFeedback("err", err instanceof Error ? err.message : String(err));
-    }
-  });
-}
-
-function setFeishuFeedback(kind: "info" | "ok" | "err", msg: string): void {
-  if (!channelsFeishuFeedbackEl) return;
-  channelsFeishuFeedbackEl.textContent = msg;
-  channelsFeishuFeedbackEl.className = "channels-feedback";
-  if (kind === "ok") channelsFeishuFeedbackEl.classList.add("channels-feedback--ok");
-  else if (kind === "err") channelsFeishuFeedbackEl.classList.add("channels-feedback--err");
-  else channelsFeishuFeedbackEl.classList.add("channels-feedback--info");
-}
-
-// ===== Phase 3.4：消息日誌 =====
-const channelsLogListEl = document.getElementById("channels-log-list");
-const channelsLogRefreshBtn = document.getElementById("channels-log-refresh");
-const channelsLogClearBtn = document.getElementById("channels-log-clear");
-
-interface LogEntry {
-  at: string;
-  dir: "incoming" | "outgoing";
-  channel: string;
-  senderId: string;
-  senderName?: string;
-  chatId: string;
-  text: string;
-  hasAttachments?: boolean;
-}
-
-function renderChannelsLog(entries: LogEntry[]): void {
-  if (!channelsLogListEl) return;
-  if (entries.length === 0) {
-    channelsLogListEl.innerHTML = '<p class="empty-hint">暫無消息。</p>';
-    return;
-  }
-  const html = entries
-    .map((e) => {
-      const t = new Date(e.at);
-      const hh = String(t.getHours()).padStart(2, "0");
-      const mm = String(t.getMinutes()).padStart(2, "0");
-      const ss = String(t.getSeconds()).padStart(2, "0");
-      const dir = e.dir === "incoming" ? "← 收到" : "→ 回覆";
-      const who = e.senderName ? `${e.senderName} (${e.senderId})` : e.senderId;
-      const safe = (s: string) =>
-        s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-      const text = e.text.length > 280 ? safe(e.text.slice(0, 280)) + "…" : safe(e.text);
-      return `<div class="channels-log__entry channels-log__entry--${e.dir}">
-        <div class="channels-log__meta">${hh}:${mm}:${ss} · ${dir} · ${safe(e.channel)} · ${safe(who)}</div>
-        <div class="channels-log__text">${text}</div>
-      </div>`;
-    })
-    .join("");
-  channelsLogListEl.innerHTML = html;
-}
-
-async function refreshChannelsLog(): Promise<void> {
-  try {
-    const entries = (await window.settings.channelsLogGet(100)) as LogEntry[];
-    renderChannelsLog(entries);
-  } catch (err) {
-    console.warn("[Channels] refreshChannelsLog 失败:", err);
-  }
-}
-
-channelsLogRefreshBtn?.addEventListener("click", () => void refreshChannelsLog());
-channelsLogClearBtn?.addEventListener("click", async () => {
-  if (!confirm("确认清空所有 bot 消息日志？")) return;
-  await window.settings.channelsLogClear();
-  await refreshChannelsLog();
-});
 
 // 首次进入 channels panel 时拉一次日志
 // （也可以在用户展开 details 时再拉，但保持简单直接拉）
@@ -3636,375 +1594,24 @@ void loadChannelsPanel();
 // 由于 renderer 走 Vite 打包、main/preload 走 esbuild，两端类型不互通，
 // 这里直接用 (window as any).music 做弱类型化调用，避免给 global.d.ts 加一堆 cross-bundle 类型。
 
-interface MusicSelectionTrack {
-  id: string;
-  name: string;
-  artists: string[];
-  album?: string;
-  durationMs?: number;
-}
 
-interface MusicSelectionResult {
-  setId: string;
-  source: string;
-  query?: string;
-  tracks: MusicSelectionTrack[];
-}
 
-type MusicIpcResult<T> =
-  | { ok: true; data: T }
-  | { ok: false; errorCode: string; backendState?: string; accountState?: string; playerState?: string };
 
-interface MusicApi {
-  getStatus: () => Promise<MusicIpcResult<MusicStatusSnapshot>>;
-  beginLogin: () => Promise<MusicIpcResult<{ loginSessionId: string; qrContent: string; expiresAt: number; pollIntervalMs: number }>>;
-  cancelLogin: () => Promise<MusicIpcResult<unknown>>;
-  logout: () => Promise<MusicIpcResult<unknown>>;
-  search: (keyword: string, limit?: number) => Promise<MusicIpcResult<MusicSelectionResult>>;
-  playTrack: (trackId: string) => Promise<MusicIpcResult<{ state: "dispatched" | "web_fallback" | "client_unavailable" | "launch_failed" }>>;
-  onStateChanged: (h: (s: MusicStatusSnapshot) => void) => (() => void) | void;
-}
 
-function getMusicApi(): MusicApi | null {
-  const w = window as unknown as { music?: MusicApi };
-  return w.music ?? null;
-}
 
-const musicHomeView = document.getElementById("music-home-view");
-const neteaseDetailView = document.getElementById("netease-detail-view");
-const musicReturnBtn = document.getElementById("music-return-btn");
-const musicSearchForm = document.getElementById("music-search-form");
-const musicSearchHint = document.getElementById("music-search-hint");
-const musicQrStatus = document.getElementById("music-qr-status");
-const musicProfileAvatar = document.getElementById("music-profile-avatar") as HTMLImageElement | null;
-const musicLoginBtn = document.getElementById("music-login-btn") as HTMLButtonElement | null;
-const musicCancelBtn = document.createElement("button");
-const musicDisconnectBtn = document.createElement("button");
 
-const musicQrImg = document.getElementById("music-qr-img") as HTMLImageElement | null;
-const musicQrTip = document.getElementById("music-qr-tip");
-const musicQrBox = document.getElementById("music-qr") as HTMLElement | null;
-const musicFeedbackEl = document.getElementById("music-feedback");
-const musicAccountStatusText = document.getElementById("music-account-status-text");
-const musicSearchInput = document.getElementById("music-search-input") as HTMLInputElement | null;
-const musicSearchBtn = document.getElementById("music-search-btn") as HTMLButtonElement | null;
-const musicSearchResults = document.getElementById("music-search-results");
 
-let musicPanelInitialized = false;
-let musicStateUnsub: (() => void) | null = null;
-let musicLoginPollTimer: number | null = null;
-let musicLastQrDataUrl: string | null = null;
 
-function setMusicFeedback(kind: "info" | "ok" | "err", msg: string): void {
-  if (!musicFeedbackEl) return;
-  musicFeedbackEl.textContent = msg;
-  musicFeedbackEl.className = "music-feedback";
-  if (kind === "ok") musicFeedbackEl.classList.add("music-feedback--ok");
-  else if (kind === "err") musicFeedbackEl.classList.add("music-feedback--err");
-  else musicFeedbackEl.classList.add("music-feedback--info");
-}
 
-function renderMusicStatus(snapshot: MusicStatusSnapshot): void {
-  const state = deriveNeteaseViewState(snapshot);
-  const labels: Record<NeteaseViewState, string> = {
-    backend_starting: "音乐服务暂不可用", backend_error: "音乐服务暂不可用", signed_out: "尚未连接",
-    creating_qr: "正在等待扫码", waiting_scan: "正在等待扫码", waiting_confirm: "已扫码，请在手机确认",
-    login_expired: "二维码已过期", login_failed: "登录失败", connected: "网易云音乐已连接", connected_without_client: "已登录，但未检测到桌面客户端",
-  };
-  if (musicAccountStatusText) musicAccountStatusText.textContent = labels[state];
-  const musicStatusDot = document.getElementById("music-status-dot");
-  if (musicStatusDot) musicStatusDot.classList.toggle("is-connected", state === "connected" || state === "connected_without_client");
-  const actionHost = document.getElementById("music-actions");
-  if (actionHost) {
-    actionHost.innerHTML = "";
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = state === "signed_out" || state === "backend_error" ? "btn-primary" : "btn-secondary";
-    const actions: Partial<Record<NeteaseViewState, string>> = { signed_out: "连接网易云", creating_qr: "取消登录", waiting_scan: "取消登录", waiting_confirm: "取消登录", login_expired: "重新生成二维码", login_failed: "重新登录", connected: "断开连接", connected_without_client: "断开连接", backend_error: "重新启动音乐服务" };
-    if (actions[state]) { button.textContent = actions[state]!; button.addEventListener("click", () => void handleMusicAction(state)); actionHost.appendChild(button); }
-  }
-  const loggedIn = state === "connected" || state === "connected_without_client";
-  musicSearchForm?.classList.toggle("is-hidden", !loggedIn);
-  if (musicSearchHint) musicSearchHint.textContent = loggedIn ? "搜索网易云曲库。" : "连接网易云后即可搜索歌曲和获取每日推荐。";
-  musicQrBox?.classList.toggle("is-hidden", !(state === "creating_qr" || state === "waiting_scan" || state === "waiting_confirm" || state === "login_expired"));
-  if (musicQrStatus) musicQrStatus.textContent = state === "connected" || state === "connected_without_client" ? "当前状态：网易云音乐已连接" : state === "waiting_confirm" ? "当前状态：等待手机确认" : state === "login_expired" ? "当前状态：二维码过期" : "当前状态：等待扫码";
-}
 
-async function handleMusicAction(state: NeteaseViewState): Promise<void> {
-  const api = getMusicApi(); if (!api) { setMusicFeedback("err", "音乐 API 未就绪"); return; }
-  if (state === "signed_out" || state === "login_expired" || state === "login_failed") return void startMusicLogin();
-  if (state === "connected" || state === "connected_without_client") {
-    setMusicFeedback("info", "正在断开连接…");
-    try {
-      const r = await api.logout();
-    if (r.ok) setMusicFeedback("ok", "已断开连接");
-    else setMusicFeedback("err", "断开失败：" + r.errorCode);
-    } catch (err) {
-      setMusicFeedback("err", "断开异常：" + (err instanceof Error ? err.message : String(err)));
-    }
-    return;
-  }
-  if (state === "creating_qr" || state === "waiting_scan" || state === "waiting_confirm") { await api.cancelLogin?.(); clearMusicQr(); }
-}
 
-function updateMusicActionsForAccount(account: string): void {
-  // Login-in-progress 状态：暂时还没有 IPC 通道告诉我们 creating_qr / waiting_scan / waiting_confirm，
-  // 所以这里只能根据"是否显示了二维码 + account 状态"来推断。
-  // 显示规则：
-  //   - account === "signed_in"      → 显示 断开连接
-  //   - account === "temporarily_unavailable" → 显示 连接网易云（让用户重试）
-  //   - 二维码显示中 → 显示 取消登录
-  //   - 其他 → 显示 连接网易云
-  const qrVisible = !!musicQrBox && !musicQrBox.classList.contains("is-hidden");
-  if (musicLoginBtn) musicLoginBtn.classList.toggle("is-hidden", qrVisible || account === "signed_in");
-  if (musicCancelBtn) musicCancelBtn.classList.toggle("is-hidden", !qrVisible);
-  if (musicDisconnectBtn) musicDisconnectBtn.classList.toggle("is-hidden", account !== "signed_in");
-}
 
-function clearMusicQr(): void {
-  if (musicQrImg) { musicQrImg.style.display = "none"; musicQrImg.src = ""; }
-  if (musicQrBox) musicQrBox.classList.add("is-hidden");
-  if (musicQrTip) musicQrTip.textContent = "请用网易云音乐 App 扫描二维码完成登录";
-  musicLastQrDataUrl = null;
-}
 
-function showMusicQr(dataUrl: string, tip: string): void {
-  if (musicQrImg) { musicQrImg.src = dataUrl; musicQrImg.style.display = "block"; }
-  if (musicQrTip) musicQrTip.textContent = tip;
-  if (musicQrBox) musicQrBox.classList.remove("is-hidden");
-  musicLastQrDataUrl = dataUrl;
-}
 
-function stopMusicLoginPolling(): void {
-  if (musicLoginPollTimer != null) {
-    window.clearInterval(musicLoginPollTimer);
-    musicLoginPollTimer = null;
-  }
-}
 
-function startMusicLoginPolling(pollIntervalMs = 2000): void {
-  stopMusicLoginPolling();
-  const api = getMusicApi();
-  if (!api) return;
-  musicLoginPollTimer = window.setInterval(async () => {
-    try {
-      const r = await api.getStatus();
-      if (r.ok) {
-        renderMusicStatus(r.data);
-        if (r.data.account === "signed_in") {
-          // 登录成功 → 关闭 QR 面板、停止轮询
-          clearMusicQr();
-          stopMusicLoginPolling();
-          setMusicFeedback("ok", "已连接到网易云音乐");
-        } else if (r.data.flow === "expired" || r.data.flow === "failed" || r.data.flow === "cancelled") {
-          stopMusicLoginPolling();
-          if (r.data.flow !== "expired") clearMusicQr();
-          setMusicFeedback("err", r.data.flow === "expired" ? "二维码已过期，请重新生成" : "登录未完成，请重试");
-        } else if (r.data.account === "temporarily_unavailable" || r.data.account === "expired") {
-          stopMusicLoginPolling();
-          clearMusicQr();
-          setMusicFeedback("err", "登录失败：账户状态 " + r.data.account);
-        }
-      }
-    } catch (err) {
-      console.warn("[music] login poll failed", err);
-    }
-  }, Math.max(1000, pollIntervalMs));
-}
 
-async function startMusicLogin(): Promise<void> {
-  const api = getMusicApi();
-  if (!api) {
-    setMusicFeedback("err", "window.music 未就绪，请确认 music plugin 已注册");
-    return;
-  }
-  setMusicFeedback("info", "正在生成二维码…");
-  try {
-    const r = await api.beginLogin();
-    if (!r.ok) {
-      setMusicFeedback("err", "启动登录失败：" + r.errorCode);
-      // 把错误状态同步渲染出来
-      const snapshot: MusicStatusSnapshot = {
-        backend: r.backendState ?? "unknown",
-        account: r.accountState ?? "unknown",
-        player: r.playerState ?? "unknown",
-      };
-      renderMusicStatus(snapshot);
-      return;
-    }
-    // 用 qrcode 包把 qrContent 渲染成 PNG dataURL
-    let dataUrl = "";
-    try {
-      // qrcode 包没有官方 d.ts；用 require 形式确保 esbuild 能解析
-      // （renderer 走 Vite，import 形式也 OK；下面用动态 import 兼容两种打包器）
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const qrcodeMod: any = await import(/* @vite-ignore */ "qrcode");
-      dataUrl = await qrcodeMod.toDataURL(r.data.qrContent, { width: 240, margin: 1 });
-    } catch (qrErr) {
-      console.error("[music] QR 渲染失败", qrErr);
-      setMusicFeedback("err", "二维码渲染失败");
-      return;
-    }
-    showMusicQr(dataUrl, "请用网易云音乐 App 扫描二维码完成登录");
-    setMusicFeedback("info", "等待扫码…");
-    updateMusicActionsForAccount("signed_out"); // 切到"取消登录"显示
-    startMusicLoginPolling(r.data.pollIntervalMs);
-  } catch (err) {
-    console.error("[music] beginLogin threw", err);
-    setMusicFeedback("err", "启动登录异常：" + (err instanceof Error ? err.message : String(err)));
-  }
-}
 
-async function cancelMusicLogin(): Promise<void> {
-  const api = getMusicApi();
-  if (!api) return;
-  stopMusicLoginPolling();
-  clearMusicQr();
-  setMusicFeedback("info", "已取消登录");
-  try {
-    await api.cancelLogin();
-  } catch (err) {
-    console.warn("[music] cancelLogin threw", err);
-  }
-  // 重新拉一次 status 让 UI 回到初始态
-  try {
-    const r = await api.getStatus();
-    if (r.ok) renderMusicStatus(r.data);
-  } catch (err) {
-    console.warn("[music] getStatus after cancel failed", err);
-  }
-}
 
-async function disconnectMusic(): Promise<void> {
-  // 暂时没有正式的 disconnect API；先用 cancelLogin 作为近似（它会清掉 loginSession），
-  // 并把 UI 切回"未连接"。后续会接 music.disconnect。
-  setMusicFeedback("info", "正在断开…");
-  await cancelMusicLogin();
-  setMusicFeedback("ok", "已断开（当前仅清空登录会话，详见说明）");
-}
-
-function renderMusicSearchResults(r: MusicIpcResult<MusicSelectionResult>, kw: string): void {
-  if (!musicSearchResults) return;
-  musicSearchResults.innerHTML = "";
-  if (!r.ok) {
-    const div = document.createElement("div");
-    div.className = "music-feedback music-feedback--err";
-    div.textContent = "搜索失败：" + r.errorCode;
-    musicSearchResults.appendChild(div);
-    return;
-  }
-  const tracks = r.data.tracks ?? [];
-  if (tracks.length === 0) {
-    const p = document.createElement("p");
-    p.className = "empty-hint";
-    // 安全转义
-    const safeKw = kw.replace(/</g, "&lt;").replace(/>/g, "&gt;");
-    p.textContent = `暂无结果，关键词 '${safeKw}' 未匹配到歌曲`;
-    musicSearchResults.appendChild(p);
-    return;
-  }
-  for (const t of tracks) {
-    const row = document.createElement("div");
-    row.className = "music-search-row";
-
-    const main = document.createElement("div");
-    main.className = "music-search-row__main";
-    const name = document.createElement("div");
-    name.className = "music-search-row__name";
-    name.textContent = t.name;
-    const meta = document.createElement("div");
-    meta.className = "music-search-row__meta";
-    const artistStr = (t.artists ?? []).join(" / ");
-    meta.textContent = [artistStr, t.album].filter(Boolean).join(" · ");
-    main.appendChild(name);
-    main.appendChild(meta);
-
-    const playBtn = document.createElement("button");
-    playBtn.type = "button";
-    playBtn.className = "btn-secondary music-search-row__play";
-    playBtn.textContent = "▶ 播放";
-    playBtn.addEventListener("click", async () => {
-      const api = getMusicApi();
-      if (!api) {
-        setMusicFeedback("err", "window.music 未就绪");
-        return;
-      }
-      playBtn.disabled = true;
-      try {
-        const feedback = await requestTrackPlayback(api, t);
-        setMusicFeedback(feedback.kind, feedback.message);
-      } catch (err) {
-        setMusicFeedback("err", "播放请求异常：" + (err instanceof Error ? err.message : String(err)));
-      } finally {
-        playBtn.disabled = false;
-      }
-    });
-
-    row.appendChild(main);
-    row.appendChild(playBtn);
-    musicSearchResults.appendChild(row);
-  }
-}
-
-async function runMusicSearch(): Promise<void> {
-  const api = getMusicApi();
-  if (!api) {
-    setMusicFeedback("err", "window.music 未就绪");
-    return;
-  }
-  const kw = (musicSearchInput?.value ?? "").trim();
-  if (!kw) {
-    setMusicFeedback("info", "请输入搜索关键词");
-    return;
-  }
-  if (musicSearchResults) musicSearchResults.innerHTML = '<p class="empty-hint">搜索中…</p>';
-  try {
-    const r = await api.search(kw, 20);
-    renderMusicSearchResults(r, kw);
-  } catch (err) {
-    console.error("[music] search threw", err);
-    if (musicSearchResults) musicSearchResults.innerHTML = "";
-    setMusicFeedback("err", "搜索异常：" + (err instanceof Error ? err.message : String(err)));
-  }
-}
-
-async function loadMusicPanel(): Promise<void> {
-  if (musicPanelInitialized) return;
-  musicPanelInitialized = true;
-
-  // 平台按钮（网易云 → 切到 music panel）的点击处理在文件下方模块初始化时已绑定，
-  // 这里不再重复 attach，避免多次进入面板造成重复监听。
-
-  musicLoginBtn?.addEventListener("click", () => void startMusicLogin());
-  musicCancelBtn?.addEventListener("click", () => void cancelMusicLogin());
-  musicDisconnectBtn?.addEventListener("click", () => void disconnectMusic());
-
-  // 搜索
-  musicSearchBtn?.addEventListener("click", () => void runMusicSearch());
-  musicSearchInput?.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") void runMusicSearch();
-  });
-
-  // 订阅状态推送
-  const api = getMusicApi();
-  if (api && typeof api.onStateChanged === "function") {
-    const unsub = api.onStateChanged((s) => renderMusicStatus(s));
-    if (typeof unsub === "function") musicStateUnsub = unsub;
-  }
-
-  // 首次拉一次状态
-  if (api) {
-    try {
-      const r = await api.getStatus();
-      if (r.ok) renderMusicStatus(r.data);
-      else setMusicFeedback("err", "读取状态失败：" + r.errorCode);
-    } catch (err) {
-      console.warn("[music] getStatus failed", err);
-    }
-  } else {
-    setMusicFeedback("err", "window.music 未就绪");
-  }
-}
 
 // ── 网易云折叠卡片用的全局 status 订阅（不依赖切到 music 面板） ────────
 // 让 MCP 面板里的「网易云音乐 / 尚未连接」永远跟主进程状态同步。
@@ -4036,16 +1643,6 @@ async function loadMusicPanel(): Promise<void> {
   }
 })();
 
-function disposeMusicPanel(): void {
-  // 离开面板时：停止轮询、取消订阅、清掉 QR dataURL 释放内存
-  stopMusicLoginPolling();
-  if (musicStateUnsub) {
-    try { musicStateUnsub(); } catch { /* ignore */ }
-    musicStateUnsub = null;
-  }
-  clearMusicQr();
-  setMusicFeedback("info", "");
-}
 // 启动时读 URL hash 决定初始标签（main 通过 loadURL 带 #api 实现"切换模型按钮跳 API"）。
 // 无 hash 默认 general。
 const initialSection = (window.location.hash || "#general").slice(1);
@@ -4054,831 +1651,35 @@ switchSection(initialSection);
 window.settings?.onSwitchSection?.((section) => {
   switchSection(section);
 });
-/* ===== RAG model card toggle (embedding only) ===== */
-(function () {
-  const cards = document.querySelectorAll<HTMLButtonElement>(".rag-model-card:not([data-reranker])");
-  const KEY = "cyrene.rag.model";
-  const saved = localStorage.getItem(KEY) || "minilm";
-  cards.forEach((card) => {
-    const value = card.dataset.value;
-    if (!value) return;
-    card.classList.toggle("is-active", value === saved);
-    card.addEventListener("click", async () => {
-      const previousActive = document.querySelector(".rag-model-card.is-active:not([data-reranker])") as HTMLElement | null;
-      const previousValue = previousActive?.dataset.value;
-
-      // Optimistic UI update
-      cards.forEach((c) => c.classList.remove("is-active"));
-      card.classList.add("is-active");
-      localStorage.setItem(KEY, value);
-
-      // Call IPC to hot-switch the embedding model
-      try {
-        const result = await (window as any).settings?.embeddingSetModel?.(value);
-        if (result?.ok) {
-          console.log("[settings] embedding switched to", value, "cleared:", result.clearedEntries);
-          if (result.clearedEntries && result.clearedEntries > 0) {
-            window.alert("已切換至 " + (value === "bgem3" ? "BGE-M3" : "MiniLM") + "。由於向量維度不同，已清除 " + result.clearedEntries + " 條舊向量記憶。");
-          }
-        } else {
-          // Rollback on failure
-          cards.forEach((c) => c.classList.remove("is-active"));
-          if (previousValue) {
-            const prevCard = document.querySelector('.rag-model-card[data-value="' + previousValue + '"]:not([data-reranker])');
-            prevCard?.classList.add("is-active");
-            localStorage.setItem(KEY, previousValue);
-          }
-          window.alert("切換失敗：" + (result?.error || "未知錯誤"));
-        }
-      } catch (err) {
-        // Rollback on error
-        cards.forEach((c) => c.classList.remove("is-active"));
-        if (previousValue) {
-          const prevCard = document.querySelector('.rag-model-card[data-value="' + previousValue + '"]:not([data-reranker])');
-          prevCard?.classList.add("is-active");
-          localStorage.setItem(KEY, previousValue);
-        }
-        console.error("[settings] embedding switch error:", err);
-      }
-    });
-  });
-})();
-/* ===== Reranker mode toggle ===== */
-(function () {
-  const cards = document.querySelectorAll<HTMLButtonElement>(".rag-model-card[data-reranker]");
-  const KEY = "cyrene.reranker.mode";
-  const saved = localStorage.getItem(KEY) || "light";
-  cards.forEach((card) => {
-    const value = card.dataset.value;
-    if (!value) return;
-    card.classList.toggle("is-active", value === saved);
-    card.addEventListener("click", async () => {
-      const previousActive = document.querySelector(".rag-model-card.is-active[data-reranker]") as HTMLElement | null;
-      const previousValue = previousActive?.dataset.value;
-
-      cards.forEach((c) => c.classList.remove("is-active"));
-      card.classList.add("is-active");
-      localStorage.setItem(KEY, value);
-      try {
-        await (window as any).settings?.rerankerSetMode?.(value);
-      } catch (err) {
-        // Rollback on failure
-        cards.forEach((c) => c.classList.remove("is-active"));
-        if (previousValue) {
-          const prevCard = document.querySelector('.rag-model-card[data-value="' + previousValue + '"][data-reranker]');
-          prevCard?.classList.add("is-active");
-          localStorage.setItem(KEY, previousValue);
-        }
-        console.warn("[Reranker] set mode failed:", err);
-      }
-    });
-  });
-})();
-
-/* ===== Reranker install status (real on-disk check via IPC) ===== */
-(async () => {
-  const lightEl = document.getElementById("reranker-light-status");
-  const standardEl = document.getElementById("reranker-standard-status");
-  try {
-    const status = await (window as any).settings?.getRerankerStatus?.();
-    if (!status) return;
-    if (lightEl) lightEl.textContent = status.light ? "已下載 · 約 23MB" : "未下載 · 可選";
-    if (standardEl) standardEl.textContent = status.standard ? "已下載 · 約 279MB" : "未下載 · 可選";
-  } catch (err) {
-    console.warn("[Reranker] status check failed:", err);
-    if (lightEl) lightEl.textContent = "狀態未知";
-    if (standardEl) standardEl.textContent = "狀態未知";
-  }
-})();
-
-/* ===== Embedding model status ===== */
-(async () => {
-  const bgem3El = document.getElementById("embedding-bgem3-status");
-  const minilmEl = document.getElementById("embedding-minilm-status");
-  try {
-    const status = await window.modelConfig?.getModelInstallStatus?.();
-    if (!status) {
-      if (bgem3El) bgem3El.textContent = "狀態未知";
-      if (minilmEl) minilmEl.textContent = "狀態未知";
-      return;
-    }
-    if (bgem3El) bgem3El.textContent = status.embedding?.bgem3 ? "已下載 · 約 570MB" : "未下載";
-    if (minilmEl) minilmEl.textContent = status.embedding?.minilm ? "已下載 · 約 23MB" : "未下載";
-  } catch (err) {
-    console.warn("[Embedding] status check failed:", err);
-    if (bgem3El) bgem3El.textContent = "狀態未知";
-    if (minilmEl) minilmEl.textContent = "狀態未知";
-  }
-})();
-
-/* ===== Embedding download / delete ===== */
-(function () {
-  const downloadBtn = document.getElementById("embedding-download-btn") as HTMLButtonElement | null;
-  const deleteBtn = document.getElementById("embedding-delete-btn") as HTMLButtonElement | null;
-  const mirrorGroup = document.getElementById("embedding-mirror") as HTMLElement | null;
-
-  function getSelectedMirror(): string {
-    const active = mirrorGroup?.querySelector(".option-block.is-active") as HTMLElement | null;
-    return active?.dataset.value || "official";
-  }
-
-  function getSelectedModel(): string {
-    const active = document.querySelector(".rag-model-card.is-active:not([data-reranker])") as HTMLElement | null;
-    return active?.dataset.value || "minilm";
-  }
-
-  downloadBtn?.addEventListener("click", async () => {
-    // 打開模型安裝說明文檔
-    await window.system?.openExternal(
-      "https://github.com/Playa-0v0/Cyrene-Agent/blob/master/docs/local-models.md"
-    );
-  });
-
-
-  // Inline modal helper
-  function _showModal(opts: { title: string; message: string; icon?: string; confirmText?: string; cancelText?: string }): Promise<boolean> {
-    var ov = document.getElementById("cy-modal-overlay");
-    if (!ov) {
-      ov = document.createElement("div");
-      ov.id = "cy-modal-overlay";
-      ov.className = "cy-modal-overlay is-hidden";
-      ov.innerHTML = '<div class="cy-modal" role="alertdialog" aria-modal="true"><div class="cy-modal__head"><span class="cy-modal__icon" id="cy-modal-icon">📌</span><h3 class="cy-modal__title" id="cy-modal-title">提示</h3></div><hr class="cy-modal__divider"><p class="cy-modal__body" id="cy-modal-message">確認執行此操作嗎？</p><div class="cy-modal__actions"><button type="button" class="ghost-btn" id="cy-modal-cancel">取消</button><button type="button" class="btn-primary" id="cy-modal-confirm">確定</button></div></div>';
-      document.body.appendChild(ov);
-    }
-    var iconEl = ov.querySelector("#cy-modal-icon") as HTMLElement;
-    var titleEl = ov.querySelector("#cy-modal-title") as HTMLElement;
-    var msgEl = ov.querySelector("#cy-modal-message") as HTMLElement;
-    var cancelBtn = ov.querySelector("#cy-modal-cancel") as HTMLButtonElement;
-    var confirmBtn = ov.querySelector("#cy-modal-confirm") as HTMLButtonElement;
-    iconEl.innerHTML = opts.icon || "📌";
-    titleEl.textContent = opts.title;
-    msgEl.textContent = opts.message;
-    cancelBtn.textContent = opts.cancelText || "取消";
-    confirmBtn.textContent = opts.confirmText || "確定";
-    ov.classList.remove("is-hidden");
-    return new Promise(function (resolve) {
-      var cleanup = function (result: boolean) {
-        ov?.classList.add("is-hidden");
-        cancelBtn.removeEventListener("click", onCancel);
-        confirmBtn.removeEventListener("click", onConfirm);
-        resolve(result);
-      };
-      var onCancel = function () { cleanup(false); };
-      var onConfirm = function () { cleanup(true); };
-      cancelBtn.addEventListener("click", onCancel);
-      confirmBtn.addEventListener("click", onConfirm);
-    });
-  }
-  deleteBtn?.addEventListener("click", async () => {
-    const model = getSelectedModel();
-    const name = model === "minilm" ? "MiniLM" : "BGE-M3";
-    var confirmed = await _showModal({ title: "刪 除 模 型", message: "確 定 刪 除 " + name + " 模 型 緩 存？下 次 使 用 需 重 新 下 載。", icon: "⚠️", confirmText: "刪 除", cancelText: "取 消" });
-    if (!confirmed) return;
-    deleteBtn.disabled = true;
-    deleteBtn.textContent = "\u5220\u9664\u4E2D\u2026";
-    try {
-      const result = await window.settings?.deleteEmbeddingModel?.(model);
-      if (result?.ok) {
-        deleteBtn.textContent = "\u2705 \u5DF2\u5220\u9664";
-        setTimeout(() => location.reload(), 800);
-      } else {
-        deleteBtn.textContent = "\u274C \u5931\u8D25";
-        deleteBtn.disabled = false;
-      }
-    } catch (err) {
-      deleteBtn.textContent = "\u274C \u5931\u8D25";
-      deleteBtn.disabled = false;
-    }
-  });
-
-  // Mirror source toggle
-  mirrorGroup?.addEventListener("click", (e) => {
-    const btn = (e.target as HTMLElement).closest("[data-value]") as HTMLElement | null;
-    if (!btn) return;
-    const value = btn.dataset.value;
-    if (!value) return;
-    mirrorGroup.querySelectorAll(".option-block").forEach((b) => {
-      const v = b.getAttribute("data-value");
-      b.classList.toggle("is-active", v === value);
-      b.setAttribute("aria-pressed", v === value ? "true" : "false");
-    });
-    localStorage.setItem("cyrene.rag.mirror", value);
-  });
-
-  // Restore saved mirror on load
-  const savedMirror = localStorage.getItem("cyrene.rag.mirror") || "official";
-  mirrorGroup?.querySelectorAll(".option-block").forEach((b) => {
-    const v = b.getAttribute("data-value");
-    b.classList.toggle("is-active", v === savedMirror);
-    b.setAttribute("aria-pressed", v === savedMirror ? "true" : "false");
-  });
-})();
-(function () {
-  const updateBtn = document.getElementById("embedding-update-btn") as HTMLButtonElement | null;
-  updateBtn?.addEventListener("click", () => {
-    updateBtn.textContent = "已是最新版本";
-    updateBtn.disabled = true;
-    setTimeout(() => {
-      updateBtn.textContent = "檢查更新";
-      updateBtn.disabled = false;
-    }, 2000);
-  });
-})();
-// ── 用戶信息面板 ──
-const avatarEl = document.getElementById("user-avatar-el") as HTMLElement | null;
-const avatarImg = avatarEl?.querySelector("img") as HTMLImageElement | null;
-const avatarPlaceholder = avatarEl?.querySelector("span") as HTMLElement | null;
-const uploadAvatarBtn = document.getElementById("upload-avatar-btn") as HTMLButtonElement | null;
-const userDefaultCityInput = document.getElementById("user-default-city") as HTMLInputElement | null;
-const userNicknameInput = document.getElementById("user-nickname") as HTMLInputElement | null;
-const userCallPrefInput = document.getElementById("user-call-pref") as HTMLInputElement | null;
-const userBirthdayInput = document.getElementById("user-birthday") as HTMLInputElement | null;
-const userTimezoneSelect = document.getElementById("user-timezone") as HTMLSelectElement | null;
-const userGenderGroup = document.getElementById("user-gender") as HTMLElement | null;
-const memoryL0NameInput = document.getElementById("memory-l0-name") as HTMLInputElement | null;
-const memoryL0OccupationInput = document.getElementById("memory-l0-occupation") as HTMLInputElement | null;
-const memoryL0InterestsInput = document.getElementById("memory-l0-interests") as HTMLInputElement | null;
-const memoryL0LanguageInput = document.getElementById("memory-l0-language") as HTMLInputElement | null;
-const memoryL0NoteInput = document.getElementById("memory-l0-note") as HTMLTextAreaElement | null;
-const memoryL1GoalsInput = document.getElementById("memory-l1-goals") as HTMLTextAreaElement | null;
-const memoryL1PreferencesInput = document.getElementById("memory-l1-preferences") as HTMLTextAreaElement | null;
-const memoryL1ProjectInput = document.getElementById("memory-l1-project") as HTMLTextAreaElement | null;
-const memoryL2SearchInput = document.getElementById("memory-l2-search") as HTMLInputElement | null;
-const memoryL2StatusFilter = document.getElementById("memory-l2-status-filter") as HTMLSelectElement | null;
-const memoryL2List = document.getElementById("memory-l2-list") as HTMLElement | null;
-const memoryTimelineToolbar = document.getElementById("memory-timeline-toolbar") as HTMLElement | null;
-const memoryTimelineView = document.getElementById("memory-timeline-view") as HTMLElement | null;
-const memoryGraphView = document.getElementById("memory-graph-view") as HTMLElement | null;
-const memoryGraphNodes = document.getElementById("memory-graph-nodes") as HTMLElement | null;
-const memoryGraphLines = document.getElementById("memory-graph-lines") as SVGSVGElement | null;
-const memoryGraphDetail = document.getElementById("memory-graph-detail") as HTMLElement | null;
-const memoryGraphEmpty = document.getElementById("memory-graph-empty") as HTMLElement | null;
-const memoryViewCount = document.getElementById("memory-view-count") as HTMLElement | null;
-const memoryImportedList = document.getElementById("memory-imported-list") as HTMLElement | null;
-const memoryReflectionList = document.getElementById("memory-reflection-list") as HTMLElement | null;
-const memoryL0EditBtn = document.getElementById("memory-l0-edit-btn") as HTMLButtonElement | null;
-const memoryL0CancelBtn = document.getElementById("memory-l0-cancel-btn") as HTMLButtonElement | null;
-const memoryL1EditBtn = document.getElementById("memory-l1-edit-btn") as HTMLButtonElement | null;
-const memoryL1CancelBtn = document.getElementById("memory-l1-cancel-btn") as HTMLButtonElement | null;
-
-let memoryPanelCache: MemoryPanelPayload | null = null;
-let l0Editing = false;
-let l1Editing = false;
-let l0Snapshot: Record<string, string> | null = null;
-let l1Snapshot: Record<string, string> | null = null;
-
-function showAvatar(dataUrl: string | null): void {
-  if (!dataUrl || !avatarEl) return;
-  if (!avatarEl) return;
-  let img = avatarEl.querySelector("img");
-  if (!img) {
-    img = document.createElement("img");
-    img.style.width = "100%";
-    img.style.height = "100%";
-    img.style.borderRadius = "50%";
-    img.style.objectFit = "cover";
-    avatarEl.appendChild(img);
-  }
-  img.src = dataUrl;
-  if (avatarPlaceholder) avatarPlaceholder.style.display = "none";
-}
-
-function formatDateTime(timestamp: number): string {
-  if (!timestamp) return "暫無時間";
-  const date = new Date(timestamp);
-  if (Number.isNaN(date.getTime())) return "暫無時間";
-  return date.toLocaleString("zh-CN", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-
-function escapeHtml(text: string): string {
-  return text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/\"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
-
-function renderEmptyState(container: HTMLElement | null, title: string, hint: string): void {
-  if (!container) return;
-  container.innerHTML = [
-    '<div class="memory-list__empty">',
-    '  <span>📭</span>',
-    `  <p>${escapeHtml(title)}</p>`,
-    `  <p class="memory-list__hint">${escapeHtml(hint)}</p>`,
-    '</div>',
-  ].join("\n");
-}
-
-function renderInfoList(
-  container: HTMLElement | null,
-  items: Array<{ title: string; body: string; meta?: string }>,
-  emptyTitle: string,
-  emptyHint: string,
-): void {
-  if (!container) return;
-  if (items.length === 0) {
-    renderEmptyState(container, emptyTitle, emptyHint);
-    return;
-  }
-
-  container.innerHTML = items
-    .map((item) => {
-      const meta = item.meta ? `<p class="memory-record__meta">${escapeHtml(item.meta)}</p>` : "";
-      return [
-        '<article class="memory-record">',
-        `  <h3 class="memory-record__title">${escapeHtml(item.title)}</h3>`,
-        `  <p class="memory-record__body">${escapeHtml(item.body)}</p>`,
-        `  ${meta}`,
-        '</article>',
-      ].join("\n");
-    })
-    .join("\n");
-}
-
-function renderL2List(query = ""): void {
-  const list = memoryPanelCache?.l2 ?? [];
-  const normalized = query.trim().toLowerCase();
-  const statusFilter = memoryL2StatusFilter?.value ?? "all";
-  const filtered = list.filter(item => {
-    if (statusFilter === "pinned" && !item.isPinned) return false;
-    if (statusFilter === "conflict" && item.conflictCount === 0) return false;
-    if (!["all", "pinned", "conflict"].includes(statusFilter) && item.status !== statusFilter) return false;
-    if (!normalized) return true;
-    const evidenceText = item.evidence.map(evidence => evidence.quoteSnippet).join(" ");
-    return [item.content, item.triggerText, item.status, evidenceText, item.sourceConversationId]
-      .join(" ").toLowerCase().includes(normalized);
-  });
-
-  if (memoryViewCount) memoryViewCount.textContent = `${filtered.length} 段記憶`;
-  if (!memoryL2List) return;
-  if (filtered.length === 0) {
-    renderEmptyState(
-      memoryL2List,
-      normalized || statusFilter !== "all" ? "沒有符合條件的記憶" : "暫無事件記憶",
-      normalized || statusFilter !== "all" ? "調整搜尋文字或狀態篩選" : "聊天後昔漣會自動提煉重要資訊",
-    );
-    return;
-  }
-
-  const groups = new Map<string, typeof filtered>();
-  for (const item of filtered) {
-    const date = new Date(item.createdAt);
-    const key = Number.isNaN(date.getTime()) ? "時間未知" : date.toLocaleDateString("zh-TW", { year: "numeric", month: "long", day: "numeric", weekday: "short" });
-    const group = groups.get(key) ?? [];
-    group.push(item);
-    groups.set(key, group);
-  }
-
-  const statusLabels: Record<string, string> = {
-    active: "活躍", aging: "淡化中", archived: "已封存", superseded: "已更新", merged: "已合併",
-  };
-  memoryL2List.innerHTML = [...groups.entries()].map(([date, items]) => [
-    '<section class="memory-day">',
-    `  <div class="memory-day__label"><span></span><strong>${escapeHtml(date)}</strong><small>${items.length} 段</small></div>`,
-    '  <div class="memory-day__events">',
-    items.map(item => {
-      const evidence = item.evidence.find(entry => entry.sourceStatus === "active") ?? item.evidence[0];
-      const badges = [
-        `<span class="memory-event__status" data-status="${escapeHtml(item.status)}">${escapeHtml(statusLabels[item.status] ?? item.status)}</span>`,
-        item.isPinned ? '<span class="memory-event__badge">已固定</span>' : "",
-        item.isSummary ? '<span class="memory-event__badge">階段摘要</span>' : "",
-        item.conflictCount > 0 ? `<span class="memory-event__badge memory-event__badge--warning">${item.conflictCount} 個衝突</span>` : "",
-      ].filter(Boolean).join("");
-      const quote = evidence?.quoteSnippet || item.triggerText;
-      return [
-        `<article class="memory-event" data-memory-id="${escapeHtml(item.id)}">`,
-        '  <span class="memory-event__dot"></span>',
-        '  <div class="memory-event__card">',
-        `    <div class="memory-event__top"><time>${escapeHtml(new Date(item.createdAt).toLocaleTimeString("zh-TW", { hour: "2-digit", minute: "2-digit" }))}</time><div>${badges}</div></div>`,
-        `    <p class="memory-event__content">${escapeHtml(item.content)}</p>`,
-        quote ? `    <blockquote class="memory-event__evidence"><span>證據</span>${escapeHtml(quote)}</blockquote>` : "",
-        `    <div class="memory-event__meta"><span>權重 ${item.weight.toFixed(1)}</span><span>想起 ${item.accessCount} 次</span><span>最近取用 ${escapeHtml(formatDateTime(item.lastAccessedAt))}</span></div>`,
-        '    <div class="memory-event__actions">',
-        `      <button type="button" data-memory-action="pin">${item.isPinned ? "取消固定" : "固定記憶"}</button>`,
-        item.sourceConversationId ? '      <button type="button" data-memory-action="source">開啟來源對話</button>' : "",
-        '      <button type="button" class="is-danger" data-memory-action="delete">忘記這段</button>',
-        '    </div>',
-        '  </div>',
-        '</article>',
-      ].join("\n");
-    }).join("\n"),
-    '  </div>',
-    '</section>',
-  ].join("\n")).join("\n");
-}
-
-function renderMemoryGraph(): void {
-  const graph = memoryPanelCache?.graph;
-  if (!graph || !memoryGraphNodes || !memoryGraphLines || !memoryGraphEmpty) return;
-  memoryGraphNodes.replaceChildren();
-  memoryGraphLines.replaceChildren();
-  const entityNodes = graph.nodes.filter(node => node.type !== "user");
-  memoryGraphEmpty.classList.toggle("is-hidden", entityNodes.length > 0);
-  if (entityNodes.length === 0) return;
-
-  const positions = new Map<string, { x: number; y: number }>();
-  const root = graph.nodes.find(node => node.type === "user") ?? graph.nodes[0];
-  positions.set(root.id, { x: 50, y: 50 });
-  entityNodes.forEach((node, index) => {
-    const angle = -Math.PI / 2 + (Math.PI * 2 * index) / entityNodes.length;
-    const radiusX = index % 2 === 0 ? 39 : 31;
-    const radiusY = index % 2 === 0 ? 39 : 31;
-    positions.set(node.id, { x: 50 + Math.cos(angle) * radiusX, y: 50 + Math.sin(angle) * radiusY });
-  });
-
-  memoryGraphLines.setAttribute("viewBox", "0 0 1000 600");
-  for (const edge of graph.edges) {
-    const source = positions.get(edge.sourceId);
-    const target = positions.get(edge.targetId);
-    if (!source || !target) continue;
-    const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
-    line.setAttribute("x1", String(source.x * 10));
-    line.setAttribute("y1", String(source.y * 6));
-    line.setAttribute("x2", String(target.x * 10));
-    line.setAttribute("y2", String(target.y * 6));
-    line.setAttribute("class", edge.inferred ? "is-inferred" : "is-explicit");
-    line.setAttribute("stroke-width", String(Math.min(5, 1 + Math.log2(Math.max(1, edge.strength)))));
-    const title = document.createElementNS("http://www.w3.org/2000/svg", "title");
-    title.textContent = `${edge.relation} · 強度 ${edge.strength}`;
-    line.appendChild(title);
-    memoryGraphLines.appendChild(line);
-  }
-
-  for (const node of graph.nodes) {
-    const position = positions.get(node.id);
-    if (!position) continue;
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "memory-graph-node";
-    button.dataset.nodeId = node.id;
-    button.dataset.type = node.type;
-    button.style.setProperty("--node-x", `${position.x}%`);
-    button.style.setProperty("--node-y", `${position.y}%`);
-    button.style.setProperty("--node-scale", String(Math.min(1.22, .88 + Math.log2(Math.max(1, node.mentionCount)) * .08)));
-    const name = document.createElement("strong");
-    name.textContent = node.name;
-    const count = document.createElement("small");
-    count.textContent = node.type === "user" ? "記憶中心" : `${node.mentionCount} 次`;
-    button.append(name, count);
-    button.addEventListener("click", () => showMemoryGraphNode(node.id));
-    memoryGraphNodes.appendChild(button);
-  }
-}
-
-function showMemoryGraphNode(nodeId: string): void {
-  const graph = memoryPanelCache?.graph;
-  if (!graph || !memoryGraphDetail) return;
-  const node = graph.nodes.find(item => item.id === nodeId);
-  if (!node) return;
-  memoryGraphNodes?.querySelectorAll(".memory-graph-node").forEach(element => {
-    element.classList.toggle("is-active", (element as HTMLElement).dataset.nodeId === nodeId);
-  });
-  const edges = graph.edges.filter(edge => edge.sourceId === nodeId || edge.targetId === nodeId);
-  const related = edges.map(edge => {
-    const otherId = edge.sourceId === nodeId ? edge.targetId : edge.sourceId;
-    return { edge, other: graph.nodes.find(item => item.id === otherId) };
-  }).filter(item => item.other);
-  const typeNames: Record<string, string> = { user: "記憶中心", person: "人物", place: "地點", preference: "偏好", organization: "組織", concept: "概念" };
-  memoryGraphDetail.replaceChildren();
-  const eyebrow = document.createElement("span");
-  eyebrow.className = "memory-graph-detail__eyebrow";
-  eyebrow.textContent = typeNames[node.type] ?? node.type;
-  const title = document.createElement("h3");
-  title.textContent = node.name;
-  const meta = document.createElement("p");
-  meta.textContent = node.type === "user"
-    ? `目前連著 ${related.length} 個記憶實體。`
-    : `提及 ${node.mentionCount} 次 · 最近出現 ${formatDateTime(node.lastMentionedAt)}`;
-  const list = document.createElement("div");
-  list.className = "memory-graph-relations";
-  for (const item of related.slice(0, 12)) {
-    const row = document.createElement("button");
-    row.type = "button";
-    const relation = document.createElement("span");
-    relation.textContent = item.edge.relation;
-    const other = document.createElement("strong");
-    other.textContent = item.other?.name ?? "未知";
-    row.append(relation, other);
-    row.addEventListener("click", () => showMemoryGraphNode(item.other!.id));
-    list.appendChild(row);
-  }
-  memoryGraphDetail.append(eyebrow, title, meta, list);
-}
-
-async function loadMemoryPanel(): Promise<void> {
-  try {
-    const payload = await window.memoryPanel?.getData();
-    if (!payload) return;
-    memoryPanelCache = payload;
-
-    if (memoryL0NameInput) memoryL0NameInput.value = payload.l0.preferredName || "";
-    if (memoryL0OccupationInput) memoryL0OccupationInput.value = payload.l0.occupation || "";
-    if (memoryL0InterestsInput) memoryL0InterestsInput.value = payload.l0.longTermInterests || "";
-    if (memoryL0LanguageInput) memoryL0LanguageInput.value = payload.l0.language || "";
-    if (memoryL0NoteInput) memoryL0NoteInput.value = payload.l0.permanentNote || "";
-
-    if (memoryL1GoalsInput) memoryL1GoalsInput.value = payload.l1.recentGoals || "";
-    if (memoryL1PreferencesInput) memoryL1PreferencesInput.value = payload.l1.recentPreferences || "";
-    if (memoryL1ProjectInput) memoryL1ProjectInput.value = payload.l1.currentProject || "";
-
-    renderL2List(memoryL2SearchInput?.value || "");
-
-        renderImportedDocs();;
-
-    renderInfoList(
-      memoryReflectionList,
-      payload.reflections,
-      "暂无阶段总结",
-      "当前项目里 Reflection 还没真正生成落地",
-    );
-
-    if (memoryL0EditBtn) memoryL0EditBtn.disabled = false;
-    if (memoryL1EditBtn) memoryL1EditBtn.disabled = false;
-  } catch (err) {
-    console.error("[settings] load memory panel failed", err);
-    renderEmptyState(memoryL2List, "记忆读取失败", "请查看终端日志");
-    renderEmptyState(memoryImportedList, "导入知识读取失败", "请查看终端日志");
-    renderEmptyState(memoryReflectionList, "阶段总结读取失败", "请查看终端日志");
-  }
-}
-
-async function loadUserProfile(): Promise<void> {
-  try {
-    const avatarDataUrl = await window.user?.getAvatar();
-    if (avatarDataUrl) showAvatar(avatarDataUrl);
-    if (uploadAvatarBtn) uploadAvatarBtn.disabled = false;
-    // 加载用户字段（昵称/称呼偏好/生日/默认城市/时区）
-    const profile = await window.user?.getProfile();
-    if (profile) {
-      if (userNicknameInput) userNicknameInput.value = String(profile.nickname ?? "");
-      if (userCallPrefInput) userCallPrefInput.value = String(profile.callPreference ?? "");
-      if (userBirthdayInput) userBirthdayInput.value = String(profile.birthday ?? "");
-      if (userDefaultCityInput) userDefaultCityInput.value = String(profile.defaultCity ?? "");
-      // 时区：白名单校验，空/非法/不在白名单都回退 FALLBACK_TIMEZONE，不直接用 ?? 兜底
-      if (userTimezoneSelect) userTimezoneSelect.value = normalizeTimezoneOptionValue(profile.timezone);
-      // 性别：标记当前选中的按钮
-      const gender = String(profile.gender ?? "secret");
-      if (userGenderGroup) {
-        userGenderGroup.querySelectorAll(".gender-select__btn").forEach((btn) => {
-          btn.classList.toggle("is-active", (btn as HTMLElement).dataset.gender === gender);
-        });
-      }
-    }
-  } catch {
-    console.warn("[settings] load user profile failed");
-  }
-}
-
-// 用戶字段：失焦/回車保存（每個字段獨立原子保存）
-function bindUserProfileSave(input: HTMLInputElement | null, field: string): void {
-  if (!input) return;
-  const save = (): void => { void window.user?.saveProfile({ [field]: input.value.trim() }); };
-  input.addEventListener("change", save);
-  input.addEventListener("blur", save);
-}
-bindUserProfileSave(userNicknameInput, "nickname");
-bindUserProfileSave(userCallPrefInput, "callPreference");
-bindUserProfileSave(userBirthdayInput, "birthday");
-// 默認城市複用上面的 saveCity（保持原邏輯）
-if (userDefaultCityInput) {
-  const saveCity = (): void => {
-    const value = userDefaultCityInput.value.trim();
-    void window.user?.saveProfile({ defaultCity: value });
-  };
-  userDefaultCityInput.addEventListener("change", saveCity);
-  userDefaultCityInput.addEventListener("blur", saveCity);
-}
-
-// 时区：白名单填充 options；保存只接受白名单 value（select 只能选白名单项，天然受限）
-if (userTimezoneSelect) {
-  for (const opt of TIMEZONE_OPTIONS) {
-    const o = document.createElement("option");
-    o.value = opt.value;
-    o.textContent = opt.label;
-    userTimezoneSelect.appendChild(o);
-  }
-  userTimezoneSelect.addEventListener("change", () => {
-    const raw = userTimezoneSelect.value;
-    // 防御性二次校验：即便有人手动改 DOM，保存路径也只放行白名单 value
-    const safe = normalizeTimezoneOptionValue(raw);
-    if (safe !== raw) {
-      userTimezoneSelect.value = safe;
-      return; // 不发保存请求，等用户重新选
-    }
-    void window.user?.saveProfile({ timezone: safe });
-  });
-}
-
-// 性别：三档按钮，点击切换并原子保存
-if (userGenderGroup) {
-  userGenderGroup.querySelectorAll(".gender-select__btn").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const value = (btn as HTMLElement).dataset.gender;
-      if (!value) return;
-      userGenderGroup.querySelectorAll(".gender-select__btn").forEach((b) => b.classList.remove("is-active"));
-      btn.classList.add("is-active");
-      void window.user?.saveProfile({ gender: value });
-    });
-  });
-}
-
-if (uploadAvatarBtn) {
-  uploadAvatarBtn.addEventListener("click", async () => {
-    try {
-      const result = await window.user?.uploadAvatar();
-      if (result?.avatarPath) {
-        const avatarDataUrl = await window.user?.getAvatar();
-        if (avatarDataUrl) showAvatar(avatarDataUrl);
-      }
-    } catch (err) {
-      console.error("[settings] upload avatar failed", err);
-    }
-  });
-}
 // --- L0/L1 editable logic ---
 
-function takeL0Snapshot(): Record<string, string> {
-  return {
-    preferredName: memoryL0NameInput?.value ?? "",
-    occupation: memoryL0OccupationInput?.value ?? "",
-    longTermInterests: memoryL0InterestsInput?.value ?? "",
-    language: memoryL0LanguageInput?.value ?? "",
-    permanentNote: memoryL0NoteInput?.value ?? "",
-  };
-}
 
-function takeL1Snapshot(): Record<string, string> {
-  return {
-    recentGoals: memoryL1GoalsInput?.value ?? "",
-    recentPreferences: memoryL1PreferencesInput?.value ?? "",
-    currentProject: memoryL1ProjectInput?.value ?? "",
-  };
-}
 
-function shallowEqual(a: Record<string, string>, b: Record<string, string>): boolean {
-  const keys = Object.keys(a);
-  if (keys.length !== Object.keys(b).length) return false;
-  for (const key of keys) {
-    if (a[key] !== b[key]) return false;
-  }
-  return true;
-}
 
-function setL0FieldsDisabled(disabled: boolean): void {
-  if (memoryL0NameInput) disabled ? memoryL0NameInput.setAttribute("disabled", "") : memoryL0NameInput.removeAttribute("disabled");
-  if (memoryL0OccupationInput) disabled ? memoryL0OccupationInput.setAttribute("disabled", "") : memoryL0OccupationInput.removeAttribute("disabled");
-  if (memoryL0InterestsInput) disabled ? memoryL0InterestsInput.setAttribute("disabled", "") : memoryL0InterestsInput.removeAttribute("disabled");
-  if (memoryL0LanguageInput) disabled ? memoryL0LanguageInput.setAttribute("disabled", "") : memoryL0LanguageInput.removeAttribute("disabled");
-  if (memoryL0NoteInput) disabled ? memoryL0NoteInput.setAttribute("disabled", "") : memoryL0NoteInput.removeAttribute("disabled");
-}
 
-function setL1FieldsDisabled(disabled: boolean): void {
-  if (memoryL1GoalsInput) disabled ? memoryL1GoalsInput.setAttribute("disabled", "") : memoryL1GoalsInput.removeAttribute("disabled");
-  if (memoryL1PreferencesInput) disabled ? memoryL1PreferencesInput.setAttribute("disabled", "") : memoryL1PreferencesInput.removeAttribute("disabled");
-  if (memoryL1ProjectInput) disabled ? memoryL1ProjectInput.setAttribute("disabled", "") : memoryL1ProjectInput.removeAttribute("disabled");
-}
 
-function enterL0EditMode(): void {
-  if (l0Editing) return;
-  l0Editing = true;
-  l0Snapshot = takeL0Snapshot();
-  setL0FieldsDisabled(false);
-  if (memoryL0EditBtn) memoryL0EditBtn.innerHTML = `<svg width="18" height="18" viewBox="0 0 48 48" fill="none" aria-hidden="true" style="display:inline;vertical-align:-2px"><path d="M6 9C6 7.34315 7.34315 6 9 6H30.3363C31.132 6 31.895 6.31607 32.4576 6.87868L36.3158 10.7368L41.1213 15.5424C41.6839 16.105 42 16.868 42 17.6637V39C42 40.6569 40.6569 42 39 42H9C7.34315 42 6 40.6569 6 39V9Z" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/><path d="M31 26H17C15.3431 26 14 27.3431 14 29V42H34V29C34 27.3431 32.6569 26 31 26Z" fill="none" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/><path d="M29 16H17C15.3431 16 14 14.6569 14 13V6" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></svg> 保存`;
-  if (memoryL0CancelBtn) memoryL0CancelBtn.classList.remove("is-hidden");
-}
 
-function exitL0EditMode(): void {
-  l0Editing = false;
-  l0Snapshot = null;
-  setL0FieldsDisabled(true);
-  if (memoryL0EditBtn) memoryL0EditBtn.innerHTML = `<svg width="18" height="18" viewBox="0 0 48 48" fill="none" aria-hidden="true" style="display:inline;vertical-align:-2px"><path d="M5.32497 43.4996L13.81 43.4998L44.9227 12.3871L36.4374 3.90186L5.32471 35.0146L5.32497 43.4996Z" fill="none" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/><path d="M27.9521 12.3872L36.4374 20.8725" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></svg> 编辑`;
-  if (memoryL0CancelBtn) memoryL0CancelBtn.classList.add("is-hidden");
-}
 
-async function saveL0(): Promise<void> {
-  const current = takeL0Snapshot();
-  if (l0Snapshot && shallowEqual(current, l0Snapshot)) {
-    exitL0EditMode();
-    return;
-  }
-  try {
-    await window.memoryPanel?.saveL0(current);
-    await loadMemoryPanel();
-    exitL0EditMode();
-    if (memoryL0EditBtn) {
-      memoryL0EditBtn.textContent = "✅ 已保存";
-      setTimeout(() => { if (memoryL0EditBtn && !l0Editing) memoryL0EditBtn.innerHTML = `<svg width="18" height="18" viewBox="0 0 48 48" fill="none" aria-hidden="true" style="display:inline;vertical-align:-2px"><path d="M5.32497 43.4996L13.81 43.4998L44.9227 12.3871L36.4374 3.90186L5.32471 35.0146L5.32497 43.4996Z" fill="none" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/><path d="M27.9521 12.3872L36.4374 20.8725" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></svg> 编辑`; }, 2000);
-    }
-  } catch (err) {
-    console.error("[settings] save L0 failed", err);
-    alert("保存失败，请重试");
-  }
-}
 
-function cancelL0Edit(): void {
-  if (l0Snapshot) {
-    if (memoryL0NameInput) memoryL0NameInput.value = l0Snapshot.preferredName;
-    if (memoryL0OccupationInput) memoryL0OccupationInput.value = l0Snapshot.occupation;
-    if (memoryL0InterestsInput) memoryL0InterestsInput.value = l0Snapshot.longTermInterests;
-    if (memoryL0LanguageInput) memoryL0LanguageInput.value = l0Snapshot.language;
-    if (memoryL0NoteInput) memoryL0NoteInput.value = l0Snapshot.permanentNote;
-  }
-  exitL0EditMode();
-}
 
-function enterL1EditMode(): void {
-  if (l1Editing) return;
-  l1Editing = true;
-  l1Snapshot = takeL1Snapshot();
-  setL1FieldsDisabled(false);
-  if (memoryL1EditBtn) memoryL1EditBtn.innerHTML = `<svg width="18" height="18" viewBox="0 0 48 48" fill="none" aria-hidden="true" style="display:inline;vertical-align:-2px"><path d="M6 9C6 7.34315 7.34315 6 9 6H30.3363C31.132 6 31.895 6.31607 32.4576 6.87868L36.3158 10.7368L41.1213 15.5424C41.6839 16.105 42 16.868 42 17.6637V39C42 40.6569 40.6569 42 39 42H9C7.34315 42 6 40.6569 6 39V9Z" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/><path d="M31 26H17C15.3431 26 14 27.3431 14 29V42H34V29C34 27.3431 32.6569 26 31 26Z" fill="none" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/><path d="M29 16H17C15.3431 16 14 14.6569 14 13V6" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></svg> 保存`;
-  if (memoryL1CancelBtn) memoryL1CancelBtn.classList.remove("is-hidden");
-}
 
-function exitL1EditMode(): void {
-  l1Editing = false;
-  l1Snapshot = null;
-  setL1FieldsDisabled(true);
-  if (memoryL1EditBtn) memoryL1EditBtn.innerHTML = `<svg width="18" height="18" viewBox="0 0 48 48" fill="none" aria-hidden="true" style="display:inline;vertical-align:-2px"><path d="M5.32497 43.4996L13.81 43.4998L44.9227 12.3871L36.4374 3.90186L5.32471 35.0146L5.32497 43.4996Z" fill="none" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/><path d="M27.9521 12.3872L36.4374 20.8725" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></svg> 编辑`;
-  if (memoryL1CancelBtn) memoryL1CancelBtn.classList.add("is-hidden");
-}
 
-async function saveL1(): Promise<void> {
-  const current = takeL1Snapshot();
-  if (l1Snapshot && shallowEqual(current, l1Snapshot)) {
-    exitL1EditMode();
-    return;
-  }
-  try {
-    await window.memoryPanel?.saveL1(current);
-    await loadMemoryPanel();
-    exitL1EditMode();
-    if (memoryL1EditBtn) {
-      memoryL1EditBtn.textContent = "✅ 已保存";
-      setTimeout(() => { if (memoryL1EditBtn && !l1Editing) memoryL1EditBtn.textContent = "✏️ 編輯"; }, 2000);
-    }
-  } catch (err) {
-    console.error("[settings] save L1 failed", err);
-    alert("保存失敗，請重試");
-  }
-}
 
-function cancelL1Edit(): void {
-  if (l1Snapshot) {
-    if (memoryL1GoalsInput) memoryL1GoalsInput.value = l1Snapshot.recentGoals;
-    if (memoryL1PreferencesInput) memoryL1PreferencesInput.value = l1Snapshot.recentPreferences;
-    if (memoryL1ProjectInput) memoryL1ProjectInput.value = l1Snapshot.currentProject;
-  }
-  exitL1EditMode();
-}
 
 // Bind edit button events
 memoryL0EditBtn?.addEventListener("click", () => {
-  if (l0Editing) { saveL0(); } else { enterL0EditMode(); }
+  if (memoryState.l0Editing) { saveL0(); } else { enterL0EditMode(); }
 });
 memoryL0CancelBtn?.addEventListener("click", cancelL0Edit);
 
 memoryL1EditBtn?.addEventListener("click", () => {
-  if (l1Editing) { saveL1(); } else { enterL1EditMode(); }
+  if (memoryState.l1Editing) { saveL1(); } else { enterL1EditMode(); }
 });
 memoryL1CancelBtn?.addEventListener("click", cancelL1Edit);
 
+// ── Obsidian Vault 绑定 UI（逻辑抽离至 ./memory/obsidian-vault-ui）──
 
-function renderImportedDocs(): void {
-  const list = memoryPanelCache?.importedDocs ?? [];
-  if (!memoryImportedList) return;
-
-  if (list.length === 0) {
-    renderEmptyState(memoryImportedList, "暫無導入文檔", "在聊天窗口上傳文件後會自動索引");
-    return;
-  }
-
-  memoryImportedList.innerHTML = list
-    .map((item) => {
-      const importId = item.importId || "";
-      const fileName = escapeHtml(item.fileName);
-      const chunkInfo = "已索引 " + item.chunkCount + " 個片段";
-      const timeInfo = "最近導入：" + formatDateTime(item.lastImportedAt);
-      return [
-        '<article class="memory-record memory-record--doc">',
-        '  <div class="memory-record__main">',
-        '    <h3 class="memory-record__title">' + fileName + '</h3>',
-        '    <p class="memory-record__body">' + escapeHtml(chunkInfo) + '</p>',
-        '    <p class="memory-record__meta">' + escapeHtml(timeInfo) + '</p>',
-        '  </div>',
-        '  <button type="button" class="memory-record__delete" data-import-id="' + escapeHtml(importId) + '" data-file-name="' + fileName + '" title="删除此导入文档"><svg width="16" height="16" viewBox="0 0 48 48" fill="none" aria-hidden="true" style="vertical-align:-2px"><path fill-rule="evenodd" clip-rule="evenodd" d="M8 15H40L37 44H11L8 15Z" fill="none" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/><path d="M20.002 25.0024V35.0026" stroke="currentColor" stroke-width="4" stroke-linecap="round"/><path d="M28.0024 24.9995V34.9972" stroke="currentColor" stroke-width="4" stroke-linecap="round"/><path d="M12 14.9999L28.3242 3L36 15" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></svg></button>',
-        '</article>',
-      ].join("\n");
-    })
-    .join("\n");
-}
+initObsidianVaultUI();
 
 memoryImportedList?.addEventListener("click", async (event) => {
   const target = event.target as HTMLElement | null;
@@ -4886,13 +1687,13 @@ memoryImportedList?.addEventListener("click", async (event) => {
   if (!deleteBtn) return;
 
   const importId = deleteBtn.dataset.importId || "";
-  const fileName = deleteBtn.dataset.fileName || "未命名文檔";
+  const fileName = deleteBtn.dataset.fileName || "未命名文档";
 
   const confirmed = await showModal({
-    title: "刪除導入知識",
-    message: "確定刪除導入知識？\n\n文件：\n《" + fileName + "》\n\n刪除後不可恢復，如需使用請重新導入。",
+    title: "删除导入知识",
+    message: "确定删除导入知识？\n\n文件：\n《" + fileName + "》\n\n删除后不可恢复，如需使用请重新导入。",
     icon: "⚠️",
-    confirmText: "刪除",
+    confirmText: "删除",
     cancelText: "取消",
   });
 
@@ -4910,132 +1711,9 @@ memoryImportedList?.addEventListener("click", async (event) => {
 
 
 void loadMemoryPanel();
-void loadUserProfile();
 
-// ── 權限檔位 UI ───────────────────────────────────────────
-type PermissionLevel = "read-only" | "scoped" | "per-action" | "full";
 
-const permissionBlocksWrap = document.getElementById("plugin-file-permission") as HTMLElement | null;
-const permissionNote = document.getElementById("plugin-file-note") as HTMLElement | null;
-
-const PERMISSION_NOTES: Record<PermissionLevel, string> = {
-  "read-only": "只讀：昔漣不會修改本地任何文件，也不能為你安裝新工具。",
-  "scoped": "指定目錄：昔漣只能在你授權的目錄裡讀寫文件（白名單後續在此面板配置）。",
-  "per-action": "每次審批：每次涉及文件或安裝的操作，昔漣都會在聊天裡彈卡片讓你確認。",
-  "full": "完全訪問：昔漣可以自由調用本地命令（含 git/npm/pip）。請只在你完全信任的情況下使用。",
-};
-
-function paintPermissionUI(level: PermissionLevel): void {
-  if (!permissionBlocksWrap) return;
-  // scoped 檔已從插件面板移除，回退顯示只讀
-  const display = level === "scoped" ? "read-only" : level;
-  const blocks = permissionBlocksWrap.querySelectorAll<HTMLButtonElement>("button[data-level]");
-  blocks.forEach((b) => {
-    const isActive = b.dataset.level === display;
-    b.classList.toggle("is-active", isActive);
-    b.setAttribute("aria-pressed", String(isActive));
-  });
-  if (permissionNote) {
-    permissionNote.textContent = PERMISSION_NOTES[level];
-  }
-}
-
-async function confirmFullAccess(): Promise<boolean> {
-  // 完全訪問需要延遲確認 + 風險提示
-  _initModalOverlay();
-  if (!_cyModalOverlay) return false;
-  const iconEl = _cyModalOverlay.querySelector("#cy-modal-icon") as HTMLElement;
-  const titleEl = _cyModalOverlay.querySelector("#cy-modal-title") as HTMLElement;
-  const msgEl = _cyModalOverlay.querySelector("#cy-modal-message") as HTMLElement;
-  const cancelBtn = _cyModalOverlay.querySelector("#cy-modal-cancel") as HTMLButtonElement;
-  const confirmBtn = _cyModalOverlay.querySelector("#cy-modal-confirm") as HTMLButtonElement;
-  iconEl.textContent = "⚠️";
-  titleEl.textContent = "切換到完全訪問？";
-  msgEl.textContent = "這意味著昔漣可以在你的電腦上自由執行命令，包括 git clone、npm install、刪除文件等。請只在你完全信任她的判斷時啟用。";
-  cancelBtn.textContent = "再想想";
-  _cyModalOverlay.classList.remove("is-hidden");
-
-  // 倒計時 5 秒強制等待
-  let remain = 5;
-  confirmBtn.disabled = true;
-  confirmBtn.textContent = "我瞭解風險（" + remain + "）";
-  const tick = setInterval(() => {
-    remain -= 1;
-    if (remain <= 0) {
-      confirmBtn.disabled = false;
-      confirmBtn.textContent = "我瞭解風險，啟用";
-      clearInterval(tick);
-    } else {
-      confirmBtn.textContent = "我瞭解風險（" + remain + "）";
-    }
-  }, 1000);
-
-  return new Promise((resolve) => {
-    const cleanup = (result: boolean) => {
-      clearInterval(tick);
-      confirmBtn.disabled = false;
-      _cyModalOverlay?.classList.add("is-hidden");
-      cancelBtn.removeEventListener("click", onCancel);
-      confirmBtn.removeEventListener("click", onConfirm);
-      resolve(result);
-    };
-    const onCancel = () => cleanup(false);
-    const onConfirm = () => cleanup(true);
-    cancelBtn.addEventListener("click", onCancel);
-    confirmBtn.addEventListener("click", onConfirm);
-  });
-}
-
-if (permissionBlocksWrap) {
-  permissionBlocksWrap.addEventListener("click", async (event) => {
-    const btn = (event.target as HTMLElement)?.closest("button[data-level]") as HTMLButtonElement | null;
-    if (!btn) return;
-    const target = (btn.dataset.level || "") as PermissionLevel;
-    if (!target) return;
-    if (btn.classList.contains("is-active")) {
-      console.log("[settings] 檔位未變，不動作");
-      return;
-    }
-
-    if (target === "full") {
-      const ok = await confirmFullAccess();
-      if (!ok) {
-        console.log("[settings] 用戶取消了完全訪問");
-        return;
-      }
-    }
-
-    console.log("[settings] 切換權限檔位 →", target);
-    try {
-      const result = await window.settings?.setPermissionLevel?.(target);
-      if (result?.ok) {
-        paintPermissionUI((result.level || target) as PermissionLevel);
-      } else {
-        console.warn("[settings] 切換檔位失敗:", result?.error);
-      }
-    } catch (err) {
-      console.error("[settings] 切換檔位異常:", err);
-    }
-  });
-
-  // 初始化：從後端拿當前檔位
-  void (async () => {
-    try {
-      const result = await window.settings?.getPermissionLevel?.();
-      const level = (result?.level || "read-only") as PermissionLevel;
-      console.log("[settings] 當前權限檔位:", level);
-      paintPermissionUI(level);
-    } catch (err) {
-      console.warn("[settings] 加載權限檔位失敗:", err);
-      paintPermissionUI("read-only");
-    }
-  })();
-}
-
-// ── 生活工具手風琴 ─────────────────────────────────────────
-const lifeToggle = document.getElementById("plugin-life-toggle") as HTMLButtonElement | null;
-const lifeCard = document.getElementById("plugin-life-card");
-const lifeBody = document.getElementById("plugin-life-body");
+// ── 生活工具手风琴 ─────────────────────────────────────────
 lifeToggle?.addEventListener("click", () => {
   const expanded = lifeToggle.getAttribute("aria-expanded") === "true";
   lifeToggle.setAttribute("aria-expanded", String(!expanded));
@@ -5044,9 +1722,6 @@ lifeToggle?.addEventListener("click", () => {
 });
 
 // ── 音乐工具手风琴（跟生活工具一样的折叠逻辑）────────────────
-const musicToggle = document.getElementById("plugin-music-toggle") as HTMLButtonElement | null;
-const musicAccordionCard = document.getElementById("plugin-music-card");
-const musicAccordionBody = document.getElementById("plugin-music-body");
 musicToggle?.addEventListener("click", () => {
   const expanded = musicToggle.getAttribute("aria-expanded") === "true";
   musicToggle.setAttribute("aria-expanded", String(!expanded));
@@ -5065,1757 +1740,113 @@ musicReturnBtn?.addEventListener("click", () => {
 	});
 
 
-// ── Skill 面板：列 skill 开关 ──────────────────────────────
-async function renderSkills(): Promise<void> {
-  const listEl = document.getElementById("skills-list");
-  const emptyEl = document.getElementById("skills-empty");
-  if (!listEl || !window.settings?.listSkills) return;
 
-  let skills: Array<{ id: string; name: string; description: string; tools: string[]; enabled: boolean; source: string; version?: string; references: string[] }> = [];
+// ── 清空聊天历史 ─────────────────────────────────────────────
+clearChatHistoryBtn.addEventListener("click", async () => {
+  if (!window.confirm("清空所有聊天会话？\n此操作会删除全部历史对话，无法恢复。")) return;
   try {
-    skills = await window.settings.listSkills();
-  } catch (err) {
-    console.warn("[settings] 加載 skill 列表失敗:", err);
-  }
-
-  listEl.innerHTML = "";
-  if (skills.length === 0) {
-    if (emptyEl) emptyEl.classList.remove("is-hidden");
-    return;
-  }
-  if (emptyEl) emptyEl.classList.add("is-hidden");
-
-  // MiniMax 辦公合集 id 列表
-  const officeGroupIds = new Set(["docx", "pdf", "pptx-generator", "xlsx"]);
-  const officeSkills = skills.filter((s) => officeGroupIds.has(s.id));
-  const otherSkills = skills.filter((s) => !officeGroupIds.has(s.id));
-
-  // 渲染單條 skill
-  function renderSkillRow(s: typeof skills[number]): HTMLDivElement {
-    const row = document.createElement("div");
-    row.className = "skill-row";
-    const label = document.createElement("div");
-    label.className = "skill-row__info";
-    const title = document.createElement("div");
-    title.className = "skill-row__title";
-    title.textContent = s.name + (s.source === "user" ? " （用戶）" : "");
-    const desc = document.createElement("div");
-    desc.className = "skill-row__desc";
-    const short = s.description.length > 120 ? s.description.slice(0, 120) + "…" : s.description;
-    const toolsStr = s.tools.length > 0 ? ` [tools: ${s.tools.join(", ")}]` : "";
-    desc.textContent = short + toolsStr;
-    label.appendChild(title);
-    label.appendChild(desc);
-
-    const toggle = document.createElement("input");
-    toggle.type = "checkbox";
-    toggle.className = "skill-toggle";
-    toggle.checked = s.enabled;
-    toggle.addEventListener("change", async () => {
-      try {
-        await window.settings?.setSkillEnabled?.(s.id, toggle.checked);
-      } catch (err) {
-        console.warn("[settings] 切換 skill 失敗:", err);
-        toggle.checked = !toggle.checked;
+    const sessions = await window.chatStore?.list();
+    if (sessions && sessions.length > 0) {
+      // 串行删除（store 不支持批量删除；会话数量不会大，可接受）
+      for (const s of sessions) {
+        await window.chatStore?.delete(s.id);
       }
-    });
-
-    row.appendChild(label);
-    row.appendChild(toggle);
-    return row;
-  }
-
-  // 渲染其他（非合集）skill
-  for (const s of otherSkills) {
-    listEl.appendChild(renderSkillRow(s));
-  }
-
-  // MiniMax 辦公合集摺疊組
-  if (officeSkills.length > 0) {
-    const group = document.createElement("div");
-    group.className = "skill-group";
-
-    const header = document.createElement("div");
-    header.className = "skill-group__header";
-    const arrow = document.createElement("span");
-    arrow.className = "skill-group__arrow";
-    arrow.textContent = "▶";
-    const gTitle = document.createElement("span");
-    gTitle.className = "skill-group__title";
-    gTitle.textContent = "MiniMAX-office-skills";
-    const gDesc = document.createElement("span");
-    gDesc.className = "skill-group__desc";
-    gDesc.textContent = "MiniMax開源的辦公文檔Skills合集";
-    header.appendChild(arrow);
-    header.appendChild(gTitle);
-    header.appendChild(gDesc);
-    header.addEventListener("click", () => {
-      body.classList.toggle("is-open");
-      arrow.textContent = body.classList.contains("is-open") ? "▼" : "▶";
-    });
-
-    const body = document.createElement("div");
-    body.className = "skill-group__body";
-    for (const s of officeSkills) {
-      body.appendChild(renderSkillRow(s));
     }
-
-    group.appendChild(header);
-    group.appendChild(body);
-    listEl.appendChild(group);
-  }
-}
-
-
-
-
-
-
-
-
-/* ============================================================
-   💬 聊天面板：會話列表
-   - 渲染 chatStore.list 返回的會話元數據，按 updatedAt desc 排序（store 已排）
-   - 微信式時間：剛剛 / N 分鐘前 / 今天 HH:mm / 昨天 HH:mm / N 天前 / MM-DD
-   - 點擊列表項 = 在聊天窗口裡打開（窗口未開則開窗）
-   - 雙擊標題 = 改名（contentEditable + Enter/Esc/blur 提交）
-   - 點🗑️ = 刪除（活躍會話給出"正在閱讀這個會話"差異化提示）
-   - 跨窗口同步：onChanged 觸發重渲；onActiveSessionChanged 更新高亮態
-   - HTML/CSS 已在 index.html / settings.css 裡就位（見 chat-sessions__*）
-   ============================================================ */
-
-declare global {
-  interface Window {
-    chatStore?: {
-      list: () => Promise<ChatSessionMetaUI[]>;
-      get: (id: string) => Promise<unknown>;
-      create: (payload?: { title?: string; identityId?: string | null }) => Promise<{ id: string } | null>;
-      delete: (id: string) => Promise<boolean>;
-      rename: (id: string, title: string) => Promise<unknown>;
-      openFolder: () => Promise<boolean>;
-      openInChatWindow: (sessionId: string) => Promise<boolean>;
-      getActiveSession: () => Promise<string | null>;
-      onChanged: (cb: () => void) => () => void;
-      onActiveSessionChanged: (cb: (sessionId: string | null) => void) => () => void;
-    };
-  }
-}
-
-let chatSessionsActiveId: string | null = null;
-
-async function renderChatSessions(): Promise<void> {
-  const listEl = document.getElementById("chat-sessions-list");
-  const emptyEl = document.getElementById("chat-sessions-empty");
-  if (!listEl || !window.chatStore) return;
-
-  // 第一次渲染前如果還不知道活躍 sessionId，主動拉一次
-  if (chatSessionsActiveId === null) {
-    try { chatSessionsActiveId = (await window.chatStore.getActiveSession()) ?? null; } catch { /* ignore */ }
-  }
-
-  let sessions: ChatSessionMetaUI[] = [];
-  try {
-    sessions = await window.chatStore.list();
+    setGeneralSaveStatus("所有聊天会话已清空", "is-ok");
   } catch (err) {
-    console.warn("[settings] 加載聊天會話列表失敗:", err);
-  }
-
-  listEl.innerHTML = "";
-  if (sessions.length === 0) {
-    if (emptyEl) emptyEl.classList.remove("is-hidden");
-    return;
-  }
-  if (emptyEl) emptyEl.classList.add("is-hidden");
-
-  for (const session of sessions) {
-    const item = buildChatSessionItem(session);
-    listEl.appendChild(item);
-  }
-}
-
-function buildChatSessionItem(session: ChatSessionMetaUI): HTMLLIElement {
-  const li = document.createElement("li");
-  li.className = "chat-sessions__item";
-  if (session.id === chatSessionsActiveId) li.classList.add("is-active");
-  li.dataset.sessionId = session.id;
-
-  const titleEl = document.createElement("div");
-  titleEl.className = "chat-sessions__title";
-  titleEl.textContent = session.title || "新對話";
-
-  const metaEl = document.createElement("div");
-  metaEl.className = "chat-sessions__meta";
-
-  const timeEl = document.createElement("span");
-  timeEl.className = "chat-sessions__time";
-  timeEl.textContent = formatChatRelativeTime(session.updatedAt);
-
-
-  metaEl.appendChild(timeEl);
-
-  // 左侧主区：标题 + meta
-  const mainEl = document.createElement("div");
-  mainEl.className = "chat-sessions__main";
-  mainEl.appendChild(titleEl);
-  mainEl.appendChild(metaEl);
-
-  const deleteBtn = document.createElement("button");
-  deleteBtn.type = "button";
-  deleteBtn.className = "chat-sessions__delete";
-  deleteBtn.title = "删除会话";
-  deleteBtn.setAttribute("aria-label", "删除会话");
-  deleteBtn.innerHTML = `<svg width="18" height="18" viewBox="0 0 48 48" fill="none" aria-hidden="true" style="display:inline;vertical-align:-2px"><path fill-rule="evenodd" clip-rule="evenodd" d="M8 15H40L37 44H11L8 15Z" fill="none" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/><path d="M20.002 25.0024V35.0026" stroke="currentColor" stroke-width="4" stroke-linecap="round"/><path d="M28.0024 24.9995V34.9972" stroke="currentColor" stroke-width="4" stroke-linecap="round"/><path d="M12 14.9999L28.3242 3L36 15" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
-
-  const renameBtn = document.createElement("button");
-  renameBtn.type = "button";
-  renameBtn.className = "chat-sessions__rename";
-  renameBtn.title = "重命名";
-  renameBtn.setAttribute("aria-label", "重命名会话");
-  renameBtn.innerHTML = `<svg width="18" height="18" viewBox="0 0 48 48" fill="none" aria-hidden="true" style="display:inline;vertical-align:-2px"><path d="M5.32497 43.4996L13.81 43.4998L44.9227 12.3871L36.4374 3.90186L5.32471 35.0146L5.32497 43.4996Z" fill="none" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/><path d="M27.9521 12.3872L36.4374 20.8725" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
-
-  // 编辑态确认/取消按钮（默认隐藏，进入编辑态时显示，替换 ✏️/🗑️ 的位置）
-  const confirmRenameBtn = document.createElement("button");
-  confirmRenameBtn.type = "button";
-  confirmRenameBtn.className = "chat-sessions__confirm-rename is-hidden";
-  confirmRenameBtn.title = "确认（Enter）";
-  confirmRenameBtn.setAttribute("aria-label", "确认重命名");
-  confirmRenameBtn.textContent = "✓";
-
-  const cancelRenameBtn = document.createElement("button");
-  cancelRenameBtn.type = "button";
-  cancelRenameBtn.className = "chat-sessions__cancel-rename is-hidden";
-  cancelRenameBtn.title = "取消（Esc）";
-  cancelRenameBtn.setAttribute("aria-label", "取消重命名");
-  cancelRenameBtn.textContent = "✕";
-
-  // 右側操作區：✏️ 🗑️（常規）/ ✓ ✕（編輯態）
-  const actionsEl = document.createElement("div");
-  actionsEl.className = "chat-sessions__actions";
-  actionsEl.appendChild(renameBtn);
-  actionsEl.appendChild(confirmRenameBtn);
-  actionsEl.appendChild(cancelRenameBtn);
-  actionsEl.appendChild(deleteBtn);
-
-  // —— 交互綁定 ——
-  // 點列表項 = 在聊天窗口裡打開（編輯態時禁用，避免切走會話）
-  li.addEventListener("click", (e) => {
-    const target = e.target as HTMLElement;
-    if (target.closest(".chat-sessions__actions")) return;
-    if (titleEl.isContentEditable) return;
-    void window.chatStore?.openInChatWindow(session.id);
-  });
-
-  // ✏️ 按鈕進入改名態
-  renameBtn.addEventListener("click", (e) => {
-    e.stopPropagation();
-    enterRenameMode(titleEl, session, { renameBtn, deleteBtn, confirmRenameBtn, cancelRenameBtn });
-  });
-
-  // 🗑️ 刪除（含活躍會話差異化提示）
-  deleteBtn.addEventListener("click", (e) => {
-    e.stopPropagation();
-    void deleteChatSession(session);
-  });
-
-  li.appendChild(mainEl);
-  li.appendChild(actionsEl);
-  return li;
-}
-
-// 進入改名態：把 ✏️/🗑️ 隱藏，顯示 ✓/✕；title 變 contentEditable 並聚焦全選。
-// 提交走 ✓ 按鈕 / Enter；取消走 ✕ 按鈕 / Esc / 失焦。失焦=取消（避免點別處誤提交）。
-function enterRenameMode(
-  titleEl: HTMLElement,
-  session: ChatSessionMetaUI,
-  btns: {
-    renameBtn: HTMLButtonElement;
-    deleteBtn: HTMLButtonElement;
-    confirmRenameBtn: HTMLButtonElement;
-    cancelRenameBtn: HTMLButtonElement;
-  },
-): void {
-  const original = titleEl.textContent || "";
-
-  // 切換按鈕可見性
-  btns.renameBtn.classList.add("is-hidden");
-  btns.deleteBtn.classList.add("is-hidden");
-  btns.confirmRenameBtn.classList.remove("is-hidden");
-  btns.cancelRenameBtn.classList.remove("is-hidden");
-
-  titleEl.contentEditable = "true";
-  titleEl.classList.add("is-editing");
-  // 用 requestAnimationFrame 等按鈕 click 冒泡完再聚焦，避免焦點搶奪導致 blur 誤觸發
-  requestAnimationFrame(() => {
-    titleEl.focus();
-    // 全選當前文本，方便用戶直接覆蓋
-    const range = document.createRange();
-    range.selectNodeContents(titleEl);
-    const sel = window.getSelection();
-    if (sel) { sel.removeAllRanges(); sel.addRange(range); }
-  });
-
-  const cleanup = () => {
-    titleEl.contentEditable = "false";
-    titleEl.classList.remove("is-editing");
-    btns.renameBtn.classList.remove("is-hidden");
-    btns.deleteBtn.classList.remove("is-hidden");
-    btns.confirmRenameBtn.classList.add("is-hidden");
-    btns.cancelRenameBtn.classList.add("is-hidden");
-    titleEl.removeEventListener("keydown", onKey);
-    titleEl.removeEventListener("blur", onBlur);
-    btns.confirmRenameBtn.removeEventListener("mousedown", suppressFocus);
-    btns.cancelRenameBtn.removeEventListener("mousedown", suppressFocus);
-    btns.confirmRenameBtn.removeEventListener("click", onConfirm);
-    btns.cancelRenameBtn.removeEventListener("click", onCancel);
-  };
-
-  const commit = () => {
-    const newTitle = (titleEl.textContent || "").trim();
-    cleanup();
-    if (newTitle && newTitle !== original) {
-      void window.chatStore?.rename(session.id, newTitle);
-      // rename 成功後 main 廣播 chats:changed → 列表重渲，無需手動改 DOM
-    } else {
-      titleEl.textContent = original; // 空內容或未變：還原
-    }
-  };
-
-  const cancel = () => {
-    cleanup();
-    titleEl.textContent = original;
-  };
-
-  const onKey = (e: KeyboardEvent) => {
-    if (e.key === "Enter") {
-      e.preventDefault();
-      commit();
-    } else if (e.key === "Escape") {
-      e.preventDefault();
-      cancel();
-    }
-  };
-  // 失焦=取消（點別處想放棄編輯的心智模型）
-  const onBlur = () => cancel();
-  const onConfirm = (e: MouseEvent) => { e.stopPropagation(); commit(); };
-  const onCancel = (e: MouseEvent) => { e.stopPropagation(); cancel(); };
-  // 關鍵：mousedown 時 preventDefault，阻止 ✓/✕ 按鈕搶焦點，
-  // 否則順序是 mousedown→titleEl blur(cancel 還原內容)→click(commit 讀到原值)→改不了名。
-  // 阻止焦點轉移後，titleEl 保持聚焦，blur 不觸發，click 正常執行 commit/cancel。
-  const suppressFocus = (e: MouseEvent) => e.preventDefault();
-
-  titleEl.addEventListener("keydown", onKey);
-  titleEl.addEventListener("blur", onBlur);
-  btns.confirmRenameBtn.addEventListener("mousedown", suppressFocus);
-  btns.cancelRenameBtn.addEventListener("mousedown", suppressFocus);
-  btns.confirmRenameBtn.addEventListener("click", onConfirm);
-  btns.cancelRenameBtn.addEventListener("click", onCancel);
-}
-
-async function deleteChatSession(session: ChatSessionMetaUI): Promise<void> {
-  const isActive = session.id === chatSessionsActiveId;
-  const prompt = isActive
-    ? `「${session.title || "新對話"}」正在聊天窗口裡打開，確定刪除？\n刪除後聊天窗口會跳到最新一條會話或自動新建。`
-    : `確定刪除「${session.title || "新對話"}」？\n刪除後無法恢復。`;
-  if (!window.confirm(prompt)) return;
-  try {
-    await window.chatStore?.delete(session.id);
-    // 刪除成功後 main 廣播 chats:changed → 列表重渲；
-    // 聊天窗口若在顯示該會話也會通過 onChanged 自動 fallback。
-  } catch (err) {
-    console.warn("[settings] 刪除會話失敗:", err);
-    window.alert("刪除失敗，請查看終端日誌。");
-  }
-}
-
-// —— 頂部"+新對話"按鈕 ——
-const chatNewBtn = document.getElementById("chat-new-btn") as HTMLButtonElement | null;
-chatNewBtn?.addEventListener("click", async () => {
-  if (!window.chatStore) return;
-  try {
-    const session = await window.chatStore.create({ identityId: null });
-    if (session?.id) await window.chatStore.openInChatWindow(session.id);
-  } catch (err) {
-    console.warn("[settings] 新建會話失敗:", err);
-    window.alert("新建會話失敗，請查看終端日誌。");
+    console.warn("[settings] 清空聊天会话失败:", err);
+    setGeneralSaveStatus("清空失败，请查看终端日志", "is-error");
   }
 });
 
-// —— 底部"打開存儲位置"按鈕 ——
-const chatOpenFolderBtn = document.getElementById("chat-open-folder-btn") as HTMLButtonElement | null;
-chatOpenFolderBtn?.addEventListener("click", () => {
-  void window.chatStore?.openFolder();
+// ── 预设卡切换厂商 ───────────────────────────────────────────
+presetCards?.addEventListener("click", (e) => {
+  const card = (e.target as HTMLElement).closest(".preset-card") as HTMLElement | null;
+  if (!card || card.classList.contains("is-disabled")) return;
+  const cardProviderName = card.dataset.provider;
+  if (!cardProviderName) return;
+
+  // 切厂商前先把当前厂商的输入值快照进缓存，避免覆盖丢失
+  captureActiveProviderProfile();
+
+  const providerName = getCustomEndpointMode(cardProviderName)
+    ? getCustomEndpointProvider(apiState.customEndpointMode)
+    : cardProviderName;
+  // 从缓存里取目标厂商的旧配置；没有缓存就用 preset 默认值
+  const cached = providerProfileCache[providerName];
+  applyPreset(
+    providerName,
+    cached?.model,
+    cached?.apiKey,
+    cached?.baseUrl,
+    cached?.displayName,
+    cached?.explicitTransport,
+  );
+  setSaveStatus(cached ? "已切回上次配置" : "已应用预设，填写 API Key 后保存");
 });
 
-// —— 跨窗口同步 ——
-// 任意會話變動（創建/追加/改名/刪除）：重渲列表
-// 僅在面板可見時刷新，節省 DOM 寫入；不可見時下次切到面板會重新拉
-window.chatStore?.onChanged(() => {
-  const panel = document.getElementById("chat-panel");
-  if (panel && !panel.classList.contains("is-hidden")) {
-    void renderChatSessions();
-  }
+// ── 自定义端点云端/本地模式切换 ───────────────────────────────
+customEndpointControls?.addEventListener("click", (e) => {
+  const button = (e.target as HTMLElement).closest<HTMLButtonElement>("[data-custom-endpoint-mode]");
+  const nextMode = button?.dataset.customEndpointMode as CustomEndpointMode | undefined;
+  if (!nextMode || nextMode === apiState.customEndpointMode) return;
+
+  captureActiveProviderProfile();
+  apiState.customEndpointMode = nextMode;
+  const providerName = getCustomEndpointProvider(nextMode);
+  const cached = providerProfileCache[providerName];
+  applyPreset(
+    providerName,
+    cached?.model,
+    cached?.apiKey,
+    cached?.baseUrl,
+    cached?.displayName,
+    cached?.explicitTransport,
+  );
+  setSaveStatus(cached ? "已切回上次配置" : nextMode === "local"
+    ? "请填写本地服务地址和模型 ID"
+    : "请填写云端服务地址、API Key 和模型 ID");
 });
 
-// 活躍 sessionId 變化：僅更新 is-active 高亮，不重新拉列表（輕量）
-window.chatStore?.onActiveSessionChanged((sessionId) => {
-  chatSessionsActiveId = sessionId;
-  const listEl = document.getElementById("chat-sessions-list");
-  if (!listEl) return;
-  listEl.querySelectorAll<HTMLElement>(".chat-sessions__item").forEach((el) => {
-    el.classList.toggle("is-active", el.dataset.sessionId === sessionId);
-  });
+// ── 偏好设置：聊天社交上下文 / 自定义风格 / 表单提交 ─────────
+chatSocialContextEnabledInput.addEventListener("change", () => {
+  setPreferencesSaveStatus("有未保存的更改");
 });
 
-/* ============================================================
-   📊 Token 用量面板：指標卡片 + 柱狀圖 + Chart.js 波浪圖
-   - 時間範圍 7d/14d/30d 切換，切換後調 IPC 拉真實數據並重渲
-   - hover 柱子/波浪節點 → tooltip 顯示當天 輸入/輸出/命中/未命中
-   - 全空時顯示空態（暫無用量數據）
-   ============================================================ */
-
-import { Chart, registerables, type ChartConfiguration } from "chart.js";
-
-Chart.register(...registerables);
-
-interface TokenDayData {
-  date: string;       // ISO 日期 "06-15"
-  weekday: string;    // "週日"
-  input: number;
-  output: number;
-  hit: number;        // 緩存命中（佔位 0）
-  miss: number;       // 緩存未命中（佔位 0）
-  requests: number;
-}
-
-interface AgentActivityPayload {
-  events: Array<{ id: string; at: string; kind: "tool" | "permission" | "system"; name: string; status: "success" | "failed" | "denied" | "running"; durationMs: number; argsSummary?: string; resultSummary?: string; error?: string }>;
-  summary: { total: number; success: number; failed: number; denied: number; avgDurationMs: number };
-  models: Array<{ model: string; input: number; output: number; requests: number }>;
-  resources: { rssBytes: number; heapUsedBytes: number; heapTotalBytes: number; queue: { pending: number; running: number; limit: number }; activityLimit: number; callContextTurnLimit: number };
-}
-
-declare global {
-  interface Window {
-    tokenUsage?: {
-      get: (days: number) => Promise<TokenDayData[]>;
-    };
-    agentActivity?: {
-      get: (days: number) => Promise<AgentActivityPayload>;
-      exportDiagnostic: () => Promise<{ filePath: string } | null>;
-      testLocalAsr: (payload: { pcmBase64: string; language: string }) => Promise<{ text: string; latencyMs: number }>;
-    };
-  }
-}
-
-// 根據天數生成假數據（帶隨機波動，模擬真實趨勢）
-// 柱狀圖：根據數據動態生成柱子（複用 chart.css 的 .chart-bar 樣式）
-function renderTokenBarChart(data: TokenDayData[]): void {
-  const container = document.getElementById("token-bar-chart");
-  if (!container) return;
-  container.innerHTML = "";
-
-  const maxVal = Math.max(...data.map((d) => d.input + d.output), 1);
-  const peakIdx = data.reduce((peak, d, i, arr) =>
-    (d.input + d.output) > (arr[peak].input + arr[peak].output) ? i : peak, 0);
-
-  // 柱狀圖最多顯示 14 根（30d 時隔天顯示），避免太擠
-  const displayData = data.length > 14
-    ? data.filter((_, i) => i % 2 === 0)
-    : data;
-
-  // 容器實際可用高度（mini-chart 高度 112px - padding-top 18px - 底部 label 區 18px ≈ 76px）
-  // 用固定像素高度，避免 flex 百分比高度在 padding 容器裡不可靠
-  const chartHeight = 76;
-
-  for (let i = 0; i < displayData.length; i++) {
-    const d = displayData[i];
-    const total = d.input + d.output;
-    const barH = Math.max(6, Math.round((total / maxVal) * chartHeight));
-    const bar = document.createElement("div");
-    bar.className = "token-bar";
-    // 峰值柱加標記
-    const origIdx = data.indexOf(d);
-    if (origIdx === peakIdx) bar.classList.add("token-bar--peak");
-
-    // 真實 fill div（不用偽元素，直接控制像素高度）
-    const fill = document.createElement("div");
-    fill.className = "token-bar__fill";
-    fill.style.height = barH + "px";
-
-    const label = document.createElement("span");
-    label.className = "token-bar__label";
-    label.textContent = d.date.split("-")[1]; // 只顯示日
-    bar.appendChild(fill);
-    bar.appendChild(label);
-
-    // hover tooltip
-    bar.addEventListener("mouseenter", (e) => showTokenTooltip(e, d));
-    bar.addEventListener("mousemove", (e) => moveTokenTooltip(e));
-    bar.addEventListener("mouseleave", hideTokenTooltip);
-
-    container.appendChild(bar);
-  }
-
-  // 日均標籤
-  const avgEl = document.getElementById("token-avg-label");
-  if (avgEl) {
-    const avg = Math.round(data.reduce((s, d) => s + d.input + d.output, 0) / data.length);
-    avgEl.textContent = `日均 ${formatTokenShort(avg)}`;
-  }
-}
-
-function formatTokenShort(n: number): string {
-  if (n >= 1000) return (n / 1000).toFixed(1) + "K";
-  return String(n);
-}
-
-// tooltip 顯示/移動/隱藏
-function showTokenTooltip(e: MouseEvent, d: TokenDayData): void {
-  const tip = document.getElementById("token-tooltip");
-  if (!tip) return;
-  tip.innerHTML = `
-    <div class="token-tooltip__date">${d.date} ${d.weekday}</div>
-    <div class="token-tooltip__row"><span>📥 輸入</span><span>${d.input.toLocaleString()}</span></div>
-    <div class="token-tooltip__row"><span>📤 輸出</span><span>${d.output.toLocaleString()}</span></div>
-    <div class="token-tooltip__row"><span>🎯 命中</span><span>${d.hit > 0 ? d.hit.toLocaleString() : "N/A"}</span></div>
-    <div class="token-tooltip__row"><span>❌ 未命中</span><span>${d.miss > 0 ? d.miss.toLocaleString() : "N/A"}</span></div>
-  `;
-  tip.hidden = false;
-  moveTokenTooltip(e);
-}
-
-function moveTokenTooltip(e: MouseEvent): void {
-  const tip = document.getElementById("token-tooltip");
-  if (!tip || tip.hidden) return;
-  const offset = 14;
-  let x = e.clientX + offset;
-  let y = e.clientY + offset;
-  // 防止超出視口右邊
-  const tipW = tip.offsetWidth;
-  if (x + tipW > window.innerWidth) x = e.clientX - tipW - offset;
-  tip.style.left = x + "px";
-  tip.style.top = y + "px";
-}
-
-function hideTokenTooltip(): void {
-  const tip = document.getElementById("token-tooltip");
-  if (tip) tip.hidden = true;
-}
-
-// Chart.js 波浪面積圖
-let tokenTrendChart: Chart | null = null;
-let tokenRangeDays = 7;
-
-function renderTokenTrendChart(data: TokenDayData[]): void {
-  const canvas = document.getElementById("token-trend-chart") as HTMLCanvasElement | null;
-  if (!canvas) return;
-
-  // 銷燬舊實例避免重疊
-  if (tokenTrendChart) { tokenTrendChart.destroy(); tokenTrendChart = null; }
-
-  const labels = data.map((d) => d.date);
-  const inputData = data.map((d) => d.input);
-  const outputData = data.map((d) => d.output);
-
-  const config: ChartConfiguration = {
-    type: "line",
-    data: {
-      labels,
-      datasets: [
-        {
-          label: "📥 輸入",
-          data: inputData,
-          borderColor: "#3b82f6",
-          backgroundColor: "rgba(59, 130, 246, 0.15)",
-          fill: true,
-          tension: 0.4,
-          borderWidth: 2,
-          pointRadius: 0,
-          pointHoverRadius: 5,
-          pointHoverBackgroundColor: "#3b82f6",
-        },
-        {
-          label: "📤 輸出",
-          data: outputData,
-          borderColor: "#ff8ccc",
-          backgroundColor: "rgba(255, 140, 204, 0.15)",
-          fill: true,
-          tension: 0.4,
-          borderWidth: 2,
-          pointRadius: 0,
-          pointHoverRadius: 5,
-          pointHoverBackgroundColor: "#ff8ccc",
-        },
-      ],
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      interaction: { mode: "index", intersect: false },
-      plugins: {
-        legend: {
-          display: true,
-          position: "top",
-          labels: { color: "rgba(235, 229, 245, 0.7)", font: { size: 11 }, boxWidth: 12, boxHeight: 12 },
-        },
-        tooltip: {
-          // 用 Chart.js 自帶 tooltip，顯示輸入/輸出/命中/未命中
-          backgroundColor: "rgba(30, 20, 45, 0.95)",
-          borderColor: "rgba(255, 182, 220, 0.3)",
-          borderWidth: 1,
-          titleColor: "rgba(254, 247, 255, 0.95)",
-          bodyColor: "rgba(235, 229, 245, 0.85)",
-          padding: 10,
-          cornerRadius: 10,
-          displayColors: true,
-          callbacks: {
-            title: (items) => {
-              const idx = items[0].dataIndex;
-              const d = data[idx];
-              return `${d.date} ${d.weekday}`;
-            },
-            label: (item) => {
-              const idx = item.dataIndex;
-              const d = data[idx];
-              const which = item.datasetIndex === 0 ? "input" : "output";
-              const val = which === "input" ? d.input : d.output;
-              return `${which === "input" ? "📥 輸入" : "📤 輸出"}: ${val.toLocaleString()}`;
-            },
-            afterBody: (items) => {
-              const idx = items[0].dataIndex;
-              const d = data[idx];
-              return [
-                `🎯 命中: ${d.hit > 0 ? d.hit.toLocaleString() : "N/A"}`,
-                `❌ 未命中: ${d.miss > 0 ? d.miss.toLocaleString() : "N/A"}`,
-              ];
-            },
-          },
-        },
-      },
-      scales: {
-        x: {
-          grid: { display: false },
-          ticks: { color: "rgba(235, 229, 245, 0.45)", font: { size: 10 }, maxRotation: 0, autoSkip: true, maxTicksLimit: 10 },
-        },
-        y: {
-          grid: { color: "rgba(255, 182, 220, 0.08)" },
-          ticks: {
-            color: "rgba(235, 229, 245, 0.45)",
-            font: { size: 10 },
-            callback: (v) => formatTokenShort(Number(v)),
-          },
-          beginAtZero: true,
-        },
-      },
-    },
-  };
-
-  tokenTrendChart = new Chart(canvas, config);
-}
-
-// 更新指標卡片
-function updateTokenStats(data: TokenDayData[]): void {
-  const totalInput = data.reduce((s, d) => s + d.input, 0);
-  const totalOutput = data.reduce((s, d) => s + d.output, 0);
-  const total = totalInput + totalOutput;
-  const requests = data.reduce((s, d) => s + d.requests, 0);
-
-  const set = (id: string, val: string) => {
-    const el = document.getElementById(id);
-    if (el) el.textContent = val;
-  };
-  set("token-total", total.toLocaleString());
-  set("token-requests", requests.toLocaleString());
-  set("token-input", totalInput.toLocaleString());
-  set("token-output", totalOutput.toLocaleString());
-  set("token-hit", "N/A");
-}
-
-// 刷新整個面板：調 IPC 拉真實數據 → 有數據渲染圖表，無數據顯示空態
-async function refreshTokenPanel(days: number): Promise<void> {
-  let data: TokenDayData[] = [];
-  try {
-    data = await window.tokenUsage?.get(days) ?? [];
-  } catch (err) {
-    console.warn("[settings] 拉取 Token 用量失敗:", err);
-  }
-
-  const hasData = data.some((d) => d.input > 0 || d.output > 0 || d.requests > 0);
-  const emptyEl = document.getElementById("token-empty");
-  const chartsEl = document.getElementById("token-charts");
-
-  if (!hasData) {
-    // 空態：隱藏圖表區，顯示空態提示，指標卡片歸零
-    if (emptyEl) emptyEl.classList.remove("is-hidden");
-    if (chartsEl) chartsEl.classList.add("is-hidden");
-    const set = (id: string, val: string) => { const el = document.getElementById(id); if (el) el.textContent = val; };
-    set("token-total", "0");
-    set("token-requests", "0");
-    set("token-input", "0");
-    set("token-output", "0");
-    set("token-hit", "N/A");
-    return;
-  }
-
-  // 有數據：顯示圖表區，隱藏空態
-  if (emptyEl) emptyEl.classList.add("is-hidden");
-  if (chartsEl) chartsEl.classList.remove("is-hidden");
-  updateTokenStats(data);
-  renderTokenBarChart(data);
-  renderTokenTrendChart(data);
-}
-
-// 時間範圍按鈕交互
-document.querySelectorAll<HTMLButtonElement>(".token-range__btn").forEach((btn) => {
-  btn.addEventListener("click", () => {
-    document.querySelectorAll(".token-range__btn").forEach((b) => {
-      b.classList.remove("is-active");
-      b.setAttribute("aria-selected", "false");
-    });
-    btn.classList.add("is-active");
-    btn.setAttribute("aria-selected", "true");
-    const days = Number(btn.dataset.range) || 7;
-    tokenRangeDays = days;
-    void refreshTokenPanel(days);
-    void refreshAgentActivity(days);
-  });
+customStyleSamplingBtn?.addEventListener("click", () => {
+  openCustomStyleModal();
 });
 
-function formatResourceBytes(bytes: number): string {
-  return `${Math.round(bytes / 1024 / 1024)} MB`;
-}
-
-async function refreshAgentActivity(days: number): Promise<void> {
-  const payload = await window.agentActivity?.get(days).catch(() => null);
-  if (!payload) return;
-  const set = (id: string, value: string) => { const element = document.getElementById(id); if (element) element.textContent = value; };
-  set("activity-total", String(payload.summary.total));
-  set("activity-success-rate", payload.summary.total ? `${Math.round(payload.summary.success / payload.summary.total * 100)}%` : "—");
-  set("activity-avg", payload.summary.total ? `${payload.summary.avgDurationMs} ms` : "—");
-  set("activity-problems", String(payload.summary.failed + payload.summary.denied));
-  set("activity-rss", formatResourceBytes(payload.resources.rssBytes));
-  set("activity-heap", `${formatResourceBytes(payload.resources.heapUsedBytes)} / ${formatResourceBytes(payload.resources.heapTotalBytes)}`);
-  set("activity-queue", `${payload.resources.queue.running} 執行 · ${payload.resources.queue.pending}/${payload.resources.queue.limit} 等待`);
-  set("activity-context", `${payload.resources.callContextTurnLimit} 輪`);
-
-  const events = document.getElementById("activity-events");
-  if (events) {
-    events.replaceChildren();
-    if (!payload.events.length) events.innerHTML = '<p class="activity-empty">尚未有工具活動</p>';
-    for (const event of payload.events) {
-      const article = document.createElement("article");
-      article.className = "activity-event";
-      article.dataset.status = event.status;
-      const strong = document.createElement("strong");
-      strong.textContent = event.name;
-      const badge = document.createElement("em");
-      badge.textContent = event.status === "success" ? "成功" : event.status === "denied" ? "已拒絕" : "失敗";
-      strong.appendChild(badge);
-      const time = document.createElement("time");
-      time.textContent = `${new Date(event.at).toLocaleTimeString("zh-TW", { hour: "2-digit", minute: "2-digit" })} · ${event.durationMs} ms`;
-      const detail = document.createElement("p");
-      detail.textContent = event.error ?? event.resultSummary ?? event.argsSummary ?? "沒有額外摘要";
-      article.append(strong, time, detail);
-      events.appendChild(article);
-    }
-  }
-
-  const models = document.getElementById("activity-models");
-  if (models) {
-    models.replaceChildren();
-    const max = Math.max(1, ...payload.models.map((model) => model.input + model.output));
-    if (!payload.models.length) models.innerHTML = '<p class="activity-empty">尚無模型資料</p>';
-    for (const model of payload.models.slice(0, 6)) {
-      const row = document.createElement("div");
-      row.className = "activity-model";
-      const total = model.input + model.output;
-      const label = document.createElement("div");
-      label.className = "activity-model__row";
-      const name = document.createElement("strong"); name.textContent = model.model;
-      const count = document.createElement("span"); count.textContent = `${total.toLocaleString()} · ${model.requests} 次`;
-      label.append(name, count);
-      const bar = document.createElement("div"); bar.className = "activity-model__bar";
-      const fill = document.createElement("i"); fill.style.width = `${Math.max(3, total / max * 100)}%`; bar.appendChild(fill);
-      row.append(label, bar); models.appendChild(row);
-    }
-  }
-}
-
-document.getElementById("diagnostic-export-btn")?.addEventListener("click", async () => {
-  const status = document.getElementById("activity-export-status");
-  if (status) status.textContent = "正在整理…";
+customStylePromptBtn?.addEventListener("click", async () => {
   try {
-    const result = await window.agentActivity?.exportDiagnostic();
-    if (status) status.textContent = result ? "已匯出" : "已取消";
-  } catch (error) {
-    if (status) status.textContent = error instanceof Error ? error.message : String(error);
-  }
-});
-
-// 初始渲染
-void refreshTokenPanel(7);
-void refreshAgentActivity(tokenRangeDays);
-
-/* ============================================================
-   🎙️ TTS 設置面板交互
-   - 配置加載/保存（存 general settings，跟其他設置一起）
-   - 引擎選擇卡片切換：選中哪個展開哪個配置表單
-   - 語速/音量滑塊實時顯示數值 + 自動保存
-   - MiniMax 測試發音：調 synthesize 合成固定文本並播放
-   - 音色快速復刻：選文件→上傳→訓練→自動填入 voice_id
-   ============================================================ */
-
-interface TtsApi {
-  upload: (apiKey: string, filePath: string, purpose: "voice_clone" | "prompt_audio") => Promise<{ file_id: string }>;
-  pickAudio: () => Promise<string | null>;
-  clone: (payload: {
-    apiKey: string; fileId: string; voiceId: string;
-    promptAudioId?: string; promptText?: string;
-    text: string; model?: string;
-  }) => Promise<{ voiceId: string; audioDemo?: string }>;
-  synthesize: (payload: {
-    apiKey: string; voiceId: string; text: string;
-    speed?: number; volume?: number; pitch?: number;
-    model?: string; format?: "mp3" | "wav" | "pcm";
-  }) => Promise<string>; // base64 音頻
-  // GPT-SoVITS（返回 base64 + cacheKey + cached + format）
-  synthesizeGptsovits: (payload: {
-    baseUrl: string; refAudioPath: string; promptText: string; text: string;
-    speed?: number; format?: "wav" | "mp3";
-  }) => Promise<{ base64: string; cacheKey: string; cached: boolean; format: "wav" | "mp3" }>;
-  synthesizeCachedGptsovits: (payload: {
-    baseUrl: string; refAudioPath: string; promptText: string; text: string;
-    speed?: number; format?: "wav" | "mp3";
-    expectedCacheKey?: string;
-  }) => Promise<{ base64: string; cacheKey: string; cached: boolean; format: "wav" | "mp3" }>;
-  // 自定義雲端（返回 base64 + cacheKey + cached + format）
-  synthesizeCustomCloud: (payload: {
-    endpointUrl: string; apiKey?: string; voiceId?: string; text: string;
-    speed?: number; volume?: number; format?: "wav" | "mp3"; timeoutMs?: number;
-  }) => Promise<{ base64: string; cacheKey: string; cached: boolean; format: "wav" | "mp3" }>;
-  synthesizeCachedCustomCloud: (payload: {
-    endpointUrl: string; apiKey?: string; voiceId?: string; text: string;
-    speed?: number; volume?: number; format?: "wav" | "mp3"; timeoutMs?: number;
-    expectedCacheKey?: string;
-  }) => Promise<{ base64: string; cacheKey: string; cached: boolean; format: "wav" | "mp3" }>;
-  // 小米 MiMo（返回 base64 + cacheKey + cached + format）
-  synthesizeMimo: (payload: {
-    apiKey: string; voiceAudioPath?: string; text: string; stylePrompt?: string;
-  }) => Promise<{ base64: string; cacheKey: string; cached: boolean; format: "wav" }>;
-  synthesizeCachedMimo: (payload: {
-    apiKey: string; voiceAudioPath?: string; text: string; stylePrompt?: string;
-    expectedCacheKey?: string;
-  }) => Promise<{ base64: string; cacheKey: string; cached: boolean; format: "wav" }>;
-  // Mossland（api.mosi.cn）
-  synthesizeMossland: (payload: {
-    apiKey: string; voiceId: string; text: string;
-    speed?: number; volume?: number; model?: string;
-    format?: "mp3" | "wav" | "pcm";
-  }) => Promise<{ base64: string; cacheKey: string; cached: boolean; format: "mp3" | "wav" | "pcm" }>;
-  synthesizeCachedMossland: (payload: {
-    apiKey: string; voiceId: string; text: string;
-    speed?: number; volume?: number; model?: string;
-    format?: "mp3" | "wav" | "pcm";
-    expectedCacheKey?: string;
-  }) => Promise<{ base64: string; cacheKey: string; cached: boolean; format: "mp3" | "wav" | "pcm" }>;
-  cloneMossland: (payload: {
-    apiKey: string; filePath: string; name?: string; description?: string;
-  }) => Promise<{ voiceId: string; name?: string; createdAt?: number }>;
-  listMosslandVoices: (payload: {
-    apiKey: string; limit?: number;
-  }) => Promise<{ voices: Array<{ id: string; name: string; createdAt: number }> }>;
-  pickAudioFile: () => Promise<string | null>;
-  saveSettings: (tts: Record<string, unknown>) => Promise<unknown>;
-  loadSettings: () => Promise<Record<string, unknown>>;
-}
-
-declare global {
-  interface Window {
-    tts?: TtsApi;
-  }
-}
-
-const TTS_TEST_TEXT = "你好，我是昔漣，很高興見到你。";
-
-// 獲取 DOM 元素的輔助函數
-function ttsEl(id: string): HTMLInputElement {
-  return document.getElementById(id) as HTMLInputElement;
-}
-
-// 當前加載的 TTS 配置（內存緩存，改一個字段就存一次）
-let ttsConfig: Record<string, unknown> = {};
-
-// 加載配置並填充表單
-async function loadTtsConfig(): Promise<void> {
-  if (!window.tts) return;
-  try {
-    ttsConfig = await window.tts.loadSettings() as Record<string, unknown>;
-  } catch (err) {
-    console.warn("[TTS] 加載配置失敗:", err);
-    return;
-  }
-
-  // 引擎選擇
-  const engine = String(ttsConfig.ttsEngine || "off");
-  document.querySelectorAll<HTMLButtonElement>(".tts-engine").forEach((btn) => {
-    const isActive = btn.dataset.engine === engine;
-    btn.classList.toggle("is-active", isActive);
-    btn.setAttribute("aria-checked", isActive ? "true" : "false");
-  });
-  document.querySelectorAll<HTMLElement>(".tts-config").forEach((el) => { el.hidden = true; });
-  if (engine !== "off") {
-    const config = document.getElementById("tts-config-" + engine);
-    if (config) config.hidden = false;
-  }
-
-  // 播放交互
-  ttsEl("tts-auto-read").checked = Boolean(ttsConfig.ttsAutoRead);
-  ttsEl("tts-speed").value = String(ttsConfig.ttsSpeed ?? 1);
-  ttsEl("tts-volume").value = String(ttsConfig.ttsVolume ?? 1);
-  updateTtsSliderLabels();
-
-  // MiniMax
-  ttsEl("tts-minimax-key").value = String(ttsConfig.ttsMinimaxKey ?? "");
-  ttsEl("tts-minimax-voice").value = String(ttsConfig.ttsMinimaxVoiceId ?? "");
-  (ttsEl("tts-minimax-model") as HTMLSelectElement).value =
-    ttsConfig.ttsMinimaxModel === "speech-2.8-hd" ? "speech-2.8-hd" : "speech-2.8-turbo";
-  ttsEl("tts-streaming").checked = ttsConfig.ttsStreaming !== false;
-
-  // GPT-SoVITS
-  ttsEl("tts-gptsovits-url").value = String(ttsConfig.ttsGptsovitsBaseUrl ?? "http://localhost:9880");
-  ttsEl("tts-gptsovits-ref-audio").value = String(ttsConfig.ttsGptsovitsRefAudioPath ?? "");
-  ttsEl("tts-gptsovits-prompt-text").value = String(ttsConfig.ttsGptsovitsPromptText ?? "");
-  (ttsEl("tts-gptsovits-format") as HTMLSelectElement).value =
-    ttsConfig.ttsGptsovitsFormat === "mp3" ? "mp3" : "wav";
-
-  // 自定義雲端
-  ttsEl("tts-custom-cloud-url").value = String(ttsConfig.ttsCustomCloudEndpointUrl ?? "");
-  ttsEl("tts-custom-cloud-key").value = String(ttsConfig.ttsCustomCloudApiKey ?? "");
-  ttsEl("tts-custom-cloud-voice").value = String(ttsConfig.ttsCustomCloudVoiceId ?? "");
-  (ttsEl("tts-custom-cloud-format") as HTMLSelectElement).value =
-    ttsConfig.ttsCustomCloudFormat === "wav" ? "wav" : "mp3";
-  ttsEl("tts-custom-cloud-timeout").value = String(ttsConfig.ttsCustomCloudTimeoutMs ?? 30000);
-
-  // 小米 MiMo
-  ttsEl("tts-mimo-key").value = String(ttsConfig.ttsMimoKey ?? "");
-  ttsEl("tts-mimo-voice-audio").value = String(ttsConfig.ttsMimoVoiceAudioPath ?? "");
-  ttsEl("tts-mimo-style").value = String(ttsConfig.ttsMimoStylePrompt ?? "温柔、自然、略带亲近感，像在轻声陪用户聊天。");
-
-  // Mossland（UI 骨架已就位，IPC 第二步接通；字段值已写入 ttsConfig 以便保存）
-  ttsEl("tts-mossland-key").value = String(ttsConfig.ttsMosslandKey ?? "");
-  ttsEl("tts-mossland-voice").value = String(ttsConfig.ttsMosslandVoiceId ?? "");
-  (ttsEl("tts-mossland-model") as HTMLSelectElement).value = "moss-tts";
-  ttsEl("tts-mossland-text").value = String(ttsConfig.ttsMosslandTestText ?? TTS_TEST_TEXT);
-  (ttsEl("tts-mossland-format") as HTMLSelectElement).value =
-    ttsConfig.ttsMosslandFormat === "wav" ? "wav"
-    : ttsConfig.ttsMosslandFormat === "pcm" ? "pcm"
-    : "mp3";
-  ttsConfig.ttsMosslandKey       = String(ttsEl("tts-mossland-key").value);
-  ttsConfig.ttsMosslandVoiceId   = String(ttsEl("tts-mossland-voice").value);
-  ttsConfig.ttsMosslandModel     = (ttsEl("tts-mossland-model") as HTMLSelectElement).value;
-  ttsConfig.ttsMosslandTestText  = String(ttsEl("tts-mossland-text").value);
-  ttsConfig.ttsMosslandFormat    = (ttsEl("tts-mossland-format") as HTMLSelectElement).value;
-
-  // 加载完成后清掉所有 Provider 的脏态（按钮隐藏，status 清空）
-  for (const provider of Object.keys(TTS_PROVIDER_FIELDS)) {
-    const ui = ttsProviderUi[provider];
-    if (!ui) continue;
-    ui.btn.classList.add("is-hidden");
-    ui.status.textContent = "";
-  }
-}
-
-function updateTtsSliderLabels(): void {
-  const speedVal = document.getElementById("tts-speed-val");
-  const volVal = document.getElementById("tts-volume-val");
-  if (speedVal) speedVal.textContent = Number(ttsEl("tts-speed").value).toFixed(1) + "x";
-  if (volVal) volVal.textContent = Math.round(Number(ttsEl("tts-volume").value) * 100) + "%";
-}
-
-interface OpenerUiStatus {
-  running: boolean;
-  packSource: "voice-pack" | "built-in-text";
-  sceneCount: number;
-  audioItemCount: number;
-  textItemCount: number;
-  dailyFireCount: number;
-  dailyLimit: number;
-  desire: number;
-  lastScene: string | null;
-  lastTriggeredAt: number | null;
-  city: string;
-}
-
-interface OpenerBridgeApi {
-  testFire: (sceneId?: string) => Promise<{ ok: boolean; message: string }>;
-  getStatus: () => Promise<OpenerUiStatus>;
-  openPackFolder: () => Promise<{ ok: boolean; error?: string }>;
-}
-
-function openerBridge(): OpenerBridgeApi | undefined {
-  return (window as unknown as { openerBridge?: OpenerBridgeApi }).openerBridge;
-}
-
-function openerEl(id: string): HTMLInputElement {
-  return document.getElementById(id) as HTMLInputElement;
-}
-
-function updateOpenerUi(): void {
-  const mode = String(ttsConfig.openerMode ?? "off");
-  document.querySelector(".opener-console")?.classList.toggle("is-off", mode === "off");
-  const limit = Number(openerEl("opener-daily-limit").value || 4);
-  const label = document.getElementById("opener-daily-limit-value");
-  if (label) label.textContent = `${limit} 次`;
-}
-
-function setOpenerTestStatus(text: string): void {
-  const status = document.getElementById("opener-test-status");
-  if (status) status.textContent = text;
-}
-
-async function refreshOpenerStatus(): Promise<void> {
-  const api = openerBridge();
-  if (!api) return;
-  try {
-    const status = await api.getStatus();
-    const health = document.getElementById("opener-health");
-    health?.classList.toggle("is-running", status.running);
-    if (health) health.title = status.city ? `天氣位置：${status.city}` : "尚未設定默認城市，天氣場景不會觸發";
-    const title = document.getElementById("opener-health-title");
-    const detail = document.getElementById("opener-health-detail");
-    if (title) title.textContent = status.running ? "感知中" : "目前已關閉";
-    if (detail) {
-      const source = status.packSource === "voice-pack"
-        ? `語音包 · ${status.audioItemCount} 句`
-        : `內建文字 · ${status.textItemCount} 句`;
-      detail.textContent = `${source} · 今日 ${status.dailyFireCount}/${status.dailyLimit}`;
-    }
-  } catch (err) {
-    const title = document.getElementById("opener-health-title");
-    const detail = document.getElementById("opener-health-detail");
-    if (title) title.textContent = "狀態讀取失敗";
-    if (detail) detail.textContent = err instanceof Error ? err.message : String(err);
-  }
-}
-
-function bindOpenerControls(): void {
-  for (const [id, field] of [
-    ["opener-quiet-start", "openerQuietStart"],
-    ["opener-quiet-end", "openerQuietEnd"],
-  ] as const) {
-    openerEl(id).addEventListener("change", () => void saveTtsField(field, openerEl(id).value).then(refreshOpenerStatus));
-  }
-  const limit = openerEl("opener-daily-limit");
-  limit.addEventListener("input", updateOpenerUi);
-  limit.addEventListener("change", () => void saveTtsField("openerDailyLimit", Number(limit.value)).then(refreshOpenerStatus));
-  for (const [id, field] of [
-    ["opener-routine-enabled", "openerRoutineEnabled"],
-    ["opener-breaks-enabled", "openerBreaksEnabled"],
-    ["opener-weather-enabled", "openerWeatherEnabled"],
-  ] as const) {
-    openerEl(id).addEventListener("change", () => void saveTtsField(field, openerEl(id).checked).then(refreshOpenerStatus));
-  }
-
-  document.getElementById("opener-open-pack-folder")?.addEventListener("click", async () => {
-    const result = await openerBridge()?.openPackFolder();
-    setOpenerTestStatus(result?.ok ? "已打開語音包資料夾；放入 manifest.json 與 wav 後重新讀取即可。" : result?.error || "無法打開資料夾");
-  });
-}
-
-// 保存單個 TTS 配置字段
-async function saveTtsField(field: string, value: unknown): Promise<void> {
-  if (!window.tts) return;
-  ttsConfig[field] = value;
-  try {
-    await window.tts.saveSettings({ [field]: value });
-  } catch (err) {
-    console.warn("[TTS] 保存配置失敗:", field, err);
-  }
-}
-
-// 播放 base64 音頻。format 決定 Blob MIME（minimax 默認 mp3，gptsovits 默認 wav）
-function playTtsAudio(base64: string, format: "wav" | "mp3" = "mp3"): void {
-  try {
-    const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
-    const mime = format === "wav" ? "audio/wav" : "audio/mp3";
-    const blob = new Blob([bytes], { type: mime });
-    const url = URL.createObjectURL(blob);
-    const audio = new Audio(url);
-    audio.play().catch((err) => console.warn("[TTS] 播放失敗:", err));
-    audio.onended = () => URL.revokeObjectURL(url);
-  } catch (err) {
-    console.warn("[TTS] 音頻解碼失敗:", err);
-  }
-}
-
-// 引擎選擇切換
-// 只匹配帶 data-engine 的按鈕（即 TTS 廠商按鈕）——主動開口檔位按鈕雖然
-// 共用 .tts-engine 視覺 class，但只有 data-mode 沒有 data-engine，
-// 用屬性選擇器避免誤觸把它們當作 TTS 廠商處理。
-document.querySelectorAll<HTMLButtonElement>("[data-engine]").forEach((btn) => {
-  btn.addEventListener("click", () => {
-    const engine = btn.dataset.engine || "off";
-    document.querySelectorAll<HTMLButtonElement>("[data-engine]").forEach((b) => {
-      b.classList.remove("is-active");
-      b.setAttribute("aria-checked", "false");
-    });
-    btn.classList.add("is-active");
-    btn.setAttribute("aria-checked", "true");
-    document.querySelectorAll<HTMLElement>(".tts-config").forEach((el) => { el.hidden = true; });
-    if (engine !== "off") {
-      const config = document.getElementById("tts-config-" + engine);
-      if (config) config.hidden = false;
-    }
-    void saveTtsField("ttsEngine", engine);
-  });
-});
-
-// 自动朗读开关
-ttsEl("tts-auto-read").addEventListener("change", () => {
-  void saveTtsField("ttsAutoRead", ttsEl("tts-auto-read").checked);
-});
-
-// 语速/音量滑块（change 时保存，input 时实时显示）
-ttsEl("tts-speed").addEventListener("input", updateTtsSliderLabels);
-ttsEl("tts-speed").addEventListener("change", () => saveTtsField("ttsSpeed", Number(ttsEl("tts-speed").value)));
-ttsEl("tts-volume").addEventListener("input", updateTtsSliderLabels);
-ttsEl("tts-volume").addEventListener("change", () => saveTtsField("ttsVolume", Number(ttsEl("tts-volume").value)));
-
-// ── TTS 文本输入框：按 Provider 分组 + 手动保存 ──
-// 之前这里有 input/change 自动 saveTtsField（settings.ts:4270–4295），
-// 但每次 input 都会触发 IPC，IME 组字过程会被打断，用户反馈"打着打着输入法被打断"。
-// 现在改为：文本框只 mark dirty，真正保存只发生在用户点击 Provider 自己的"保存配置"按钮。
-// switch / slider / select / 引擎选择 / Opener 档位仍然走立即保存（保持即时反馈）。
-const TTS_FIELD_MAP: Record<string, string> = {
-  "tts-minimax-key":          "ttsMinimaxKey",
-  "tts-minimax-voice":        "ttsMinimaxVoiceId",
-  "tts-minimax-model":        "ttsMinimaxModel",
-  "tts-gptsovits-url":        "ttsGptsovitsBaseUrl",
-  "tts-gptsovits-ref-audio":  "ttsGptsovitsRefAudioPath",
-  "tts-gptsovits-prompt-text":"ttsGptsovitsPromptText",
-  "tts-custom-cloud-url":     "ttsCustomCloudEndpointUrl",
-  "tts-custom-cloud-key":     "ttsCustomCloudApiKey",
-  "tts-custom-cloud-voice":   "ttsCustomCloudVoiceId",
-  "tts-custom-cloud-timeout": "ttsCustomCloudTimeoutMs",
-  "tts-mimo-key":             "ttsMimoKey",
-  "tts-mimo-voice-audio":     "ttsMimoVoiceAudioPath",
-  "tts-mimo-style":           "ttsMimoStylePrompt",
-  "tts-mossland-key":         "ttsMosslandKey",
-  "tts-mossland-voice":       "ttsMosslandVoiceId",
-  "tts-mossland-model":       "ttsMosslandModel",
-  "tts-mossland-text":        "ttsMosslandTestText",
-  "tts-mossland-format":      "ttsMosslandFormat",
-};
-
-// 每个 Provider 自己负责的文本输入框列表（不含 switch/slider/select，复刻子区块也不在此）
-const TTS_PROVIDER_FIELDS: Record<string, string[]> = {
-  minimax:        ["tts-minimax-key", "tts-minimax-voice"],
-  gptsovits:      ["tts-gptsovits-url", "tts-gptsovits-ref-audio", "tts-gptsovits-prompt-text"],
-  "custom-cloud": ["tts-custom-cloud-url", "tts-custom-cloud-key", "tts-custom-cloud-voice", "tts-custom-cloud-timeout"],
-  mimo:           ["tts-mimo-key", "tts-mimo-voice-audio", "tts-mimo-style"],
-  mossland:       ["tts-mossland-key", "tts-mossland-voice", "tts-mossland-model", "tts-mossland-text", "tts-mossland-format"],
-};
-
-// Provider ID → { 保存按钮, 状态 div }
-// 用 ttsEl() 安全获取：拿不到时返回 null，不让整个 settings.ts 初始化崩。
-function safeGet(id: string): HTMLElement | null {
-  return document.getElementById(id);
-}
-const ttsProviderUi: Record<string, { btn: HTMLButtonElement; status: HTMLElement } | null> = {
-  minimax:        ttsEl("tts-minimax-save-btn") && safeGet("tts-minimax-save-status")
-                    ? { btn: ttsEl("tts-minimax-save-btn"), status: safeGet("tts-minimax-save-status") as HTMLElement }
-                    : null,
-  gptsovits:      ttsEl("tts-gptsovits-save-btn") && safeGet("tts-gptsovits-save-status")
-                    ? { btn: ttsEl("tts-gptsovits-save-btn"), status: safeGet("tts-gptsovits-save-status") as HTMLElement }
-                    : null,
-  "custom-cloud": ttsEl("tts-custom-cloud-save-btn") && safeGet("tts-custom-cloud-save-status")
-                    ? { btn: ttsEl("tts-custom-cloud-save-btn"), status: safeGet("tts-custom-cloud-save-status") as HTMLElement }
-                    : null,
-  mimo:           ttsEl("tts-mimo-save-btn") && safeGet("tts-mimo-save-status")
-                    ? { btn: ttsEl("tts-mimo-save-btn"), status: safeGet("tts-mimo-save-status") as HTMLElement }
-                    : null,
-  mossland:       ttsEl("tts-mossland-save-btn") && safeGet("tts-mossland-save-status")
-                    ? { btn: ttsEl("tts-mossland-save-btn"), status: safeGet("tts-mossland-save-status") as HTMLElement }
-                    : null,
-};
-
-// 输入框触发脏态：只显示按钮和"有未保存的更改"，不发 IPC
-function markTtsProviderDirty(provider: string): void {
-  const ui = ttsProviderUi[provider];
-  if (!ui) return;
-  ui.btn.classList.remove("is-hidden");
-  ui.status.textContent = "有未保存的更改";
-  ui.status.className = "save-status";
-}
-
-for (const [provider, elIds] of Object.entries(TTS_PROVIDER_FIELDS)) {
-  for (const elId of elIds) {
-    const el = ttsEl(elId);
-    el.addEventListener("input", () => markTtsProviderDirty(provider));
-  }
-}
-
-// 保存某个 Provider 的所有文本配置
-async function saveTtsProvider(provider: string): Promise<void> {
-  const ui = ttsProviderUi[provider];
-  if (!ui) return;
-  const fields = TTS_PROVIDER_FIELDS[provider] ?? [];
-  ui.btn.disabled = true;
-  ui.status.textContent = "保存中…";
-  ui.status.className = "save-status";
-  try {
-    const payload: Record<string, unknown> = {};
-    for (const elId of fields) {
-      const field = TTS_FIELD_MAP[elId];
-      if (!field) continue;
-      const el = ttsEl(elId);
-      // 数字字段（timeout）转 Number；无效则跳过该字段但继续保存其他字段
-      let value: unknown = el.value;
-      if (elId === "tts-custom-cloud-timeout") {
-        const num = Number(el.value);
-        if (!Number.isFinite(num) || num <= 0) continue;
-        value = num;
-      }
-      payload[field] = value;
-      ttsConfig[field] = value;   // 同步内存中的 ttsConfig 缓存
-    }
-    if (Object.keys(payload).length === 0) {
-      ui.status.textContent = "没有可保存的更改";
-      ui.status.className = "save-status";
+    const result = await window.settings?.openCustomStylePrompt?.();
+    if (!result?.ok) {
+      setPreferencesSaveStatus("打开 Prompt 文件失败", "is-error");
       return;
     }
-    await window.tts!.saveSettings(payload);
-    ui.status.textContent = "已保存";
-    ui.status.className = "save-status is-ok";
-    ui.btn.classList.add("is-hidden");
-    setTimeout(() => { ui.status.textContent = ""; }, 2000);
-  } catch (e) {
-    ui.status.textContent = "保存失败：" + (e instanceof Error ? e.message : String(e));
-    ui.status.className = "save-status is-error";
-  } finally {
-    ui.btn.disabled = false;
-  }
-}
-
-// 注册点击 handler
-for (const [provider, ui] of Object.entries(ttsProviderUi)) {
-  ui?.btn.addEventListener("click", () => void saveTtsProvider(provider));
-}
-
-// GPT-SoVITS 格式选择（select，change 时直接保存）
-(ttsEl("tts-gptsovits-format") as HTMLSelectElement).addEventListener("change", () => {
-  void saveTtsField("ttsGptsovitsFormat", (ttsEl("tts-gptsovits-format") as HTMLSelectElement).value as "wav" | "mp3");
-});
-
-// 自定义云端格式选择
-(ttsEl("tts-custom-cloud-format") as HTMLSelectElement).addEventListener("change", () => {
-  void saveTtsField("ttsCustomCloudFormat", (ttsEl("tts-custom-cloud-format") as HTMLSelectElement).value as "wav" | "mp3");
-});
-
-// MiniMax 流式播放开关
-ttsEl("tts-streaming").addEventListener("change", () => {
-  void saveTtsField("ttsStreaming", ttsEl("tts-streaming").checked);
-});
-
-// GPT-SoVITS 选择参考音频
-document.getElementById("tts-gptsovits-ref-pick")?.addEventListener("click", async () => {
-  if (!window.tts) return;
-  const filePath = await window.tts.pickAudioFile();
-  if (filePath) {
-    ttsEl("tts-gptsovits-ref-audio").value = filePath;
-    void saveTtsField("ttsGptsovitsRefAudioPath", filePath);
+    setPreferencesSaveStatus("已打开 Prompt 文件位置", "is-ok");
+  } catch {
+    setPreferencesSaveStatus("打开 Prompt 文件失败", "is-error");
   }
 });
 
-// GPT-SoVITS 測試發音
-document.getElementById("tts-gptsovits-test")?.addEventListener("click", async () => {
-  if (!window.tts) return;
-  const baseUrl = ttsEl("tts-gptsovits-url").value.trim();
-  const refAudioPath = ttsEl("tts-gptsovits-ref-audio").value.trim();
-  const promptText = ttsEl("tts-gptsovits-prompt-text").value.trim();
-  const format = (ttsEl("tts-gptsovits-format") as HTMLSelectElement).value as "wav" | "mp3";
-  if (!baseUrl) { window.alert("請先填寫 GPT-SoVITS API 地址"); return; }
-  if (!refAudioPath) { window.alert("請先選擇參考音頻文件"); return; }
-  if (!promptText) { window.alert("請先填寫參考音頻對應的文本"); return; }
-
-  const btn = document.getElementById("tts-gptsovits-test") as HTMLButtonElement;
-  btn.disabled = true;
-  btn.textContent = "合成中…";
+preferencesForm.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  setPreferencesSaveStatus("保存中…");
   try {
-    const result = await window.tts.synthesizeGptsovits({
-      baseUrl, refAudioPath, promptText, text: TTS_TEST_TEXT, format,
+    await window.settings!.saveGeneral({
+      citaEnabled: citaEnabledInput.checked,
+      citaSemanticEngine: "remote",
+      chatSocialContextEnabled: chatSocialContextEnabledInput.checked,
+      defaultChatMode: "chat",
+      segmentedOutputMode: "off",
+      mobileMessageSegmentation: getMobileMessageSegmentationValue(),
+      proactiveChatMode: getProactiveChatValue(),
+      proactiveDeliveryTarget: getProactiveDeliveryValue(),
+      screenshotHotkey: screenshotHotkeyInput?.value || "Alt+Shift+S",
     });
-    playTtsAudio(result.base64, result.format);
-  } catch (err) {
-    window.alert("測試失敗: " + (err instanceof Error ? err.message : String(err)));
-  } finally {
-    btn.disabled = false;
-    btn.textContent = "🔊 測試發音";
+    setPreferencesSaveStatus("已保存", "is-ok");
+  } catch {
+    setPreferencesSaveStatus("保存失败", "is-error");
   }
 });
-
-// 小米 MiMo 選擇昔漣克隆參考音頻
-document.getElementById("tts-mimo-voice-pick")?.addEventListener("click", async () => {
-  if (!window.tts) return;
-  const filePath = await window.tts.pickAudioFile();
-  if (filePath) {
-    ttsEl("tts-mimo-voice-audio").value = filePath;
-    void saveTtsField("ttsMimoVoiceAudioPath", filePath);
-  }
-});
-
-// 自定義雲端測試發音
-document.getElementById("tts-custom-cloud-test")?.addEventListener("click", async () => {
-  if (!window.tts) return;
-  const endpointUrl = ttsEl("tts-custom-cloud-url").value.trim();
-  const apiKey = ttsEl("tts-custom-cloud-key").value.trim();
-  const voiceId = ttsEl("tts-custom-cloud-voice").value.trim();
-  const format = (ttsEl("tts-custom-cloud-format") as HTMLSelectElement).value as "wav" | "mp3";
-  const timeoutMs = Number(ttsEl("tts-custom-cloud-timeout").value) || 30000;
-  if (!endpointUrl) { window.alert("請先填寫自定義雲端 Endpoint URL"); return; }
-
-  const btn = document.getElementById("tts-custom-cloud-test") as HTMLButtonElement;
-  btn.disabled = true;
-  btn.textContent = "合成中…";
-  try {
-    const result = await window.tts.synthesizeCustomCloud({
-      endpointUrl, apiKey, voiceId, text: TTS_TEST_TEXT,
-      speed: Number(ttsEl("tts-speed").value),
-      volume: Number(ttsEl("tts-volume").value),
-      format,
-      timeoutMs,
-    });
-    playTtsAudio(result.base64, result.format);
-  } catch (err) {
-    window.alert("測試失敗: " + (err instanceof Error ? err.message : String(err)));
-  } finally {
-    btn.disabled = false;
-    btn.textContent = "🔊 測試發音";
-  }
-});
-
-// 小米 MiMo 測試發音
-document.getElementById("tts-mimo-test")?.addEventListener("click", async () => {
-  if (!window.tts) return;
-  const apiKey = ttsEl("tts-mimo-key").value.trim();
-  const voiceAudioPath = ttsEl("tts-mimo-voice-audio").value.trim();
-  const stylePrompt = ttsEl("tts-mimo-style").value.trim();
-  if (!apiKey) { window.alert("請先填寫小米 MiMo API Key"); return; }
-  if (!voiceAudioPath) { window.alert("請先選擇昔漣克隆參考音頻"); return; }
-
-  const btn = document.getElementById("tts-mimo-test") as HTMLButtonElement;
-  btn.disabled = true;
-  btn.textContent = "合成中…";
-  try {
-    const result = await window.tts.synthesizeMimo({
-      apiKey, voiceAudioPath, stylePrompt, text: TTS_TEST_TEXT,
-    });
-    playTtsAudio(result.base64, result.format);
-  } catch (err) {
-    window.alert("测试失败: " + (err instanceof Error ? err.message : String(err)));
-  } finally {
-    btn.disabled = false;
-    btn.textContent = "🔊 测试发音";
-  }
-});
-
-// ── Mossland ──
-// 当前为 UI 骨架：所有按钮触发"功能开发中"占位 modal，
-// ── Mossland ──
-// 第二步已接通：所有按钮走真实 IPC 调用，错误抛到 status / alert。
-function setMosslandStatus(text: string, type: "ok" | "error" | "loading"): void {
-  const el = document.getElementById("tts-mossland-clone-status");
-  if (!el) return;
-  el.textContent = text;
-  el.className = "tts-clone-status" + (type ? " is-" + type : "");
-}
-
-function setMosslandListStatus(text: string, type: "ok" | "error" | "loading"): void {
-  const el = document.getElementById("tts-mossland-list-voices-status");
-  if (!el) return;
-  el.textContent = text;
-  el.className = "tts-clone-status" + (type ? " is-" + type : "");
-}
-
-/** 把拉到的 voices 列表渲染成 `<ul>`；每行有一个"使用此 voice"按钮，点击回填到 #tts-mossland-voice */
-function renderMosslandVoiceList(voices: Array<{ id: string; name: string }>): void {
-  const ul = document.getElementById("tts-mossland-voice-list");
-  if (!ul) return;
-  ul.replaceChildren();
-  for (const v of voices) {
-    const li = document.createElement("li");
-    const idSpan = document.createElement("span");
-    idSpan.className = "voice-id";
-    idSpan.textContent = v.id;
-    const nameSpan = document.createElement("span");
-    nameSpan.className = "voice-name";
-    nameSpan.textContent = v.name;
-    const useBtn = document.createElement("button");
-    useBtn.type = "button";
-    useBtn.className = "voice-use";
-    useBtn.textContent = "使用";
-    useBtn.addEventListener("click", () => {
-      ttsEl("tts-mossland-voice").value = v.id;
-    });
-    li.append(idSpan, nameSpan, useBtn);
-    ul.appendChild(li);
-  }
-}
-
-// 测试发音：走 window.tts.synthesizeMossland
-document.getElementById("tts-mossland-test")?.addEventListener("click", async () => {
-  if (!window.tts) return;
-  const apiKey = ttsEl("tts-mossland-key").value.trim();
-  const voiceId = ttsEl("tts-mossland-voice").value.trim();
-  const text = ttsEl("tts-mossland-text").value.trim();
-  const model = (ttsEl("tts-mossland-model") as HTMLSelectElement).value;
-  const format = (ttsEl("tts-mossland-format") as HTMLSelectElement).value as "mp3" | "wav" | "pcm";
-  if (!apiKey) { window.alert("请先填写 Mossland API Key"); return; }
-  if (!voiceId) { window.alert("请先填写音色 ID（可从下方拉取列表）"); return; }
-  if (!text) { window.alert("请先填写试听文本"); return; }
-
-  const btn = document.getElementById("tts-mossland-test") as HTMLButtonElement;
-  btn.disabled = true;
-  btn.textContent = "合成中…";
-  const statusEl = document.getElementById("tts-mossland-test-status");
-  if (statusEl) { statusEl.textContent = "合成中…"; statusEl.className = "tts-clone-status is-loading"; }
-  try {
-    const result = await window.tts.synthesizeMossland({
-      apiKey, voiceId, text, model, format,
-      speed: Number(ttsEl("tts-speed").value),
-      volume: Number(ttsEl("tts-volume").value),
-    });
-    playTtsAudio(result.base64, result.format);
-    if (statusEl) {
-      statusEl.textContent = "✅ 合成成功";
-      statusEl.className = "tts-clone-status is-ok";
-      setTimeout(() => { statusEl.textContent = ""; }, 2000);
-    }
-  } catch (err) {
-    if (statusEl) {
-      statusEl.textContent = "❌ " + (err instanceof Error ? err.message : String(err));
-      statusEl.className = "tts-clone-status is-error";
-    } else {
-      window.alert("合成失败: " + (err instanceof Error ? err.message : String(err)));
-    }
-  } finally {
-    btn.disabled = false;
-    btn.textContent = "测试发音";
-  }
-});
-
-
-// 克隆子区块：选择文件（用现有 pickAudio）
-document.getElementById("tts-mossland-clone-pick")?.addEventListener("click", async () => {
-  if (!window.tts) return;
-  const filePath = await window.tts.pickAudio();
-  if (filePath) ttsEl("tts-mossland-clone-file").value = filePath;
-});
-
-// 克隆子区块：开始上传（multipart）
-document.getElementById("tts-mossland-clone-start")?.addEventListener("click", async () => {
-  if (!window.tts) return;
-  const apiKey = ttsEl("tts-mossland-key").value.trim();
-  const filePath = ttsEl("tts-mossland-clone-file").value.trim();
-  const name = ttsEl("tts-mossland-clone-name").value.trim();
-  const description = ttsEl("tts-mossland-clone-desc").value.trim();
-  if (!apiKey) { window.alert("请先填写 Mossland API Key"); return; }
-  if (!filePath) { window.alert("请先选择参考音频"); return; }
-
-  setMosslandStatus("正在上传并创建音色…", "loading");
-  try {
-    const result = await window.tts.cloneMossland({
-      apiKey, filePath,
-      name: name || undefined,
-      description: description || undefined,
-    });
-    // 自动填到上方「音色 ID」+ 同步写到 ttsConfig（让保存按钮 / chat 调度都能用）
-    ttsEl("tts-mossland-voice").value = result.voiceId;
-    void saveTtsField("ttsMosslandVoiceId", result.voiceId);
-    setMosslandStatus(`✅ 克隆成功！voice_id「${result.voiceId}」已自动填入音色 ID 框。`, "ok");
-  } catch (err) {
-    setMosslandStatus("❌ " + (err instanceof Error ? err.message : String(err)), "error");
-  }
-});
-
-// 拉取音色列表：调 listMosslandVoices + 渲染
-document.getElementById("tts-mossland-list-voices")?.addEventListener("click", async () => {
-  if (!window.tts) return;
-  const apiKey = ttsEl("tts-mossland-key").value.trim();
-  if (!apiKey) { window.alert("请先填写 Mossland API Key"); return; }
-
-  setMosslandListStatus("正在拉取音色列表…", "loading");
-  try {
-    const result = await window.tts.listMosslandVoices({ apiKey, limit: 50 });
-    if (result.voices.length === 0) {
-      setMosslandListStatus("账号下还没有已克隆的音色，请先到上方「音色克隆」创建一个。", "error");
-    } else {
-      renderMosslandVoiceList(result.voices);
-      setMosslandListStatus(`✅ 拉到 ${result.voices.length} 个音色。点击右侧「使用」可填入音色 ID 框。`, "ok");
-    }
-  } catch (err) {
-    setMosslandListStatus("❌ " + (err instanceof Error ? err.message : String(err)), "error");
-  }
-});
-
-// 克隆须知 modal（富文本，复用 showHtmlModal 复用 MiniMax 那套样式）
-document.getElementById("tts-mossland-clone-info-btn")?.addEventListener("click", () => {
-  void showHtmlModal({
-    title: "Mossland 音色克隆 · 完整规格",
-    icon: "ⓘ",
-    htmlBody: [
-      '<div class="tts-clone-spec-block">',
-      '  <h4><svg class="tts-clone-spec-icon" width="18" height="18" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M24 44C35.0457 44 44 35.0457 44 24C44 12.9543 35.0457 4 24 4C12.9543 4 4 12.9543 4 24C4 35.0457 12.9543 44 24 44Z" fill="none" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/><path d="M18 22H30" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><path d="M18 28H30" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><path d="M24.0083 22V34" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><path d="M30 15L24 21L18 15" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></svg> 费用</h4>',
-      '  <p>请参阅 Mossland 平台定价页（文档未提供具体单价）。每次成功创建 voice_id 都会计费。',
-      '     与 MiniMax 不同：<strong>Mossland 没有「7 天过期」</strong>，voice_id 永久有效。</p>',
-      '</div>',
-      '<div class="tts-clone-spec-block">',
-      '  <h4><svg class="tts-clone-spec-icon" width="18" height="18" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M7 4H41" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><path d="M7 44H41" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><path d="M11 44C13.6667 30.6611 18 23.9944 24 24C30 24.0056 34.3333 30.6722 37 44H11Z" fill="none" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/><path d="M37 4C34.3333 17.3389 30 24.0056 24 24C18 23.9944 13.6667 17.3278 11 4H37Z" fill="none" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/><path d="M21 15H27" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><path d="M19 38H29" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></svg> 持久化规则</h4>',
-      '  <p>创建的 voice_id <strong>永久有效</strong>，无过期、无冷却。直接复制到「音色 ID」即可永久复用。</p>',
-      '</div>',
-      '<div class="tts-clone-spec-block">',
-      '  <h4><svg class="tts-clone-spec-icon" width="18" height="18" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M8 44V4H31L40 14.5V44H8Z" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><path d="M32 14L26 16.9688V31.5" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><circle cx="20.5" cy="31.5" r="5.5" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></svg> 参考音频 <code>audio_sample</code></h4>',
-      '  <ul>',
-      '    <li>请求格式：<strong>multipart/form-data</strong>（不支持 JSON / URL / base64）</li>',
-      '    <li>字段名：<code>audio_sample</code>（必填）</li>',
-      '    <li>字段名：<code>name</code>（可选，给音色起名）</li>',
-      '    <li>字段名：<code>description</code>（可选，描述音色）</li>',
-      '    <li>时长限制：≤ 60 秒（实测，官方文档未标注）</li>',
-      '    <li>格式：文档示例为 wav</li>',
-      '  </ul>',
-      '</div>',
-      '<div class="tts-clone-spec-block">',
-      '  <h4><svg class="tts-clone-spec-icon" width="18" height="18" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><circle cx="24" cy="24" r="18" fill="none" stroke="currentColor" stroke-width="4"/><path d="M24 14V16" stroke="currentColor" stroke-width="4" stroke-linecap="round"/><circle cx="24" cy="32" r="2.5" fill="currentColor"/></svg> 后续合成</h4>',
-      '  <ul>',
-      '    <li>拿到 voice_id 后，调用 <code>POST /v1/audio/speech</code>，body 形如 <code>{ model: "moss-tts", input: "...", voice_id: "..." }</code></li>',
-      '    <li>可选 <code>delivery_method: "audio" \| "url"</code>（默认 audio，二进制流；url 返回 JSON 含 URL）</li>',
-      '    <li><code>version</code> 字段为预留能力，当前请不传，服务端使用默认版本</li>',
-      '  </ul>',
-      '</div>',
-    ].join("\n"),
-  });
-});
-
-// MiniMax 测试发音
-document.getElementById("tts-minimax-test")?.addEventListener("click", async () => {
-  if (!window.tts) return;
-  const apiKey = ttsEl("tts-minimax-key").value.trim();
-  const voiceId = ttsEl("tts-minimax-voice").value.trim();
-  const modelSelect = ttsEl("tts-minimax-model") as HTMLSelectElement;
-  const model = modelSelect.value === "speech-2.8-hd" ? "speech-2.8-hd" : "speech-2.8-turbo";
-  if (!apiKey) { window.alert("请先填写 MiniMax API Key"); return; }
-  if (!voiceId) { window.alert("请先填写音色 ID（或下方复刻训练）"); return; }
-
-  const btn = document.getElementById("tts-minimax-test") as HTMLButtonElement;
-  btn.disabled = true;
-  btn.textContent = "合成中…";
-  try {
-    const base64 = await window.tts.synthesize({ apiKey, voiceId, text: TTS_TEST_TEXT, model });
-    playTtsAudio(base64);
-  } catch (err) {
-    window.alert("測試失敗: " + (err instanceof Error ? err.message : String(err)));
-  } finally {
-    btn.disabled = false;
-    btn.textContent = "🔊 測試發音";
-  }
-});
-
-// ── 音色快速復刻 ──
-// 選擇配音文件
-document.getElementById("tts-clone-pick")?.addEventListener("click", async () => {
-  if (!window.tts) return;
-  const filePath = await window.tts.pickAudio();
-  if (filePath) ttsEl("tts-clone-file").value = filePath;
-});
-
-// 選擇示例音頻
-document.getElementById("tts-clone-prompt-pick")?.addEventListener("click", async () => {
-  if (!window.tts) return;
-  const filePath = await window.tts.pickAudio();
-  if (filePath) ttsEl("tts-clone-prompt-file").value = filePath;
-});
-
-// 設置復刻狀態文案
-function setCloneStatus(text: string, type: "ok" | "error" | "loading"): void {
-  const el = document.getElementById("tts-clone-status");
-  if (!el) return;
-  el.textContent = text;
-  el.className = "tts-clone-status" + (type ? " is-" + type : "");
-}
-
-// 開始復刻
-document.getElementById("tts-clone-start")?.addEventListener("click", async () => {
-  if (!window.tts) return;
-  const apiKey = ttsEl("tts-minimax-key").value.trim();
-  const cloneFile = ttsEl("tts-clone-file").value.trim();
-  const promptFile = ttsEl("tts-clone-prompt-file").value.trim();
-  const promptText = ttsEl("tts-clone-prompt-text").value.trim();
-  const cloneText = ttsEl("tts-clone-text").value.trim();
-  const voiceId = ttsEl("tts-clone-voice-id").value.trim();
-
-  if (!apiKey) { window.alert("請先填寫 MiniMax API Key"); return; }
-  if (!cloneFile) { window.alert("請選擇配音文件"); return; }
-  if (!cloneText) { window.alert("請填寫復刻文本"); return; }
-  if (!voiceId) { window.alert("請填寫音色命名"); return; }
-
-  const btn = document.getElementById("tts-clone-start") as HTMLButtonElement;
-  btn.disabled = true;
-  setCloneStatus("正在上傳配音文件…", "loading");
-
-  try {
-    // 步驟1: 上傳配音文件
-    const cloneUpload = await window.tts.upload(apiKey, cloneFile, "voice_clone");
-    setCloneStatus("配音文件上傳完成 (file_id: " + cloneUpload.file_id + ")，正在上傳示例音頻…", "loading");
-
-    // 步驟2: 上傳示例音頻（可選）
-    let promptFileId: string | undefined;
-    if (promptFile) {
-      const promptUpload = await window.tts.upload(apiKey, promptFile, "prompt_audio");
-      promptFileId = promptUpload.file_id;
-      setCloneStatus("示例音頻上傳完成，正在訓練音色…", "loading");
-    } else {
-      setCloneStatus("正在訓練音色…", "loading");
-    }
-
-    // 步驟3: 音色克隆
-    const result = await window.tts.clone({
-      apiKey, fileId: cloneUpload.file_id, voiceId,
-      promptAudioId: promptFileId, promptText: promptText || undefined,
-      text: cloneText,
-    });
-
-    // 自動填入音色 ID
-    ttsEl("tts-minimax-voice").value = result.voiceId;
-    void saveTtsField("ttsMinimaxVoiceId", result.voiceId);
-
-    setCloneStatus("✅ 復刻成功！音色 ID「" + result.voiceId + "」已自動填入。", "ok");
-
-    // 如果有試聽音頻，播放
-    if (result.audioDemo) {
-      try {
-        const resp = await fetch(result.audioDemo);
-        const buf = await resp.arrayBuffer();
-        const base64 = btoa(String.fromCharCode(...new Uint8Array(buf)));
-        playTtsAudio(base64);
-      } catch { /* 試聽音頻播放失敗不影響主流程 */ }
-    }
-  } catch (err) {
-    setCloneStatus("❌ " + (err instanceof Error ? err.message : String(err)), "error");
-  } finally {
-    btn.disabled = false;
-  }
-});
-
-// ── 音色快速复刻：规格说明模态框 ──
-// 摘要见 C:\Users\13575\Desktop\minimax-tts文档摘要.md（音色快速复刻 / Voice Clone）
-// 字段顺序：file_id → voice_id → clone_prompt(prompt_audio / prompt_text) → text(试听)
-const CLONE_SPEC_BODY = [
-  '<div class="tts-clone-spec-block">',
-  '  <h4>',
-  '    <svg class="tts-clone-spec-icon" width="18" height="18" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">',
-  '      <path d="M24 44C35.0457 44 44 35.0457 44 24C44 12.9543 35.0457 4 24 4C12.9543 4 4 12.9543 4 24C4 35.0457 12.9543 44 24 44Z" fill="none" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/>',
-  '      <path d="M18 22H30" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>',
-  '      <path d="M18 28H30" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>',
-  '      <path d="M24.0083 22V34" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>',
-  '      <path d="M30 15L24 21L18 15" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>',
-  '    </svg>',
-  '    费用',
-  '  </h4>',
-  '  <p>每次成功发起复刻将收取 <span class="tts-clone-fee">¥9.9</span>。',
-  '     试听（<code>text</code> + <code>model</code>）按字符数另计 T2A 费用，与平台其他 T2A 接口同价。</p>',
-  '</div>',
-  '<div class="tts-clone-spec-block">',
-  '  <h4>',
-  '    <svg class="tts-clone-spec-icon" width="18" height="18" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">',
-  '      <path d="M7 4H41" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>',
-  '      <path d="M7 44H41" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>',
-  '      <path d="M11 44C13.6667 30.6611 18 23.9944 24 24C30 24.0056 34.3333 30.6722 37 44H11Z" fill="none" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/>',
-  '      <path d="M37 4C34.3333 17.3389 30 24.0056 24 24C18 23.9944 13.6667 17.3278 11 4H37Z" fill="none" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/>',
-  '      <path d="M21 15H27" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>',
-  '      <path d="M19 38H29" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>',
-  '    </svg>',
-  '    过期规则',
-  '  </h4>',
-  '  <p>复刻得到的音色若 <strong>7 天内</strong>无任何调用，将被系统自动删除。如需长期保留音色，平时不定期点一下「🔊 测试发音」即可续命。</p>',
-  '</div>',
-  '<div class="tts-clone-spec-block">',
-  '  <h4>',
-  '    <svg class="tts-clone-spec-icon" width="18" height="18" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">',
-  '      <path d="M8 44V4H31L40 14.5V44H8Z" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>',
-  '      <path d="M32 14L26 16.9688V31.5" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>',
-  '      <circle cx="20.5" cy="31.5" r="5.5" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>',
-  '    </svg>',
-  '    配音文件 <code>file_id</code>（必填）',
-  '  </h4>',
-  '  <ul>',
-  '    <li>格式：mp3 / m4a / wav</li>',
-  '    <li>时长：10 秒 ~ 5 分钟</li>',
-  '    <li>大小：≤ 20 MB</li>',
-  '  </ul>',
-  '</div>',
-  '<div class="tts-clone-spec-block">',
-  '  <h4>',
-  '    <svg class="tts-clone-spec-icon" width="18" height="18" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">',
-  '      <path d="M10 10H32H38V44H10V10Z" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>',
-  '      <path d="M10 10L32 4V10" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>',
-  '      <circle cx="24" cy="24" r="4" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>',
-  '      <path d="M20 34H28" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>',
-  '    </svg>',
-  '    自定义 voice_id（必填）',
-  '  </h4>',
-  '  <ul>',
-  '    <li>长度范围：8 ~ 256 个字符</li>',
-  '    <li>首字符必须为英文字母</li>',
-  '    <li>允许：数字、字母、<code>-</code>、<code>_</code></li>',
-  '    <li>末位字符不可为 <code>-</code> 或 <code>_</code></li>',
-  '    <li>不得与已有 voice_id 重复</li>',
-  '  </ul>',
-  '</div>',
-  '<div class="tts-clone-spec-block">',
-  '  <h4>',
-  '    <svg class="tts-clone-spec-icon" width="18" height="18" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">',
-  '      <path d="M24 44C35.0457 44 44 35.0457 44 24C44 12.9543 35.0457 4 24 4C12.9543 4 4 12.9543 4 24C4 35.0457 12.9543 44 24 44Z" fill="none" stroke="currentColor" stroke-width="4"/>',
-  '      <path d="M30 18V30" stroke="currentColor" stroke-width="4" stroke-linecap="round"/>',
-  '      <path d="M36 22V26" stroke="currentColor" stroke-width="4" stroke-linecap="round"/>',
-  '      <path d="M18 18V30" stroke="currentColor" stroke-width="4" stroke-linecap="round"/>',
-  '      <path d="M12 22V26" stroke="currentColor" stroke-width="4" stroke-linecap="round"/>',
-  '      <path d="M24 14V34" stroke="currentColor" stroke-width="4" stroke-linecap="round"/>',
-  '    </svg>',
-  '    示例音频 clone_prompt（可选，强烈推荐）',
-  '  </h4>',
-  '  <p>提供一段示例音频可显著增强合成音色的相似度与稳定性。</p>',
-  '  <ul>',
-  '    <li>格式：mp3 / m4a / wav</li>',
-  '    <li>时长：&lt; 8 秒</li>',
-  '    <li>大小：≤ 20 MB</li>',
-  '    <li>须填写对应的示例文本 <code>prompt_text</code>，句末需有标点</li>',
-  '  </ul>',
-  '</div>',
-  '<div class="tts-clone-spec-block">',
-  '  <h4>',
-  '    <svg class="tts-clone-spec-icon" width="18" height="18" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">',
-  '      <path d="M40 33V42C40 43.1046 39.1046 44 38 44H31.5" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>',
-  '      <path d="M40 16V6C40 4.89543 39.1046 4 38 4H10C8.89543 4 8 4.89543 8 6V42C8 43.1046 8.89543 44 10 44H16" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>',
-  '      <path d="M16 16H30" stroke="currentColor" stroke-width="4" stroke-linecap="round"/>',
-  '      <path d="M23 44L40 23" stroke="currentColor" stroke-width="4" stroke-linecap="round"/>',
-  '      <path d="M16 24H24" stroke="currentColor" stroke-width="4" stroke-linecap="round"/>',
-  '    </svg>',
-  '    复刻文本 <code>text</code>（试听用，建议 ≤1000 字符）',
-  '  </h4>',
-  '  <p>模型会用克隆后的音色朗读这段文本并返回试听音频链接，便于人工核对相似度。</p>',
-  '</div>',
-].join("\n");
-
-function showCloneSpecModal(): void {
-  void showHtmlModal({
-    title: "🎙️ 音色快速复刻 · 完整规格",
-    icon: "ⓘ",
-    htmlBody: CLONE_SPEC_BODY,
-  });
-}
-
-document.getElementById("tts-clone-info-btn")?.addEventListener("click", showCloneSpecModal);
-document.getElementById("tts-clone-info-link")?.addEventListener("click", showCloneSpecModal);
-
-// 初始加载配置
-void loadTtsConfig();

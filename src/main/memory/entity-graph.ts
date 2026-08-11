@@ -1,16 +1,17 @@
-// 簡易實體關係圖譜
+// 简易实体关系图谱
 //
-// 從對話中自動提取實體（人物、地點、偏好、概念）和關係，
-// 彌補純向量檢索無法回答"用戶提到過的朋友是誰"這類關係型問題的不足。
+// 从对话中自动提取实体（人物、地点、偏好、概念）和关系，
+// 弥补纯向量检索无法回答"用户提到过的朋友是谁"这类关系型问题的不足。
 //
-// 存儲為 JSON 文件，與 memory.json 並列。
+// 存储为 JSON 文件，与 memory.json 并列。
 
 import * as fs from "fs";
 import * as path from "path";
 import { app } from "electron";
 import { registerJiebaCustomWord, registerJiebaCustomWords } from "../rag/retriever";
+import { logger, LogTag } from "../logger";
 
-// ── 類型 ──
+// ── 类型 ──
 
 export interface EntityNode {
   id: string;
@@ -28,77 +29,28 @@ export interface EntityRelation {
   targetId: string;
   relation: string;          // "likes" | "works_at" | "lives_in" | "friend_of" | "owns" | ...
   confidence: number;        // 0.0 ~ 1.0
-  strength: number;          // 提及次數累積
+  strength: number;          // 提及次数累积
 }
 
-export interface EntityGraphData {
+interface EntityGraphData {
   entities: EntityNode[];
   relations: EntityRelation[];
 }
 
-// ── 簡單解析器（不依賴 LLM，用正則啟發式提取） ──
+// ── 实体抽取输入类型 ──
+//
+// 实体抽取改由 Memory Judge 的 LLM 调用顺手产出（零额外 LLM 调用 + 零正则）。
+// 旧 ENTITY_PATTERNS 正则的 .{1,10} 贪婪匹配会把聊天碎片（标点/引号/emoji/单字）
+// 当成实体，产生「」就收尾」「（用户发送表情包：哈」之类的垃圾文件。
+// 详见 EntityGraph.ingestEntities()。
 
-// 常見實體觸發模式
-const ENTITY_PATTERNS: Array<{ type: EntityNode["type"]; patterns: RegExp[] }> = [
-  {
-    type: "person",
-    patterns: [
-      /我的朋友(.{1,6})/g,
-      /我認識(.{1,6})/g,
-      /同事(.{1,6})/g,
-      /叫(.{1,4})(?:的人|的朋友|的同事|的老闆)/g,
-      /有.{0,4}朋友.{0,4}(.{1,6})/g,
-      /(.{1,4})是我的朋友/g,
-    ],
-  },
-  {
-    type: "place",
-    patterns: [
-      /住在(.{1,10})/g,
-      /在(.{1,10})(?:工作|學習|生活|住|上班|上學)/g,
-      /去了(.{1,10})/g,
-      /在(.{1,10})出差/g,
-    ],
-  },
-  {
-    type: "organization",
-    patterns: [
-      /在(.{1,10})(?:公司|單位|工作室|團隊|學校|大學|學院)/g,
-      /(.{1,10})公司/g,
-    ],
-  },
-  {
-    type: "preference",
-    patterns: [
-      /喜歡(.{1,10})(?:的東西|的活動|的食物|的音樂|的運動|的遊戲|的動畫|的漫畫)/g,
-      /最愛(.{1,10})/g,
-      /討厭(.{1,10})(?:的東西|的事情)/g,
-    ],
-  },
-];
-
-/** 從文本中啟發式提取實體名，返回 [type, name] 列表 */
-export function extractEntitiesFromText(text: string): Array<{ type: EntityNode["type"]; name: string }> {
-  const results: Array<{ type: EntityNode["type"]; name: string }> = [];
-  const seen = new Set<string>();
-
-  for (const { type, patterns } of ENTITY_PATTERNS) {
-    for (const regex of patterns) {
-      const matches = text.matchAll(regex);
-      for (const m of matches) {
-        const name = m[1]?.trim();
-        if (name && name.length >= 2 && name.length <= 10 && !seen.has(`${type}:${name}`)) {
-          seen.add(`${type}:${name}`);
-          results.push({ type, name });
-        }
-      }
-    }
-  }
-
-  return results;
+export interface ExtractedEntity {
+  name: string;
+  type: EntityNode["type"];
+  aliases?: string[];
 }
 
-// ── 實體圖譜管理器 ──
+// ── 实体图谱管理器 ──
 
 const dataDir = () => path.join(app.getPath("userData"));
 const getPath = () => path.join(dataDir(), "entity-graph.json");
@@ -122,15 +74,6 @@ class EntityGraph {
     return this.cache;
   }
 
-  /** 提供給設定頁的只讀快照，避免 UI 直接碰觸圖譜存儲。 */
-  snapshot(): EntityGraphData {
-    const data = this.load();
-    return {
-      entities: data.entities.map(entity => ({ ...entity, aliases: [...entity.aliases] })),
-      relations: data.relations.map(relation => ({ ...relation })),
-    };
-  }
-
   save(): void {
     if (!this.cache) return;
     const filePath = getPath();
@@ -139,56 +82,75 @@ class EntityGraph {
     fs.writeFileSync(filePath, JSON.stringify(this.cache, null, 2), "utf8");
   }
 
-  /** 從一條對話文本中提取實體併入庫 */
-  ingest(text: string): void {
+  /**
+   * 把一批已抽取的实体入库。
+   *
+   * 实体由 Memory Judge 的 LLM 调用顺手产出（{name, type, aliases}），
+   * 不再在此处用正则从原文抽取 —— 旧正则贪婪匹配会产生「」就收尾」之类的垃圾实体。
+   * 调用方：MemoryScheduler 在 judge 返回后调本方法。
+   */
+  ingestEntities(extracted: ExtractedEntity[]): void {
+    if (extracted.length === 0) return;
     const data = this.load();
-    const extracted = extractEntitiesFromText(text);
     const now = Date.now();
-    let hasNewEntity = false;
+    let changed = false;
 
-    for (const { type, name } of extracted) {
+    for (const { name, type, aliases } of extracted) {
+      const trimmedName = name?.trim();
+      if (!trimmedName || trimmedName.length < 2) continue;
       const existing = data.entities.find(
-        (e) => e.name === name || e.aliases.includes(name),
+        (e) => e.name === trimmedName || e.aliases.includes(trimmedName),
       );
       if (existing) {
         existing.mentionCount++;
         existing.lastMentionedAt = now;
+        // 合并 LLM 给出的新别名（去重），新别名也要喂给 jieba 避免误切
+        const newAliases = (aliases ?? [])
+          .map((a) => a.trim())
+          .filter((a) => a && a !== existing.name && !existing.aliases.includes(a));
+        if (newAliases.length > 0) {
+          existing.aliases.push(...newAliases);
+          for (const a of newAliases) this.feedSingleName(a);
+          changed = true;
+        }
       } else {
         data.entities.push({
           id: `ent_${now}_${Math.random().toString(36).slice(2, 8)}`,
-          name,
+          name: trimmedName,
           type,
-          aliases: [],
+          aliases: (aliases ?? [])
+            .map((a) => a.trim())
+            .filter((a) => a && a !== trimmedName),
           mentionCount: 1,
           firstMentionedAt: now,
           lastMentionedAt: now,
         });
-        hasNewEntity = true;
-        // 新實體立即餵給 jieba，避免後續對話中該詞被錯誤切分
-        this.feedSingleName(name);
+        changed = true;
+        // 新实体立即喂给 jieba，避免后续对话中该词被错误切分
+        this.feedSingleName(trimmedName);
       }
     }
 
-    if (extracted.length > 0) this.save();
+    if (changed) this.save();
   }
 
 /**
- * 把一個名稱註冊到 jieba 自定義詞表。
+ * 把一个名称注册到 jieba 自定义词表。
  *
- * @node-rs/jieba 沒有運行時 insertWord() —— 走「後處理重組」方案：
- * retriever.ts 的 tokenize() 在 jieba.cut() 之後會把被切散的自定義詞
- * 重新合併。這個函數就是把 entity 名加進那張表的入口。
+ * @node-rs/jieba 没有运行时 insertWord() —— 走「后处理重组」方案：
+ * retriever.ts 的 tokenize() 在 jieba.cut() 之后会把被切散的自定义词
+ * 重新合并。这个函数就是把 entity 名加进那张表的入口。
  */
   private feedSingleName(name: string): void {
     registerJiebaCustomWord(name);
   }
 
-  /** 搜索與 query 相關的實體和關係，返回可讀文本 */
+  /** 搜索与 query 相关的实体和关系，返回可读文本 */
   search(query: string): string {
     const data = this.load();
     if (data.entities.length === 0) return "";
 
-    // 簡單關鍵詞匹配：找名稱包含 query 中任意詞的實體
+    // 简单关键词匹配：找名称包含 query 中任意词的实体
     const queryTokens = query.toLowerCase().split(/\s+/).filter(Boolean);
     const matchedEntities = data.entities.filter((e) =>
       queryTokens.some((t) => e.name.includes(t) || e.aliases.some((a) => a.includes(t))),
@@ -201,7 +163,7 @@ class EntityGraph {
       const mentions = entity.mentionCount > 1 ? `（提及${entity.mentionCount}次）` : "";
       lines.push(`· ${entity.name}（${typeLabel(entity.type)}）${mentions}`);
 
-      // 找該實體相關的所有關係
+      // 找该实体相关的所有关系
       const outgoing = data.relations.filter((r) => r.sourceId === entity.id);
       for (const rel of outgoing) {
         const target = data.entities.find((e) => e.id === rel.targetId);
@@ -222,14 +184,14 @@ class EntityGraph {
     return lines.length > 0 ? lines.join("\n") : "";
   }
 
-  /** 清空圖譜 */
+  /** 清空图谱 */
   reset(): void {
     this.cache = { entities: [], relations: [] };
     this.save();
   }
 }
 
-/** 獲取所有實體名稱（含別名） */
+/** 获取所有实体名称（含别名） */
 export function getAllEntityNames(): string[] {
   const graph = entityGraph.load();
   const names = new Set<string>();
@@ -241,25 +203,25 @@ export function getAllEntityNames(): string[] {
 }
 
 /**
- * 將實體圖譜中的所有實體名註冊到 jieba 自定義詞表。
- * 調用時機：應用啟動後、圖譜有更新時。
- * 這樣 "昔漣"、"小鹿" 等 AI 伴侶核心名詞不會被錯誤切分。
+ * 将实体图谱中的所有实体名注册到 jieba 自定义词表。
+ * 调用时机：应用启动后、图谱有更新时。
+ * 这样 "昔涟"、"小鹿" 等 AI 伴侣核心名词不会被错误切分。
  *
- * @node-rs/jieba 沒有運行時 insertWord() —— 走「後處理重組」方案：
- * 詞表存到 retriever.ts 的 customWords Set，tokenize() 切完後合併回去。
+ * @node-rs/jieba 没有运行时 insertWord() —— 走「后处理重组」方案：
+ * 词表存到 retriever.ts 的 customWords Set，tokenize() 切完后合并回去。
  */
 export async function feedEntityNamesToJieba(): Promise<void> {
   const names = getAllEntityNames();
   if (names.length === 0) return;
   registerJiebaCustomWords(names);
-  console.log(`[EntityGraph] 註冊 ${names.length} 個實體名到 jieba 自定義詞表`);
+  logger.info(LogTag.EntityGraph, `registered ${names.length} entity names into jieba custom dictionary`);
 }
 
 function typeLabel(type: EntityNode["type"]): string {
   switch (type) {
     case "person": return "人物";
-    case "place": return "地點";
-    case "organization": return "組織";
+    case "place": return "地点";
+    case "organization": return "组织";
     case "preference": return "偏好";
     case "concept": return "概念";
   }

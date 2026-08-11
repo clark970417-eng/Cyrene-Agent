@@ -1,5 +1,6 @@
 import { JsonVectorStore, SearchResult } from "./vectorstore";
 import { EmbeddingProvider, getEmbeddingProvider } from "./embedding";
+import { getReranker } from "./reranker";
 
 // ── @node-rs/jieba 分词（Node 24 兼容；nodejieba 已弃用） ──
 import { Jieba } from "@node-rs/jieba";
@@ -105,7 +106,7 @@ function mergeCustomWords(tokens: string[]): string[] {
 }
 
 function tokenize(text: string): TokenInfo[] {
-  // 純英文/數字文本走原來的空格分詞邏輯（jieba 不適合純英文）
+  // 纯英文/数字文本走原来的空格分词逻辑（jieba 不适合纯英文）
   if (/^[a-zA-Z0-9\s]+$/.test(text)) {
     return text.split(/\s+/).filter(Boolean).map((word) => ({
       word: word.toLowerCase(),
@@ -116,14 +117,14 @@ function tokenize(text: string): TokenInfo[] {
   }
 
   try {
-    // 第二個參數 hmm=true 讓 jieba 用 HMM 模型識別未登錄詞（如角色名"昔漣"）
-    // 默認詞典不含"昔漣"等角色名，但 HMM 能根據上下文判斷這是個整體
-    // 再疊加後處理：把 jieba 切散的自定義詞重組
+    // 第二个参数 hmm=true 让 jieba 用 HMM 模型识别未登录词（如角色名"昔涟"）
+    // 默认词典不含"昔涟"等角色名，但 HMM 能根据上下文判断这是个整体
+    // 再叠加后处理：把 jieba 切散的自定义词重组
     const rawCuts = jieba.cut(text, true);
     const mergedCuts = mergeCustomWords(rawCuts);
 
-    // 用 jieba.tag 給重組後的詞打標籤（每個"詞"獨立 tag）
-    // 重組後詞和原文本不對齊，所以對每個 merged token 單獨 tag
+    // 用 jieba.tag 给重组后的词打标签（每个"词"独立 tag）
+    // 重组后词和原文本不对齐，所以对每个 merged token 单独 tag
     const result: TokenInfo[] = [];
     for (const word of mergedCuts) {
       const tagged = jieba.tag(word, true);
@@ -137,7 +138,7 @@ function tokenize(text: string): TokenInfo[] {
     }
     return result;
   } catch {
-    // jieba 失敗時回退到單字切分
+    // jieba 失败时回退到单字切分
     const tokens: TokenInfo[] = [];
     const seg = text.split(/([\u4e00-\u9fff]|[a-zA-Z]+|\d+)/).filter(Boolean);
     for (const s of seg) {
@@ -164,7 +165,7 @@ function bm25Score(
   const b = 0.75;
   let score = 0;
 
-  // 文檔詞頻
+  // 文档词频
   const tf: Map<string, number> = new Map();
   for (const t of docTokens) {
     tf.set(t.word, (tf.get(t.word) || 0) + 1);
@@ -180,9 +181,9 @@ function bm25Score(
     const denominator = termFreq + k1 * (1 - b + b * (avgDocLen ? docTokens.length / avgDocLen : 1));
     let termScore = idf * (numerator / denominator);
 
-    // 名詞加權：實際的信息載體，提高權重
+    // 名词加权：实际的信息载体，提高权重
     if (qt.isNoun) termScore *= NOUN_WEIGHT;
-    // 停用詞降權：高頻無意義詞，降低干擾
+    // 停用词降权：高频无意义词，降低干扰
     if (qt.isStop) termScore *= STOP_WEIGHT;
 
     score += termScore;
@@ -191,7 +192,7 @@ function bm25Score(
   return score;
 }
 
-// ── 混合檢索器 ──
+// ── 混合检索器 ──
 export class HybridRetriever {
   private store: JsonVectorStore;
   private provider: EmbeddingProvider | null;
@@ -240,7 +241,7 @@ export class HybridRetriever {
       }
     }
 
-    // 歸一化 + 加權
+    // 归一化 + 加权
     const all = Array.from(merged.values());
     const maxV = Math.max(...all.map((m) => m.vectorScore), 1);
     const maxB = Math.max(...all.map((m) => m.bm25Score), 1);
@@ -251,7 +252,31 @@ export class HybridRetriever {
     }));
 
     scored.sort((a, b) => b.score - a.score);
-    return scored.slice(0, topK);
+    const candidates = scored.slice(0, topK);
+
+    // ── Reranker 精排 ──
+    // 如果 reranker 可用，用 cross-encoder 对候选结果做精排
+    const reranker = getReranker();
+    if (reranker && candidates.length > 1) {
+      try {
+        const docs = candidates.map((c) => c.entry.text);
+        const reranked = await reranker.rerank(query, docs);
+        const scoreMap = new Map(reranked.map((r) => [r.text, r.score]));
+
+        // 用 reranker 分数重排，但保留原始 hybrid 分数作为参考
+        for (const c of candidates) {
+          const rerankScore = scoreMap.get(c.entry.text);
+          if (rerankScore !== undefined) {
+            c.score = rerankScore;
+          }
+        }
+        candidates.sort((a, b) => b.score - a.score);
+      } catch (err) {
+        console.warn("[HybridRetriever] reranker failed, using hybrid scores:", err);
+      }
+    }
+
+    return candidates;
   }
 
   private bm25Search(query: string, source?: string, topK = 15, options: RetrieveOptions = {}): SearchResult[] {
@@ -273,7 +298,7 @@ export class HybridRetriever {
     const totalDocs = docs.length;
     const avgDocLen = docTokensList.reduce((sum, t) => sum + t.length, 0) / totalDocs;
 
-    // 文檔頻率
+    // 文档频率
     const docFreq = new Map<string, number>();
     for (const tokens of docTokensList) {
       const seen = new Set<string>();
@@ -286,15 +311,15 @@ export class HybridRetriever {
     }
 
     const scored = docs.map((doc, i) => {
-      // 從 query 角度打分只考慮 query 包含的 token
+      // 从 query 角度打分只考虑 query 包含的 token
       const queryWords = queryTokenInfo.map((t) => t.word);
       const docTokens = docTokensList[i];
 
-      // 只對 query 中出現的詞做 BM25 計算
+      // 只对 query 中出现的词做 BM25 计算
       const queryWordsSet = new Set(queryWords);
       const relevantDocTokens = docTokens.filter((t) => queryWordsSet.has(t.word));
       
-      // 如果 doc 沒有命中任何 query 詞，分數為 0
+      // 如果 doc 没有命中任何 query 词，分数为 0
       if (relevantDocTokens.length === 0) {
         return {
           entry: {

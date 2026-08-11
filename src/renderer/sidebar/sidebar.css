@@ -1,6 +1,6 @@
 /* ============================================================
    Cyrene sidebar (status / feeling / model / settings)
-   跟 chat.css 同款：粉紫玻璃質感 + 同一套設計 token
+   跟 chat.css 同款：粉紫玻璃质感 + 同一套设计 token
    ============================================================ */
 
 html, body { height: 100%; }
@@ -21,7 +21,7 @@ body {
   height: 100vh;
   width: 100vw;
   margin: 0;
-  border-radius: 24px;
+  border-radius: var(--cy-window-radius, 24px);
   overflow: hidden;
   background:
     radial-gradient(circle at 18% 8%, var(--rb-bg-elevated) 0%, transparent 38%),
@@ -29,10 +29,6 @@ body {
     radial-gradient(circle at 50% 110%, var(--rb-bg-3) 0%, transparent 38%),
     linear-gradient(155deg, var(--rb-bg-3) 0%, var(--rb-bg-1) 60%, var(--rb-bg-2) 100%);
   border: 1px solid rgba(255, 190, 226, 0.36);
-  box-shadow:
-    0 0 24px var(--rb-glow-soft),
-    inset 0 1px 0 rgba(255, 255, 255, 0.12),
-    inset 0 0 0 1px var(--rb-border-faint);
   transition: background 200ms ease, border-color 200ms ease, box-shadow 200ms ease;
 }
 
@@ -110,7 +106,7 @@ body {
 
 .sidebar__icon-btn,
 .sidebar__winbtn {
-  /* titlebar 整體是 drag 區，按鈕必須 no-drag 否則點擊被拖拽吞掉 */
+  /* titlebar 整体是 drag 区，按钮必须 no-drag 否则点击被拖拽吞掉 */
   -webkit-app-region: no-drag;
   display: grid;
   place-items: center;

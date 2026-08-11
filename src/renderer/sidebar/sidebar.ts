@@ -17,8 +17,8 @@ interface ModelConfigApi {
   onChanged: (callback: (config: ModelConfig) => void) => () => void;
 }
 
-type RuntimeStatus = "陪伴中" | "思考中" | "工作中" | "聆聽中" | "提醒中" | "離線";
-type RuntimeFeeling = "平靜" | "開心" | "溫柔" | "激動" | "撒嬌" | "擔心" | "難過" | "感動" | "害羞";
+type RuntimeStatus = "陪伴中" | "思考中" | "工作中" | "聆听中" | "提醒中" | "离线";
+type RuntimeFeeling = "平静" | "开心" | "温柔" | "激动" | "撒娇" | "担心" | "难过" | "感动" | "害羞";
 
 interface RuntimeState {
   status: RuntimeStatus;
@@ -48,7 +48,7 @@ declare global {
   }
 }
 
-// 沒有 preload 時給瀏覽器跑留個 no-op，方便 vite 單獨打開 sidebar 調試
+// 没有 preload 时给浏览器跑留个 no-op，方便 vite 单独打开 sidebar 调试
 if (!window.sidebar) {
   (window as unknown as { sidebar: SidebarApi }).sidebar = {
     minimize: () => {},
@@ -137,10 +137,10 @@ function applyModelConfig(config: ModelConfig | null): void {
   const connected = Boolean(config?.connected);
   const wasRuntimeSyncEnabled = runtimeSyncEnabled;
   runtimeSyncEnabled = config?.runtimeSync === "local" || config?.runtimeSync === "llm";
-  onlineStatusLabel.textContent = connected ? "在線" : "離線";
+  onlineStatusLabel.textContent = connected ? "在线" : "离线";
   onlineBadge?.classList.toggle("is-offline", !connected);
-  // "正在餵養"顯示優先級：用戶暱稱 > 廠商短名 > model id > 兜底
-  feedingModelEl.textContent = config?.displayName || config?.shortName || config?.model || "未選擇模型";
+  // "正在喂养"显示优先级：用户昵称 > 厂商短名 > model id > 兜底
+  feedingModelEl.textContent = config?.displayName || config?.shortName || config?.model || "未选择模型";
   if (!runtimeSyncEnabled) applyRuntimeDisabled();
   else if (!wasRuntimeSyncEnabled) applyRuntimeState(latestRuntimeState);
 }
@@ -154,13 +154,13 @@ async function initModelConfig(): Promise<void> {
   }
   window.modelConfig?.onChanged((config) => applyModelConfig(config));
 }
-// 置頂 toggle：點 📌 切換 alwaysOnTop，按鈕高亮態反映當前是否已置頂。
+// 置顶 toggle：点 📌 切换 alwaysOnTop，按钮高亮态反映当前是否已置顶。
 pinBtn.addEventListener("click", async () => {
   const pinned = await window.sidebar?.toggleAlwaysOnTop();
   const isPinned = Boolean(pinned);
   pinBtn.classList.toggle("is-active", isPinned);
-  pinBtn.setAttribute("aria-label", isPinned ? "取消置頂" : "置頂");
-  pinBtn.setAttribute("title", isPinned ? "取消置頂" : "置頂");
+  pinBtn.setAttribute("aria-label", isPinned ? "取消置顶" : "置顶");
+  pinBtn.setAttribute("title", isPinned ? "取消置顶" : "置顶");
 });
 
 minBtn.addEventListener("click", () => {
@@ -176,7 +176,7 @@ settingsBtn.addEventListener("click", () => {
 });
 
 modelSwitchBtn.addEventListener("click", () => {
-  // "切換模型"直奔 API 配置標籤，而不是默認的通用標籤
+  // "切换模型"直奔 API 配置标签，而不是默认的通用标签
   window.sidebar?.openSettings("api");
 });
 
@@ -184,14 +184,14 @@ callBtn.addEventListener("click", () => {
   window.sidebar?.openCall();
 });
 
-// "打開聊天"：拿到最近一條會話 id，讓 main 打開聊天窗口並加載它；
-// 沒有任何會話時先建一個再打開，保證點按鈕總能進到一個具體會話。
+// "打开聊天"：拿到最近一条会话 id，让 main 打开聊天窗口并加载它；
+// 没有任何会话时先建一个再打开，保证点按钮总能进到一个具体会话。
 openChatBtn.addEventListener("click", async () => {
   const chatStore = (window as unknown as {
     chatStore?: {
       list: () => Promise<Array<{ id: string }>>;
       create: (payload?: { identityId?: string | null }) => Promise<{ id: string } | null>;
-      openInChatWindow: (sessionId: string) => Promise<unknown>;
+      openInReactChatWindow: (sessionId: string) => Promise<unknown>;
     };
   }).chatStore;
   if (!chatStore) return;
@@ -202,9 +202,9 @@ openChatBtn.addEventListener("click", async () => {
       const created = await chatStore.create({ identityId: null });
       latestId = created?.id ?? "";
     }
-    if (latestId) await chatStore.openInChatWindow(latestId);
+    if (latestId) await chatStore.openInReactChatWindow(latestId);
   } catch (err) {
-    console.warn("[sidebar] 打開聊天失敗:", err);
+    console.warn("[sidebar] 打开聊天失败:", err);
   }
 });
 

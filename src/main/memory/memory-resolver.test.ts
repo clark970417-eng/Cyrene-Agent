@@ -12,6 +12,11 @@ const ragMock = vi.hoisted(() => ({
   addL2MemoryVector: vi.fn(),
 }))
 
+const mockResolution = vi.hoisted(() => ({
+  value: null as Record<string, unknown> | null,
+  error: null as Error | null,
+}))
+
 vi.mock("electron", () => ({
   app: {
     getPath: () => electronMock.userDataDir,
@@ -20,10 +25,25 @@ vi.mock("electron", () => ({
 
 vi.mock("../rag/index", () => ragMock)
 
+vi.mock("./memory-llm-client", () => ({
+  invokeMemoryStructuredOutput: vi.fn(async () => {
+    if (mockResolution.error) throw mockResolution.error;
+    return mockResolution.value;
+  }),
+  getDefaultMaxOutputTokens: () => 700,
+}))
+
+function setMockResolution(value: Record<string, unknown> | null, error: Error | null = null) {
+  mockResolution.value = value;
+  mockResolution.error = error;
+}
+
 describe("memory conflict resolver", () => {
   beforeEach(() => {
     electronMock.userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), "memory-resolver-"))
     ragMock.addL2MemoryVector.mockReset()
+    mockResolution.value = null
+    mockResolution.error = null
     vi.resetModules()
   })
 
@@ -31,15 +51,15 @@ describe("memory conflict resolver", () => {
     const { memoryStore } = await import("./memory-store")
     const { buildResolverPayload } = await import("./memory-resolver")
     const oldMemory = await memoryStore.addL2Memory({
-      content: "用戶喜歡跑步",
-      triggerText: "我喜歡跑步",
+      content: "用户喜欢跑步",
+      triggerText: "我喜欢跑步",
       sourceConversationId: "conv_old",
       ragId: "rag_old",
       isPinned: false,
     })
     const newMemory = await memoryStore.addL2Memory({
-      content: "用戶不喜歡跑步",
-      triggerText: "我現在不喜歡跑步",
+      content: "用户不喜欢跑步",
+      triggerText: "我现在不喜欢跑步",
       sourceConversationId: "conv_new",
       ragId: "rag_new",
       isPinned: false,
@@ -63,65 +83,80 @@ describe("memory conflict resolver", () => {
     const payload = await buildResolverPayload(log.id)
 
     expect(payload.conflictLog.id).toBe(log.id)
-    expect(payload.newMemory.content).toBe("用戶不喜歡跑步")
-    expect(payload.oldMemory.content).toBe("用戶喜歡跑步")
-    expect(payload.newEvidence[0].quoteSnippet).toBe("我現在不喜歡跑步")
-    expect(payload.oldEvidence[0].quoteSnippet).toBe("我喜歡跑步")
+    expect(payload.newMemory.content).toBe("用户不喜欢跑步")
+    expect(payload.oldMemory.content).toBe("用户喜欢跑步")
+    expect(payload.newEvidence[0].quoteSnippet).toBe("我现在不喜欢跑步")
+    expect(payload.oldEvidence[0].quoteSnippet).toBe("我喜欢跑步")
     expect(payload.conflictScore).toBe(80)
   })
 
-  it("resolves payload from structured resolver JSON", async () => {
+  it("resolves payload from structured resolver result", async () => {
+    setMockResolution({
+      resolutionType: "preference_evolution",
+      resolvedSummary: "用户过去喜欢跑步，但现在不喜欢跑步。",
+      reason: "新记忆表达了当前偏好变化。",
+      confidence: 0.88,
+      actions: {
+        createResolvedMemory: true,
+        oldMemoryStatus: "superseded",
+        newMemoryStatus: "merged",
+        shouldAskUser: false,
+        clarificationNeeded: false,
+      },
+    })
+
     const { resolvePayload } = await import("./memory-resolver")
     const payload: ResolverPayload = {
       conflictLog: { id: "conf", createdAt: 1, status: "candidate", sourceL2Id: "new", targetL2Id: "old", reason: "test", confidence: 0.8, detector: "local" },
-      newMemory: { id: "new", content: "用戶不喜歡跑步", triggerText: "", sourceConversationId: "", createdAt: 1, lastAccessedAt: 1, accessCount: 0, weight: 0, isPinned: false, status: "active" },
-      oldMemory: { id: "old", content: "用戶喜歡跑步", triggerText: "", sourceConversationId: "", createdAt: 1, lastAccessedAt: 1, accessCount: 0, weight: 0, isPinned: false, status: "active" },
+      newMemory: { id: "new", content: "用户不喜欢跑步", triggerText: "", sourceConversationId: "", createdAt: 1, lastAccessedAt: 1, accessCount: 0, weight: 0, isPinned: false, status: "active" },
+      oldMemory: { id: "old", content: "用户喜欢跑步", triggerText: "", sourceConversationId: "", createdAt: 1, lastAccessedAt: 1, accessCount: 0, weight: 0, isPinned: false, status: "active" },
       newEvidence: [],
       oldEvidence: [],
       conflictScore: 80,
       scoringSignals: { ragCandidate: true },
     }
 
-    const result = await resolvePayload(payload, {
-      callLLM: async () => JSON.stringify({
-        resolutionType: "preference_evolution",
-        resolvedSummary: "用戶過去喜歡跑步，但現在不喜歡跑步。",
-        reason: "新記憶表達了當前偏好變化。",
-        confidence: 0.88,
-        actions: {
-          createResolvedMemory: true,
-          oldMemoryStatus: "superseded",
-          newMemoryStatus: "merged",
-          shouldAskUser: false,
-          clarificationNeeded: false,
-        },
-      }),
-    })
+    const result = await resolvePayload(payload)
 
     expect(result.resolutionType).toBe("preference_evolution")
     expect(result.actions.createResolvedMemory).toBe(true)
     expect(result.actions.oldMemoryStatus).toBe("superseded")
   })
 
-  it("rejects invalid resolver JSON", async () => {
+  it("propagates structured output errors", async () => {
+    setMockResolution(null, new Error("structured output failed: NO_SCHEMA_VALID_OBJECT"))
+
     const { resolvePayload } = await import("./memory-resolver")
     const payload: ResolverPayload = {
       conflictLog: { id: "conf", createdAt: 1, status: "candidate", sourceL2Id: "new", targetL2Id: "old", reason: "test", confidence: 0.8, detector: "local" },
-      newMemory: { id: "new", content: "用戶不喜歡跑步", triggerText: "", sourceConversationId: "", createdAt: 1, lastAccessedAt: 1, accessCount: 0, weight: 0, isPinned: false, status: "active" },
-      oldMemory: { id: "old", content: "用戶喜歡跑步", triggerText: "", sourceConversationId: "", createdAt: 1, lastAccessedAt: 1, accessCount: 0, weight: 0, isPinned: false, status: "active" },
+      newMemory: { id: "new", content: "用户不喜欢跑步", triggerText: "", sourceConversationId: "", createdAt: 1, lastAccessedAt: 1, accessCount: 0, weight: 0, isPinned: false, status: "active" },
+      oldMemory: { id: "old", content: "用户喜欢跑步", triggerText: "", sourceConversationId: "", createdAt: 1, lastAccessedAt: 1, accessCount: 0, weight: 0, isPinned: false, status: "active" },
       newEvidence: [],
       oldEvidence: [],
       conflictScore: 80,
       scoringSignals: { ragCandidate: true },
     }
 
-    await expect(resolvePayload(payload, { callLLM: async () => "not json" })).rejects.toThrow("invalid resolver json")
+    await expect(resolvePayload(payload)).rejects.toThrow("structured output failed")
   })
 
   it("runs one queued resolver item and applies the result", async () => {
     const { memoryStore } = await import("./memory-store")
     const { runResolverQueueOnce } = await import("./memory-resolver")
     ragMock.addL2MemoryVector.mockResolvedValue("rag_resolved")
+
+    setMockResolution({
+      resolutionType: "preference_evolution",
+      resolvedSummary: "用户过去喜欢跑步，但现在不喜欢跑步。",
+      reason: "用户表达了当前偏好变化。",
+      confidence: 0.88,
+      actions: {
+        createResolvedMemory: true,
+        oldMemoryStatus: "superseded",
+        newMemoryStatus: "merged",
+      },
+    })
+
     const oldMemory = await memoryStore.addL2Memory({
       content: "用户喜欢跑步",
       triggerText: "我喜欢跑步",
@@ -150,19 +185,7 @@ describe("memory conflict resolver", () => {
       scoringSignals: { ragCandidate: true, evidenceAvailable: true, penalties: [] },
     })
 
-    const result = await runResolverQueueOnce({
-      callLLM: async () => JSON.stringify({
-        resolutionType: "preference_evolution",
-        resolvedSummary: "用戶過去喜歡跑步，但現在不喜歡跑步。",
-        reason: "用戶表達了當前偏好變化。",
-        confidence: 0.88,
-        actions: {
-          createResolvedMemory: true,
-          oldMemoryStatus: "superseded",
-          newMemoryStatus: "merged",
-        },
-      }),
-    })
+    const result = await runResolverQueueOnce()
 
     const queue = await memoryStore.getResolverQueue()
     const conflictLogs = await memoryStore.getConflictLogs()
@@ -176,7 +199,7 @@ describe("memory conflict resolver", () => {
     expect(resolvedMemory?.syncStatus).toBe("synced")
     expect(resolvedMemory?.ragId).toBe("rag_resolved")
     expect(ragMock.addL2MemoryVector).toHaveBeenCalledWith(
-      "用戶過去喜歡跑步，但現在不喜歡跑步。",
+      "用户过去喜欢跑步，但现在不喜欢跑步。",
       resolvedMemory!.id,
       expect.objectContaining({
         conflictLogId: log.id,
@@ -191,6 +214,19 @@ describe("memory conflict resolver", () => {
     const { memoryStore } = await import("./memory-store")
     const { runResolverQueueOnce } = await import("./memory-resolver")
     ragMock.addL2MemoryVector.mockRejectedValue(new Error("rag down"))
+
+    setMockResolution({
+      resolutionType: "preference_evolution",
+      resolvedSummary: "用户过去喜欢喝咖啡，但现在不喜欢喝咖啡。",
+      reason: "用户表达了当前偏好变化。",
+      confidence: 0.88,
+      actions: {
+        createResolvedMemory: true,
+        oldMemoryStatus: "superseded",
+        newMemoryStatus: "merged",
+      },
+    })
+
     const oldMemory = await memoryStore.addL2Memory({
       content: "用户喜欢喝咖啡",
       triggerText: "我喜欢喝咖啡",
@@ -219,19 +255,7 @@ describe("memory conflict resolver", () => {
       scoringSignals: { ragCandidate: true, evidenceAvailable: true, penalties: [] },
     })
 
-    const result = await runResolverQueueOnce({
-      callLLM: async () => JSON.stringify({
-        resolutionType: "preference_evolution",
-        resolvedSummary: "用戶過去喜歡喝咖啡，但現在不喜歡喝咖啡。",
-        reason: "用戶表達了當前偏好變化。",
-        confidence: 0.88,
-        actions: {
-          createResolvedMemory: true,
-          oldMemoryStatus: "superseded",
-          newMemoryStatus: "merged",
-        },
-      }),
-    })
+    const result = await runResolverQueueOnce()
 
     const conflictLogs = await memoryStore.getConflictLogs()
     const store = await memoryStore.load()
@@ -248,17 +272,29 @@ describe("memory conflict resolver", () => {
     const { runResolverQueueOnce } = await import("./memory-resolver")
     ragMock.addL2MemoryVector.mockResolvedValue("rag_resolved")
 
+    setMockResolution({
+      resolutionType: "preference_evolution",
+      resolvedSummary: "用户过去喜欢该事项，但现在不喜欢该事项。",
+      reason: "用户表达了当前偏好变化。",
+      confidence: 0.88,
+      actions: {
+        createResolvedMemory: true,
+        oldMemoryStatus: "superseded",
+        newMemoryStatus: "merged",
+      },
+    })
+
     for (const topic of ["跑步", "咖啡"]) {
       const oldMemory = await memoryStore.addL2Memory({
-        content: `用戶喜歡${topic}`,
-        triggerText: `我喜歡${topic}`,
+        content: `用户喜欢${topic}`,
+        triggerText: `我喜欢${topic}`,
         sourceConversationId: "test",
         ragId: `rag_old_${topic}`,
         isPinned: false,
       })
       const newMemory = await memoryStore.addL2Memory({
-        content: `用戶現在不喜歡${topic}`,
-        triggerText: `我現在不喜歡${topic}`,
+        content: `用户现在不喜欢${topic}`,
+        triggerText: `我现在不喜欢${topic}`,
         sourceConversationId: "test",
         ragId: `rag_new_${topic}`,
         isPinned: false,
@@ -278,22 +314,8 @@ describe("memory conflict resolver", () => {
       })
     }
 
-    const deps = {
-      callLLM: async () => JSON.stringify({
-        resolutionType: "preference_evolution",
-        resolvedSummary: "用戶過去喜歡該事項，但現在不喜歡該事項。",
-        reason: "用戶表達了當前偏好變化。",
-        confidence: 0.88,
-        actions: {
-          createResolvedMemory: true,
-          oldMemoryStatus: "superseded",
-          newMemoryStatus: "merged",
-        },
-      }),
-    }
-
-    const first = await runResolverQueueOnce(deps, { now: 1_000, minIntervalMs: 60_000 })
-    const second = await runResolverQueueOnce(deps, { now: 1_001, minIntervalMs: 60_000 })
+    const first = await runResolverQueueOnce({ now: 1_000, minIntervalMs: 60_000 })
+    const second = await runResolverQueueOnce({ now: 1_001, minIntervalMs: 60_000 })
     const queue = await memoryStore.getResolverQueue()
     const tracePath = path.join(electronMock.userDataDir, "memory-trace.log")
     const traceOps = fs.readFileSync(tracePath, "utf8")
@@ -304,24 +326,26 @@ describe("memory conflict resolver", () => {
     expect(first.status).toBe("resolved")
     expect(second.status).toBe("rate_limited")
     expect(queue).toHaveLength(1)
-    expect(traceOps).toContain("resolver.run.start")
     expect(traceOps).toContain("resolver.run.success")
-    expect(traceOps).toContain("resolver.run.rate_limited")
+    expect(traceOps).toContain("resolver.queue.rate_limited")
   })
 
-  it("marks resolver item failed when resolver throws", async () => {
+  it("marks resolver item failed when structured output throws", async () => {
     const { memoryStore } = await import("./memory-store")
     const { runResolverQueueOnce } = await import("./memory-resolver")
+
+    setMockResolution(null, new Error("structured output failed: MODEL_REQUEST_FAILED"))
+
     const oldMemory = await memoryStore.addL2Memory({
-      content: "用戶喜歡跑步",
-      triggerText: "我喜歡跑步",
+      content: "用户喜欢跑步",
+      triggerText: "我喜欢跑步",
       sourceConversationId: "test",
       ragId: "rag_old",
       isPinned: false,
     })
     const newMemory = await memoryStore.addL2Memory({
-      content: "用戶不喜歡跑步",
-      triggerText: "我現在不喜歡跑步",
+      content: "用户不喜欢跑步",
+      triggerText: "我现在不喜欢跑步",
       sourceConversationId: "test",
       ragId: "rag_new",
       isPinned: false,
@@ -340,7 +364,7 @@ describe("memory conflict resolver", () => {
       scoringSignals: { ragCandidate: true, evidenceAvailable: true, penalties: [] },
     })
 
-    const result = await runResolverQueueOnce({ callLLM: async () => { throw new Error("resolver down") } })
+    const result = await runResolverQueueOnce()
     const conflictLogs = await memoryStore.getConflictLogs()
 
     expect(result.status).toBe("failed")

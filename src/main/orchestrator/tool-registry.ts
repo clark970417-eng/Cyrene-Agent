@@ -4,12 +4,55 @@
 import { searchMemory } from "../rag/index";
 import type { ToolRiskLevel } from "../permission";
 import type { ToolContext } from "./tool-context";
+import type { SoulProjectionConfig, SoulClaimKind } from "./soul-execution-context";
+
+/** 工具效果类型：决定工具对系统状态的影响分类。未配置默认 "unknown"。 */
+export type ToolEffectKind =
+  | "read"
+  | "mutation"
+  | "verification"
+  | "external_side_effect"
+  | "unknown";
+
+/** 验证策略：决定 mutation 工具需要何种验证。 */
+export type VerificationPolicy = "none" | "artifact" | "code" | "unknown";
+
+/** 动态效果解析器：根据参数判断效果类型（如 run_shell 根据 purpose）。 */
+export type ToolEffectResolver = (args: Record<string, unknown>) => ToolEffectKind;
+
+/** 动态验证策略解析器：根据参数判断验证策略（如 write_file 根据文件扩展名）。 */
+export type VerificationPolicyResolver = (args: Record<string, unknown>) => VerificationPolicy;
+
+/** 工具完成证据元数据：供 Planner 生成 completionCriteria 和 planVerify 校验 */
+export interface CapabilityCompletionEvidence {
+  kind: "tool_succeeded" | "projection_claim";
+  claimKind?: SoulClaimKind;
+}
 
 /** JSON Schema 片段：参数可以是简单类型，也可以是 array/object（含 items/properties）。 */
 export type JsonSchemaProp =
-  | { type: string; description?: string; enum?: string[] }
-  | { type: "array"; description?: string; items: JsonSchemaProp }
-  | { type: "object"; description?: string; properties: Record<string, JsonSchemaProp>; required?: string[] };
+  | { type: string; description?: string; enum?: string[]; default?: unknown; askAliases?: Record<string, unknown> }
+  | { type: "array"; description?: string; items: JsonSchemaProp; default?: unknown; askAliases?: Record<string, unknown> }
+  | { type: "object"; description?: string; properties: Record<string, JsonSchemaProp>; required?: string[]; default?: unknown; askAliases?: Record<string, unknown> };
+
+/** 控制输入策略：简单字符串或带 kind 的对象形式 */
+export type ControlledInputPolicy =
+  | "context_ref"
+  | "context_ref_array"
+  | "tool_result"
+  | { type: "context_ref"; kind: string }
+  | { type: "context_ref_array"; kind: string }
+  | { type: "tool_result" };
+
+/** 从 ControlledInputPolicy 提取底层策略类型字符串 */
+export function controlledInputType(policy: ControlledInputPolicy): string {
+  return typeof policy === "string" ? policy : policy.type;
+}
+
+/** 从 ControlledInputPolicy 提取 expectedKind（如有） */
+export function controlledInputKind(policy: ControlledInputPolicy): string | undefined {
+  return typeof policy === "object" && "kind" in policy ? policy.kind : undefined;
+}
 
 export interface ToolDefinition {
   id: string;           // 工具唯一标识，如 "imported_docs"
@@ -22,8 +65,8 @@ export interface ToolDefinition {
   category?: string;
   /** Action Gate 使用的稳定能力标识；未填时回落到工具 id。 */
   capability?: string;
-  /** Runtime 校验受控参数来源；这些值不能由模型自由编造。 */
-  controlledInput?: Record<string, "context_ref" | "context_ref_array" | "tool_result">;
+  /** Runtime 校验受控参数来源；这些值不能由模型自由编造。支持带 kind 的对象形式用于类型化引用验证。 */
+  controlledInput?: Record<string, ControlledInputPolicy>;
   enabled: boolean;     // 用户是否启用（对应设置面板的开关）
   // 危险等级：决定该工具在哪些权限档位下可调用；不填默认 "safe"
   risk?: ToolRiskLevel;
@@ -35,6 +78,34 @@ export interface ToolDefinition {
   };
   /** 工具若声明 needsContext，调度层执行时会传入 ToolContext。默认不声明=不传。 */
   needsContext?: boolean;
+  /** Soul 上下文中替代 toolId 的安全语义名称 */
+  soulActionLabel?: string;
+  /** 声明式 Soul 投影配置 */
+  soulProjection?: SoulProjectionConfig;
+  /** 工具专用错误码 -> 用户安全消息 */
+  soulErrorMessages?: Record<string, string>;
+  /** 完成证据元数据：供 Planner 和 planVerify 使用。未配置的工具不能进入 Plan 步骤。 */
+  completionEvidence?: CapabilityCompletionEvidence[];
+  /** Plan 模式下不暴露给 Action Gate 和 Native FC（防止 Plan 步骤降级到旧 Loop）。 */
+  hideInPlanMode?: boolean;
+  /** 执行类型：atomic 走普通 executeTool，subagent 走子代理 Executor。默认 atomic。 */
+  executionKind?: "atomic" | "subagent";
+  /** 子代理 Profile 标识（executionKind=subagent 时必填）。 */
+  subAgentProfile?: import("./subagents/types").SubAgentProfileId;
+  /** Ledger 策略：success_terminal 缓存终态成功（默认），bypass 不缓存。子代理默认 bypass。 */
+  ledgerPolicy?: "success_terminal" | "bypass";
+  /** 标记为已废弃：从新运行的 Action Gate 可用工具列表中隐藏，但保留注册用于旧会话兼容。 */
+  deprecated?: boolean;
+  /** 自定义完成证据验证器：对子代理工具，从结构化输出中验证 artifact 等条件。 */
+  completionEvidenceVerifier?: (result: import("./types").ToolCallResult) => boolean;
+  /** 工具效果类型。未配置默认 "unknown"，不静默放行。 */
+  effectKind?: ToolEffectKind;
+  /** 动态效果解析器（覆盖 effectKind）。用于 run_shell 等根据参数判断效果的工具。 */
+  effectResolver?: ToolEffectResolver;
+  /** 验证策略。mutation 工具必须显式配置；未配置视为 "unknown"。 */
+  verificationPolicy?: VerificationPolicy;
+  /** 动态验证策略解析器（覆盖 verificationPolicy）。用于 write_file 根据文件扩展名判断。 */
+  verificationPolicyResolver?: VerificationPolicyResolver;
   // 执行器：内置工具指向本地函数，外部 MCP 工具指向 transport 调用
   execute: (args: Record<string, unknown>, ctx?: ToolContext) => Promise<string>;
 }
@@ -58,7 +129,7 @@ export class ToolRegistry {
   }
 
   getEnabledTools(): ToolDefinition[] {
-    return Array.from(this.tools.values()).filter(t => t.enabled);
+    return Array.from(this.tools.values()).filter(t => t.enabled && !t.deprecated);
   }
 
   getAllTools(): ToolDefinition[] {
@@ -70,10 +141,32 @@ export class ToolRegistry {
   }
 }
 
-// 全局單例
+// 全局单例
 export const toolRegistry = new ToolRegistry();
 
-// ── 註冊內置工具 ──────────────────────────────────────────
+// ── 效果与验证策略解析 ────────────────────────────────────
+
+/** 解析工具效果类型：优先使用 effectResolver，其次 effectKind，默认 "unknown"。 */
+export function resolveEffectKind(
+  tool: ToolDefinition | undefined,
+  args: Record<string, unknown>,
+): ToolEffectKind {
+  if (!tool) return "unknown";
+  if (tool.effectResolver) return tool.effectResolver(args);
+  return tool.effectKind ?? "unknown";
+}
+
+/** 解析验证策略：优先使用 verificationPolicyResolver，其次 verificationPolicy，默认 "none"。 */
+export function resolveVerificationPolicy(
+  tool: ToolDefinition | undefined,
+  args: Record<string, unknown>,
+): VerificationPolicy {
+  if (!tool) return "none";
+  if (tool.verificationPolicyResolver) return tool.verificationPolicyResolver(args);
+  return tool.verificationPolicy ?? "none";
+}
+
+// ── 注册内置工具 ──────────────────────────────────────────
 
 function formatMemoryResult(result: unknown): string {
   if (typeof result === "string") return result;
@@ -86,24 +179,26 @@ function formatMemoryResult(result: unknown): string {
 
 toolRegistry.register({
   id: 'imported_docs',
-  name: '導入文檔',
+  name: '导入文档',
   description:
-    '在用戶上傳導入的文檔/小說/文件範圍內做語義檢索，返回相關片段。\n\n' +
-    '何時用：\n' +
-    '- 用戶提到「文件」「文檔」「小說」，或消息包含「已上傳文件」標記\n' +
-    '- 用戶問的內容可能在導入的文檔裡\n' +
-    '- 用戶要「在文檔裡找 xxx」「小說裡有沒有寫到 yyy」\n\n' +
-    '不要用於：\n' +
-    '- 本機任意路徑的文件（那是 read_file）\n' +
-    '- 用戶的歷史對話記憶（那是 user_memory）\n' +
-    '- 聯網信息（那是 web_search）\n\n' +
-    '參數：query (必填，搜索關鍵詞)，topK (可選，返回條數，默認5)。',
+    '在用户上传导入的文档/小说/文件范围内做语义检索，返回相关片段。\n\n' +
+    '何时用：\n' +
+    '- 用户提到「文件」「文档」「小说」，或消息包含「已上传文件」标记\n' +
+    '- 用户问的内容可能在导入的文档里\n' +
+    '- 用户要「在文档里找 xxx」「小说里有没有写到 yyy」\n\n' +
+    '不要用于：\n' +
+    '- 本机任意路径的文件（那是 read_file）\n' +
+    '- 用户的历史对话记忆（那是 user_memory）\n' +
+    '- 联网信息（那是 web_search）\n\n' +
+    '参数：query (必填，搜索关键词)，topK (可选，返回条数，默认5)。',
   enabled: true,
+  effectKind: "read",
+  verificationPolicy: "none",
   inputSchema: {
     type: 'object',
     properties: {
-      query: { type: 'string', description: '搜索關鍵詞' },
-      topK:  { type: 'number', description: '返回條數，默認5' },
+      query: { type: 'string', description: '搜索关键词' },
+      topK:  { type: 'number', description: '返回条数，默认5' },
     },
     required: ['query'],
   },
@@ -115,24 +210,26 @@ toolRegistry.register({
 
 toolRegistry.register({
   id: 'user_memory',
-  name: '用戶記憶',
+  name: '用户记忆',
   description:
-    '查詢用戶的歷史記憶、個人信息、過往對話中提到的事實。\n\n' +
-    '何時用：\n' +
-    '- 用戶說「你還記得」「我之前說過」「以前」「上次」等指代詞\n' +
-    '- 用戶問自己的偏好/習慣/背景（「我喜歡什麼」「我是做什麼的」）\n' +
-    '- 需要確認用戶曾經提過的具體信息\n\n' +
-    '不要用於：\n' +
-    '- 當前對話最近幾輪能看到的內容\n' +
-    '- 導入文檔內容（那是 imported_docs）\n' +
-    '- 用戶從沒提過的信息（查不到就老實說不知道）\n\n' +
-    '參數：query (必填，搜索關鍵詞)，topK (可選，返回條數，默認5)。',
+    '查询用户的历史记忆、个人信息、过往对话中提到的事实。\n\n' +
+    '何时用：\n' +
+    '- 用户说「你还记得」「我之前说过」「以前」「上次」等指代词\n' +
+    '- 用户问自己的偏好/习惯/背景（「我喜欢什么」「我是做什么的」）\n' +
+    '- 需要确认用户曾经提过的具体信息\n\n' +
+    '不要用于：\n' +
+    '- 当前对话最近几轮能看到的内容\n' +
+    '- 导入文档内容（那是 imported_docs）\n' +
+    '- 用户从没提过的信息（查不到就老实说不知道）\n\n' +
+    '参数：query (必填，搜索关键词)，topK (可选，返回条数，默认5)。',
   enabled: true,
+  effectKind: "read",
+  verificationPolicy: "none",
   inputSchema: {
     type: 'object',
     properties: {
-      query: { type: 'string', description: '搜索關鍵詞' },
-      topK:  { type: 'number', description: '返回條數，默認5' },
+      query: { type: 'string', description: '搜索关键词' },
+      topK:  { type: 'number', description: '返回条数，默认5' },
     },
     required: ['query'],
   },

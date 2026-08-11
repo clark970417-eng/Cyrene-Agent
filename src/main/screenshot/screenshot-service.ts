@@ -12,7 +12,7 @@ export interface ScreenshotService {
   init(initialHotkey: string): void;
   prewarm(): Promise<void>;
   startFromHotkey(): Promise<{ ok: boolean; reason?: string }>;
-  startFromChatButton(): Promise<{ ok: boolean; reason?: string }>;
+  startFromChatButton(sendInsert?: (data: ScreenshotInsertData) => void): Promise<{ ok: boolean; reason?: string }>;
   replaceHotkey(next: string): { ok: boolean; activeHotkey: string | null };
   suspendHotkey(): void;
   resumeHotkey(): void;
@@ -29,13 +29,6 @@ export interface ScreenshotServiceDeps {
 export interface ScreenshotImageProbe {
   isEmpty(): boolean;
   getSize(): { width: number; height: number };
-}
-
-function toFilePreviewUrl(filePath: string): string {
-  if (/^[A-Za-z]:[\\/]/.test(filePath)) {
-    return new URL(`file:///${filePath.replace(/\\/g, "/")}`).toString();
-  }
-  return pathToFileURL(filePath).toString();
 }
 
 export function validateScreenshotInsert(
@@ -70,7 +63,7 @@ export function validateScreenshotInsert(
   return {
     ...data,
     filePath,
-    previewUrl: toFilePreviewUrl(filePath),
+    previewUrl: pathToFileURL(filePath).toString(),
   };
 }
 
@@ -91,18 +84,20 @@ export function createScreenshotService(deps: ScreenshotServiceDeps): Screenshot
     }
   };
 
-  const startFromChatButton = async (): Promise<{ ok: boolean; reason?: string }> => {
+  const startFromChatButton = async (
+    sendInsert: (data: ScreenshotInsertData) => void = deps.sendInsert,
+  ): Promise<{ ok: boolean; reason?: string }> => {
     try {
       const result = await deps.client.start("clipboard-and-file", "chat-button");
       if (!result.filePath) {
         return { ok: false, reason: "SCREENSHOT_FILE_PATH_REQUIRED" };
       }
-      deps.sendInsert({
+      sendInsert({
         filePath: result.filePath,
         width: result.width,
         height: result.height,
         mime: result.mime,
-        previewUrl: toFilePreviewUrl(result.filePath),
+        previewUrl: pathToFileURL(result.filePath).toString(),
         hasAnnotations: result.hasAnnotations,
       });
       return { ok: true };

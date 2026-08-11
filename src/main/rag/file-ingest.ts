@@ -125,8 +125,8 @@ export function describePendingAttachment(filePath: string): Attachment {
 }
 
 /**
- * 判二進制：讀前 8KB 中有無 null 字節。
- * 不要求讀滿，如果文件小於 8KB 就全讀完。
+ * 判二进制：读前 8KB 中有无 null 字节。
+ * 不要求读满，如果文件小于 8KB 就全读完。
  */
 const BINARY_SCAN_BYTES = 8192;
 
@@ -211,12 +211,12 @@ export async function ingestOneFile(
   const name = path.basename(filePath);
   const ext = path.extname(filePath).toLowerCase();
 
-  // 顯式不支持的類型
+  // 显式不支持的类型
   if (isUnsupportedExt(ext)) {
-    return { name, kind: "unsupported", reason: `暫不支持的文件格式 ${ext}（MVP-0 僅支持文本）` };
+    return { name, kind: "unsupported", reason: `暂不支持的文件格式 ${ext}（MVP-0 仅支持文本）` };
   }
 
-  // 讀取文件
+  // 读取文件
   let buf: Buffer;
   try {
     buf = fs.readFileSync(filePath);
@@ -224,12 +224,12 @@ export async function ingestOneFile(
     return { name, kind: "unsupported", reason: err?.code || String(err) };
   }
 
-  // 類型判斷與內容提取
-  // 文本擴展名
+  // 类型判断与内容提取
+  // 文本扩展名
   if (isTextExt(ext)) {
-    // 二進制兜底：標題是文本但實際含 null 字節
+    // 二进制兜底：标题是文本但实际含 null 字节
     if (isBinary(buf)) {
-      return { name, kind: "unsupported", reason: `文件 ${ext} 含二進制數據，暫不支持` };
+      return { name, kind: "unsupported", reason: `文件 ${ext} 含二进制数据，暂不支持` };
     }
     const text = buf.toString("utf-8");
     if (!text.trim()) {
@@ -242,11 +242,11 @@ export async function ingestOneFile(
     return { name, kind: "text", text };
   }
 
-  // 無擴展名或未知擴展名：用 null 字節檢測
+  // 无扩展名或未知扩展名：用 null 字节检测
   if (isBinary(buf)) {
-    return { name, kind: "unsupported", reason: "二進制文件，暫不支持" };
+    return { name, kind: "unsupported", reason: "二进制文件，暂不支持" };
   }
-  // 無擴展名的文本文件
+  // 无扩展名的文本文件
   const text = buf.toString("utf-8");
   if (!text.trim()) {
     return { name, kind: "empty" };
@@ -257,18 +257,18 @@ export async function ingestOneFile(
   return { name, kind: "text", text };
 }
 
-// ── 目錄遞歸 ──
+// ── 目录递归 ──
 
 /**
- * 遞歸遍歷目錄，返回所有（非隱藏）文件的絕對路徑。
- * 遇到無權限等異常時跳過該條目，不拋。
+ * 递归遍历目录，返回所有（非隐藏）文件的绝对路径。
+ * 遇到无权限等异常时跳过该条目，不抛。
  */
 export function walkDir(dirPath: string): string[] {
   const result: string[] = [];
   try {
     const items = fs.readdirSync(dirPath);
     for (const item of items) {
-      // 跳過隱藏文件/目錄（. 開頭）
+      // 跳过隐藏文件/目录（. 开头）
       if (item.startsWith(".")) continue;
       const fullPath = path.join(dirPath, item);
       try {
@@ -312,7 +312,7 @@ export async function ingestPaths(
         filesWithPaths.push({ absPath: p, displayName: path.basename(p) });
       }
     } catch {
-      // 不存在 → 跳過
+      // 不存在 → 跳过
     }
   }
 

@@ -9,6 +9,61 @@ import type {
 import type { ChatRequest, ChatResponse } from "./vendors/types";
 import type { ChatMessage } from "./vendors/types";
 import type { TrustedAskUserProfile } from "../../shared/ask-clarification";
+import { resolveMaxOutputTokens } from "../runtime-policy";
+
+const ASK_CLARIFICATION_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    intro: { type: "string", minLength: 1, maxLength: 300 },
+    questions: {
+      type: "array",
+      minItems: 1,
+      maxItems: 3,
+      items: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          field: { type: "string", minLength: 1, maxLength: 120 },
+          question: { type: "string", minLength: 1, maxLength: 500 },
+          type: {
+            type: "string",
+            enum: ["single_select", "multi_select", "text"],
+          },
+          options: {
+            type: "array",
+            minItems: 2,
+            maxItems: 3,
+            items: {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                value: { type: "string", minLength: 1, maxLength: 200 },
+                label: { type: "string", minLength: 1, maxLength: 200 },
+              },
+              required: ["value", "label"],
+            },
+          },
+          allowCustom: { type: "boolean" },
+          freeTextPlaceholder: { type: "string", maxLength: 300 },
+        },
+        required: [
+          "field",
+          "question",
+          "type",
+          "options",
+          "allowCustom",
+          "freeTextPlaceholder",
+        ],
+      },
+    },
+    deferredFields: {
+      type: "array",
+      items: { type: "string", minLength: 1, maxLength: 120 },
+    },
+  },
+  required: ["intro", "questions", "deferredFields"],
+} as const;
 
 function record(value: unknown, label: string): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -39,23 +94,25 @@ function normalizeOptions(
   field: AskMissingField,
   type: AskFieldType,
 ): AskOption[] {
-  if (type === "text") return [];
   if (!Array.isArray(value)) throw new Error("question.options is invalid");
-  const allowed = new Map(
-    authoritativeOptions(field).map((option) => [option.value, option]),
-  );
+  const authoritative = authoritativeOptions(field);
+  const allowed = new Map(authoritative.map((option) => [option.value, option]));
   const result: AskOption[] = [];
   for (const item of value) {
     const option = record(item, "question.option");
     const optionValue = text(option.value, "question.option.value", 200);
     if (optionValue === "__custom__") continue;
-    const trusted = allowed.get(optionValue);
+    const optionLabel = text(option.label, "question.option.label", 200);
+    const trusted = authoritative.length > 0
+      ? allowed.get(optionValue)
+      : { value: optionValue, label: optionLabel };
     if (!trusted) throw new Error("question.option is not allowed");
     if (!result.some((existing) => existing.value === optionValue)) {
       result.push(trusted);
     }
     if (result.length === 3) break;
   }
+  if (result.length < 2) throw new Error("question.options requires at least two choices");
   return result;
 }
 
@@ -86,9 +143,7 @@ export function normalizeAskClarificationOutput(
       question: text(question.question, "question.question"),
       type,
       options: normalizeOptions(question.options, field, type),
-      allowCustom: typeof question.allowCustom === "boolean"
-        ? question.allowCustom
-        : (field.allowCustom ?? type !== "text"),
+      allowCustom: true,
       freeTextPlaceholder: typeof question.freeTextPlaceholder === "string"
         ? question.freeTextPlaceholder.trim().slice(0, 300)
         : "",
@@ -112,8 +167,8 @@ function fallbackQuestion(field: AskMissingField): AskQuestion {
     field: field.field,
     question: field.questionHint?.trim() || field.reason,
     type,
-    options: type === "text" ? [] : options,
-    allowCustom: field.allowCustom ?? type !== "text",
+    options,
+    allowCustom: true,
     freeTextPlaceholder: type === "text" ? "请填写你的具体要求" : "填写其他选择",
   };
 }
@@ -173,31 +228,44 @@ export async function resolveAskClarification(
   if (!requestInput.askSystemContent.trim()) {
     return buildFallbackAskClarification(requestInput.input);
   }
-  try {
-    const response = await invoke({
-      model: requestInput.model,
-      messages: [
-        { role: "system", content: requestInput.askSystemContent },
-        {
-          role: "user",
-          content: JSON.stringify({
-            protocol: "ask_clarification.v1",
-            ...requestInput.input,
-          }),
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    let response: ChatResponse;
+    try {
+      response = await invoke({
+        model: requestInput.model,
+        messages: [
+          { role: "system", content: requestInput.askSystemContent },
+          {
+            role: "user",
+            content: JSON.stringify({
+              protocol: "ask_clarification.v1",
+              ...requestInput.input,
+              ...(attempt > 0 ? {
+                repair: "Every question must contain at least two distinct valid suggestions.",
+              } : {}),
+            }),
+          },
+        ],
+        stream: false,
+        maxTokens: resolveMaxOutputTokens({ stage: "ask-soul" }),
+        structuredOutput: {
+          mode: "prompt_json",
+          name: "ask_clarification",
+          schema: ASK_CLARIFICATION_SCHEMA,
+          sendJsonObjectHint: true,
         },
-      ],
-      stream: false,
-      maxTokens: 1_600,
-      structuredOutput: {
-        mode: "prompt_json",
-        sendJsonObjectHint: true,
-      },
-    });
-    return normalizeAskClarificationOutput(
-      parseJsonText(response.text),
-      requestInput.input,
-    );
-  } catch {
-    return buildFallbackAskClarification(requestInput.input);
+      });
+    } catch {
+      return buildFallbackAskClarification(requestInput.input);
+    }
+    try {
+      return normalizeAskClarificationOutput(
+        parseJsonText(response.text),
+        requestInput.input,
+      );
+    } catch {
+      // One bounded repair attempt; an invalid fallback is rejected by buildAskCard.
+    }
   }
+  return buildFallbackAskClarification(requestInput.input);
 }

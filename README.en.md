@@ -1,10 +1,18 @@
 <div align="center">
 
-<img src="./preview.png" alt="Cyrene Agent" width="800">
+<img src="./docs/image/preview.png" alt="Cyrene Agent" width="800">
 
 # Cyrene-Agent
 
 **English** | [中文](./README.md)
+
+</div>
+
+<div align="center">
+
+<img src="./docs/image/preview2.png" alt="Cyrene Agent live preview (Work mode · weather query)" width="800">
+
+<i>Live preview · Work mode invoking a tool to check the weather</i>
 
 </div>
 
@@ -13,7 +21,7 @@
 > A desktop Live2D conversational Agent built with Electron and TypeScript.  
 > Centered around Cyrene's character design and powered by the self-developed DMAE memory engine,  
 > it brings character-driven conversation, personalized memory, voice interaction, tool use, and multi-platform access into a single desktop Agent,  
-> while supporting both casual conversation (Chat) and assisted work (Work).
+> supporting five conversation modes: Chat, Work, Code, Learn, and Daily.
 
 ---
 
@@ -22,6 +30,9 @@
 - 🌸 **Playful Desktop Companion** — A persistent Live2D character with expressions, actions, status, mood, speech bubbles, and intelligent stickers
 - 💬 **Casual Conversation (Chat)** — Focused on character-driven interaction, with responses shaped by conversation history, user style, and long-term memory
 - 🛠️ **Assisted Work (Work)** — Understands requests, invokes tools through a complete Agent workflow, and replies from verified execution results
+- 💻 **Code Collaboration (Code)** — Binds a trusted code directory and uses a Coding Agent to read, modify, verify code, and run commands
+- 📚 **Learning Companion (Learn)** — Binds an Obsidian Vault to accompany users in understanding materials, taking notes, generating exercises, and tracking progress
+- 📅 **Daily Affairs (Daily)** — General tool-enabled sessions for everyday Q&A, information organization, and light tasks
 - 🧠 **Personalized Memory** — L0 / L1 / L2 layered memory combined with the self-developed DMAE Worldbook for long-term interaction continuity
 - 🔊 **Voice Interaction** — Integrated TTS, ASR, and voice calls so Cyrene can listen and respond
 - 🧰 **Rich Tool Ecosystem** — Web search, file processing, document generation, everyday services, music, and MCP extensions
@@ -36,11 +47,27 @@
 
 ### Prerequisites
 
-- **Windows 10 / 11**
+- **Windows 10 / 11 64-bit**
 - **Node.js 24 LTS**
 - **npm 10+** (npm 11 recommended)
+- **[Rust stable](https://www.rust-lang.org/tools/install)** (required for building the screenshot helper from source)
+- **[Visual Studio 2022 Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/)**
 
-> Some features, including Feishu, WeChat iLink, and `nut-js` keyboard and mouse automation, depend on the Windows environment.
+When installing Visual Studio Build Tools, select:
+
+- **Desktop development with C++**
+- **MSVC v143**
+- **Windows 10 / 11 SDK**
+
+After installing Rust, it is recommended to confirm the MSVC toolchain:
+
+```powershell
+rustup default stable-x86_64-pc-windows-msvc
+```
+
+> Feishu, WeChat iLink, `nut-js` keyboard/mouse automation, and the native screenshot feature depend on the Windows environment.
+>
+> If you install a packaged release directly, you do not need to install Rust or Visual Studio Build Tools.
 
 ### 1. Clone the Project
 
@@ -57,7 +84,31 @@ npm install
 
 The first installation downloads Electron, Pixi.js, Live2D, and related dependencies. The time required depends on your network connection.
 
-### 3. Install BGE-M3 (Recommended)
+### 3. Command-line Entry
+
+The project ships a `cyrene` command-line entry point for the first-time greeting, version checks, and launching the desktop app. From the project root:
+
+```bash
+npm run build:cli
+npm link
+```
+
+You can then use `cyrene` from any directory:
+
+```bash
+cyrene            # First run shows the welcome banner; later runs stay quiet
+cyrene hello      # Show the full welcome banner again
+cyrene about      # Banner plus project metadata
+cyrene version    # Print the version
+cyrene --help     # List all subcommands
+cyrene run        # Launch the desktop app from a project root (dev mode)
+```
+
+> The first-time greeting appears only once; the state is recorded in `~/.cyrene/state.json`. Subsequent default invocations print only `Cyrene Agent <version>` and `Ready.`. `cyrene run` is dev-only in v0.9 and requires a `package.json` in the current directory; the production `cyrene desktop` entry will arrive in 1.x.
+>
+> `npm run build` already includes `npm run build:cli`, so you do not need to run `build:cli` separately after building the project. However, `npm link` is still required to use the `cyrene` command from any directory.
+
+### 4. Install BGE-M3 (Recommended)
 
 Cyrene can chat normally without running a local large language model. However, installing the **BGE-M3 Embedding model** is recommended for the complete semantic-enhancement experience:
 
@@ -72,9 +123,9 @@ Cyrene can chat normally without running a local large language model. However, 
 >
 > Not installing BGE-M3 does not affect basic chat. Features that depend on Embedding will be disabled or degraded automatically.
 
-### 4. Music Feature (Optional)
+### 5. Music Feature (Optional)
 
-To use the NetEase Cloud Music feature, install the following additional dependencies:
+The music tool is integrated via [Code-MonkeyZhang/cloud-music-mcp](https://github.com/Code-MonkeyZhang/cloud-music-mcp). To use the NetEase Cloud Music feature, install the following additional dependencies:
 
 - **[uv](https://docs.astral.sh/uv/getting-started/installation/)** — A Python package manager that will automatically download Python and install all dependencies when the music tool is first used
 - **[NetEase Cloud Music Desktop Client](https://music.163.com/)** — Required for music playback; the `orpheus://` protocol must be registered
@@ -83,22 +134,46 @@ To use the NetEase Cloud Music feature, install the following additional depende
 >
 > The music feature is optional and does not affect chat or other core features. If `uv` is not installed, the music tool will be skipped automatically with a UI prompt.
 
-### 5. Build and Start
+### 6. Build and Start
+
+When running from source for the first time, you need to build the Rust native screenshot helper:
 
 ```bash
+npm run build:screenshot-helper
 npm run build
 npm start
 ```
 
+> [!IMPORTANT]
+>
+> The native screenshot helper is not committed to the Git repository as an `.exe` file. You must run `npm run build:screenshot-helper` once after cloning.
+>
+> **Windows users** can also double-click `setup.bat` in the project root to install dependencies, build, and run `npm link`, then double-click `start.bat` to launch.
+
 Development mode:
 
 ```bash
+npm run build:screenshot-helper
 npm run dev
+```
+
+After modifying the Rust screenshot helper code, re-run:
+
+```bash
+npm run build:screenshot-helper
 ```
 
 Development mode starts the Electron main process, Preload compilation, the Vite renderer, and the Electron application together.
 
 Changes to the main process automatically restart Electron, while renderer changes are applied through Vite HMR.
+
+Building a distributable Windows version:
+
+```bash
+npm run package:win:dir
+```
+
+The packaging command automatically builds both the Electron application and the Rust screenshot helper.
 
 ---
 
@@ -126,6 +201,9 @@ Configuration is stored in the application's `<userData>/` directory. Most chang
 | 🌸 Live2D Desktop Companion | ✅ Available | Always-on-top companion, multiple windows, expressions, actions, mood and status, speech bubbles, and intelligent stickers |
 | 💬 Casual Conversation (Chat) | ✅ Available | Independent character-chat flow that neither exposes nor executes tools, using recent messages, social context, and user style |
 | 🛠️ Assisted Work (Work) | ✅ Available | Complete Agent workflow: CITA → Action Gate → Native FC → Execution Policy → Tool Runtime → Soul |
+| 💻 Code Collaboration (Code) | ✅ Available | Binds a trusted code directory; Coding Agent reads, modifies, verifies code, and runs commands |
+| 📚 Learning Companion (Learn) | ✅ Available | Binds an Obsidian Vault to accompany understanding, take notes, generate exercises, and track progress |
+| 📅 Daily Affairs (Daily) | ✅ Available | General tool-enabled sessions for everyday Q&A, information organization, and light tasks |
 | 🧠 Personalized Memory | ✅ Available | L0 / L1 / L2 layered memory, self-developed DMAE Worldbook, relationship profile, and long-term interaction continuity |
 | 🔊 Voice Interaction | ✅ Available | Multiple TTS engines, real-time ASR, voice calls, and VAD silence detection; some features require additional configuration |
 | 🧰 Built-in Tools | ✅ Available | Web search, webpage reading, file operations, document generation, everyday services, music, and more |
@@ -277,31 +355,39 @@ If OOM errors continue, use the Chrome DevTools Memory Profiler in development m
 
 #### 🛠️ Assisted Work (Work)
 
+- **LangGraph Runtime** — Uses a LangGraph `StateGraph` to orchestrate multi-turn decision-execution loops, supporting both direct and plan execution modes.
 - **Complete Agent Workflow** — Tool tasks are processed through the following trusted execution chain:
 
-```text
-User Request
-  ↓
-CITA Context Understanding
-  ↓
-Action Gate Decision
-  ↓
-Native Function Calling Argument Generation
-  ↓
-Execution Policy Permission and Risk Checks
-  ↓
-Tool Runtime Execution
-  ↓
-RouteAfterTool ──┬── Failure / Replanning Required → Return to Action Gate
-                  └── Success → Continue
-  ↓
-Soul Responds from Verified Results
-```
+<img src="./docs/image/work-langgraph-flow.png" alt="Work Mode LangGraph Execution Flow" width="900">
 
+- **Code Verification Loop** — After a mutation tool modifies files, routeAfterTool sets `requiredNextAction=run_verification` to force verification in the next round; FinalizationGuard checks plan status and code verification status before respond, blocking if not satisfied.
 - **Local Trust Validation** — Model output must pass format, Schema, and business-level trust validation. The model itself is not the final trust boundary.
 - **Fail-Safe Degradation** — If Action Gate, Native FC, or the execution policy becomes untrusted at any stage, tool execution is prohibited and Soul responds honestly from locally generated failure facts.
 - **Multi-Provider Model Profiles** — Automatically selects an A / B / M / D Structured Output Profile based on provider capabilities and applies unified reasoning separation, JSON extraction, Repair, and failure routing.
 - **AG-UI Event Stream** — Delivers text, tool calls, execution state, and final results through a unified event stream with token-by-token rendering and tool cards.
+
+#### 💻 Code Collaboration (Code)
+
+- **Cline Runtime** — Coding Agent runtime based on the Cline SDK, supporting multi-turn tool calls, file edits, and command execution.
+- **Trusted Workspace Binding** — Binds a session to a specific code directory; all file operations, command execution, and tool calls are restricted to that directory.
+- **Coding Agent Workflow** — Understands engineering requirements, reads and modifies code, analyzes logs and architecture, runs commands and tests, and delivers verifiable results.
+- **Change Review and Verification** — Code modifications go through change evidence collection, optional human confirmation, and verification runs to reduce the risk of automated code changes.
+- **AG-UI Event Stream** — Consistent text, tool cards, and run-state display with Work mode, supporting real-time tracking of the coding run process.
+
+#### 📚 Learning Companion (Learn)
+
+- **Obsidian Vault Workspace** — Binds a Vault as the learning workspace, using the `materials/`, `notes/`, `exercises/`, `templates/`, and `learn/progress.md` structure.
+- **Accompanied Understanding** — Helps users understand materials through questions, breakdowns, analogies, and discussion rather than doing the learning for them.
+- **Notes and Exercises** — Organizes concepts, generates exercises, and records reviews inside the Vault, automatically maintaining a learning-progress overview.
+- **Respects the User's Pace** — Re-explains when the user is stuck, advances when the user is ready, and never scolds the user for wrong answers.
+
+#### 📅 Daily Affairs (Daily)
+
+- **TwoPhaseFC Runtime** — Uses the legacy TwoPhaseFC Agent execution chain, performing multi-turn tool execution and result summarization via native function calling.
+- **General Tool-Enabled Session** — The default general-purpose conversation mode for everyday Q&A, information organization, and light tasks.
+- **Workspace Binding** — Requires binding a trusted directory as the context root; file operations and tool execution stay within that directory.
+- **Flexible Agent Execution Chain** — Uses the same Agent shell as Work mode and invokes search, file, lifestyle, and other tools as needed.
+- **Legacy Session Compatibility** — Unclassified historical sessions default to Daily mode and bind to a migration workspace for smooth upgrades.
 
 #### 📝 Rich Text and Code Rendering
 
@@ -411,8 +497,8 @@ Cyrene includes many built-in and extensible tools, primarily covering the follo
 |---|---|
 | Runtime | Node.js 24 LTS + Electron 43 |
 | Language | TypeScript 5 |
-| Build Tool | Vite 5 |
-| UI Rendering | HTML / CSS + Pixi.js 7 + Chart.js |
+| Build Tool | Vite 7 |
+| UI Rendering | HTML / CSS + React 19 + Pixi.js 7 + Ant Design X + Chart.js |
 | Live2D | `pixi-live2d-display` 0.5.0-beta + Cubism Core |
 | Agent Workflow | LangGraph + Structured Output + Native Function Calling |
 | Agent Event Protocol | `@ag-ui/core`, `@ag-ui/client` |
@@ -420,7 +506,9 @@ Cyrene includes many built-in and extensible tools, primarily covering the follo
 | Memory and Retrieval | Embedding (`@xenova/transformers`) + BM25 + self-developed Cross-Encoder Reranker + self-developed indexing pipeline |
 | Chinese Retrieval | `@node-rs/jieba` |
 | Browser and Desktop Automation | Playwright + `@nut-tree-fork/nut-js` |
+| Rich Text Rendering | `@ant-design/x-markdown` (Markdown / code highlighting / KaTeX math) |
 | Voice and Media | TTS / ASR + `silk-wasm` |
+| Native Screenshot Helper | Rust + DXGI Desktop Duplication / Direct2D / GDI + WIC PNG + NDJSON IPC |
 | Self-Developed Core | CITA, Action Gate, DMAE Worldbook, unified Structured Output Pipeline |
 | External Channels | Feishu OpenAPI, WeChat iLink |
 | Documents and Email | ExcelJS, docx, PDFKit, Nodemailer |
