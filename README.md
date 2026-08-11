@@ -1,8 +1,6 @@
-# 昔漣桌面陪伴系統・個人擴充版
+# Cyrene Agent
 
-> 一個以 Electron、TypeScript 與 Live2D 建構的桌面 AI 陪伴系統，整合對話、長期記憶、語音、工具調用、跨平台訊息與互動式生活空間。
-
-![專案預覽](./preview.png)
+> An Electron and TypeScript desktop AI companion system with long-term memory, voice interaction, Discord integration, mobile access, cloud services, and game automation tools.
 
 ## 專案定位
 
