@@ -2,8 +2,6 @@
 
 <div align="center">
 
-<img src="./docs/image/preview.png" alt="Cyrene Agent desktop companion" width="820">
-
 **A local-first, memory-aware AI desktop companion inspired by Cyrene.**
 
 Built with Electron, TypeScript, React, Live2D, and an extensible agent runtime.
@@ -85,16 +83,6 @@ The agent supports five focused modes:
 - Optional cloud-bot runtime and failover tooling
 - MCP servers over stdio, SSE, and HTTP
 - User-defined Skills and reusable tool instructions
-
-## Screenshots
-
-<div align="center">
-
-<img src="./docs/image/preview2.png" alt="Cyrene Agent Work mode using a weather tool" width="820">
-
-*Work mode streaming a tool-assisted weather request.*
-
-</div>
 
 ## Architecture
 
