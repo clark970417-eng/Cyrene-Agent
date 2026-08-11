@@ -58,6 +58,9 @@ import "../components/PermissionControl.css";
 import "../components/ChatMessageList.css";
 import "../components/ConversationSidebar.css";
 import "../components/StatusFloat.css";
+// Keep the semantic colour layer last so component-local light defaults cannot
+// leak into the dark theme (Ant Design portals are covered by the same layer).
+import "../../../styles/react-theme.css";
 
 import avatarLight from "../../../assets/avatars/avatar-light.png";
 import compressingPng from "../../../assets/compressing.png";

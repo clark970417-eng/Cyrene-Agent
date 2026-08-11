@@ -1,0 +1,324 @@
+/*
+ * Cyrene semantic colour layer
+ *
+ * Components keep their structural styling locally. This final layer owns
+ * colour hierarchy so light surfaces stay softly separated and dark surfaces
+ * never inherit low-contrast light-theme text.
+ */
+
+html[data-ui-theme="pearl-white"] {
+  --cy-bg-page: #f6f1f7;
+  --cy-bg-workspace: #fffdfd;
+  --cy-bg-hover: #f3e9f3;
+  --cy-bg-active: #eadbea;
+  --cy-surface-soft: #f7f2f7;
+  --cy-surface-control: #f0e8f2;
+  --cy-surface-raised: #fffdfd;
+  --cy-border: #d8cbdc;
+  --cy-border-strong: #bba8c3;
+  --cy-text: #2b2130;
+  --cy-text-muted: #685b70;
+  --cy-text-placeholder: #756879;
+  --cy-text-disabled: #746879;
+  --cy-pill-bg: #fff8fb;
+  --cy-pill-border: #c897ad;
+  --cy-pill-status: #7b3658;
+  --cy-accent: #b73e77;
+  --cy-focus-ring: rgb(183 62 119 / 18%);
+  --cy-control-shadow: 0 10px 28px rgb(60 39 69 / 10%);
+}
+
+html[data-ui-theme="cyrene-night"] {
+  --cy-bg-page: #100b17;
+  --cy-bg-workspace: #171020;
+  --cy-bg-hover: #2a1c34;
+  --cy-bg-active: #382541;
+  --cy-surface-soft: #1d1426;
+  --cy-surface-control: #24192e;
+  --cy-surface-raised: #2c1f38;
+  --cy-border: #4b3956;
+  --cy-border-strong: #6a5177;
+  --cy-text: #f6eff9;
+  --cy-text-muted: #c5b8cd;
+  --cy-text-placeholder: #ad9eb7;
+  --cy-text-disabled: #a99bb3;
+  --cy-pill-bg: #2a1b33;
+  --cy-pill-border: #79516a;
+  --cy-pill-status: #f2c2dc;
+  --cy-accent: #ff78aa;
+  --cy-focus-ring: rgb(255 120 170 / 24%);
+  --cy-control-shadow: 0 12px 30px rgb(3 1 8 / 32%);
+}
+
+html[data-ui-theme] :is(.cy-page, .cy-workspace) {
+  color: var(--cy-text);
+}
+
+html[data-ui-theme] .cy-page {
+  background: var(--cy-bg-page);
+  border-color: var(--cy-border-strong);
+}
+
+html[data-ui-theme] .cy-workspace {
+  background: var(--cy-bg-workspace);
+  border-color: var(--cy-border);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--cy-border) 42%, transparent), var(--cy-shadow-workspace);
+}
+
+/* Composer: raised input over a related, but visibly separate, footer. */
+html[data-ui-theme] .cy-composer-shell {
+  background: var(--cy-surface-control);
+  border: 1px solid var(--cy-border-strong);
+  box-shadow: var(--cy-control-shadow);
+}
+
+html[data-ui-theme] .cy-composer.ant-sender {
+  color: var(--cy-text);
+  background: var(--cy-surface-raised);
+  border-color: var(--cy-border-strong);
+  box-shadow: none;
+}
+
+html[data-ui-theme] .cy-composer.ant-sender:hover {
+  border-color: color-mix(in srgb, var(--cy-border-strong) 72%, var(--cy-accent));
+}
+
+html[data-ui-theme] .cy-composer.ant-sender:focus-within {
+  border-color: var(--cy-accent);
+  box-shadow: 0 0 0 3px var(--cy-focus-ring);
+}
+
+html[data-ui-theme] .cy-composer .ant-sender-input {
+  color: var(--cy-text);
+  caret-color: var(--cy-accent);
+}
+
+html[data-ui-theme] .cy-composer .ant-sender-input::placeholder {
+  color: var(--cy-text-placeholder);
+  opacity: 1;
+}
+
+html[data-ui-theme] .cy-composer__footer {
+  color: var(--cy-text-muted);
+  background: var(--cy-surface-control);
+  border-top: 1px solid var(--cy-border);
+}
+
+html[data-ui-theme] :is(
+  .cy-composer__icon-button,
+  .cy-composer__footer-button,
+  .cy-composer__agent-button
+) {
+  color: var(--cy-text-muted);
+}
+
+html[data-ui-theme] :is(
+  .cy-composer__icon-button,
+  .cy-composer__footer-button,
+  .cy-composer__agent-button
+):hover:not(:disabled) {
+  color: var(--cy-accent);
+}
+
+html[data-ui-theme] :is(
+  .cy-composer__icon-button,
+  .cy-composer__footer-button,
+  .cy-composer__agent-button,
+  .cy-composer .ant-sender-actions-btn
+):disabled {
+  color: var(--cy-text-disabled);
+  opacity: 1;
+}
+
+html[data-ui-theme] .cy-composer .ant-sender-actions-btn:disabled {
+  background: var(--cy-bg-active);
+}
+
+html[data-ui-theme] :is(
+  .cy-composer__screenshot-icon,
+  .cy-composer__code-folder-icon,
+  .cy-composer__terminal-folder-icon
+) {
+  stroke: currentColor;
+}
+
+html[data-ui-theme] .cy-composer__footer-separator {
+  background: var(--cy-border-strong);
+}
+
+html[data-ui-theme] .cy-composer__footer-button--placeholder small {
+  color: var(--cy-text-muted);
+  background: var(--cy-bg-active);
+}
+
+html[data-ui-theme] :is(.cy-settings-btn, .cy-sidebar-toggle) {
+  color: var(--cy-text-muted);
+}
+
+html[data-ui-theme] .cy-composer__queue {
+  border-color: var(--cy-border);
+}
+
+html[data-ui-theme] .cy-composer__queue-item {
+  color: var(--cy-text);
+  background: var(--cy-surface-soft);
+  border: 1px solid var(--cy-border);
+}
+
+html[data-ui-theme] .cy-composer__queue-item button {
+  color: var(--cy-text-muted);
+}
+
+html[data-ui-theme] :is(.cy-composer__attachment, .cy-sticker-picker button) {
+  color: var(--cy-text);
+  background: var(--cy-surface-soft);
+  border-color: var(--cy-border);
+}
+
+/* Mode and tool controls use the same light-on-light / dark-on-dark ladder. */
+html[data-ui-theme] .cy-segmented {
+  color: var(--cy-text-muted);
+  background: var(--cy-surface-control);
+  border-color: var(--cy-border-strong);
+  box-shadow: var(--cy-control-shadow);
+}
+
+html[data-ui-theme] .cy-segment {
+  color: var(--cy-text-muted);
+}
+
+html[data-ui-theme] .cy-segment:hover:not(.is-active) {
+  color: var(--cy-text);
+  background: var(--cy-bg-hover);
+}
+
+html[data-ui-theme] .cy-segment.is-active {
+  color: var(--cy-text);
+  background: var(--cy-surface-raised);
+  border-color: var(--cy-border-strong);
+  box-shadow: 0 2px 8px rgb(26 15 35 / 12%);
+}
+
+html[data-ui-theme] :is(.cy-segment, .cy-composer button):focus-visible {
+  outline: 2px solid var(--cy-accent);
+  outline-offset: 2px;
+}
+
+/* Popovers are rendered through a portal, so scope them from the html theme. */
+html[data-ui-theme] :is(
+  .cy-sticker-popover,
+  .cy-style-popover,
+  .cy-reasoning-popover,
+  .cy-permission-popover,
+  .cy-project-popover
+) .ant-popover-inner {
+  color: var(--cy-text);
+  background: var(--cy-surface-raised);
+  border-color: var(--cy-border-strong);
+  box-shadow: var(--cy-control-shadow);
+}
+
+html[data-ui-theme] :is(.cy-style-panel__option, .cy-permission-panel__option) {
+  color: var(--cy-text);
+}
+
+html[data-ui-theme] :is(.cy-style-panel__option, .cy-permission-panel__option):hover {
+  color: var(--cy-text);
+  background: var(--cy-bg-hover);
+}
+
+html[data-ui-theme] :is(
+  .cy-style-panel__option.is-active,
+  .cy-permission-panel__option.is-active
+) {
+  color: var(--cy-text);
+  background: var(--cy-bg-active);
+}
+
+html[data-ui-theme] .cy-reasoning-popover .ant-segmented {
+  background: var(--cy-surface-control);
+  border: 1px solid var(--cy-border);
+}
+
+html[data-ui-theme] .cy-reasoning-popover .ant-segmented-item {
+  color: var(--cy-text-muted);
+}
+
+html[data-ui-theme] .cy-reasoning-popover .ant-segmented-item-selected {
+  color: #ffffff;
+}
+
+/* Conversation rail and context menus. */
+html[data-ui-theme] :is(
+  .cy-conversation-sidebar__title,
+  .cy-conversation-list .ant-conversations-item,
+  .cy-conversation-list .ant-conversations-group-title
+) {
+  color: var(--cy-text-muted);
+}
+
+html[data-ui-theme] .cy-conversation-list .ant-conversations-item:hover {
+  color: var(--cy-text);
+  background: var(--cy-bg-hover);
+}
+
+html[data-ui-theme] .cy-conversation-list .ant-conversations-item-active {
+  color: var(--cy-text);
+  background: var(--cy-surface-raised);
+  border: 1px solid var(--cy-border);
+}
+
+html[data-ui-theme] .cy-conversation-list-wrapper::-webkit-scrollbar-thumb {
+  background: var(--cy-border-strong);
+}
+
+html[data-ui-theme] :is(.cy-session-context-menu, .cy-project-card) {
+  color: var(--cy-text);
+  background: var(--cy-surface-raised);
+}
+
+html[data-ui-theme] :is(
+  .cy-session-context-menu .ant-menu,
+  .cy-session-context-menu .ant-menu-item,
+  .cy-project-card__open,
+  .cy-session-rename-input
+) {
+  color: var(--cy-text);
+  background: var(--cy-surface-raised);
+  border-color: var(--cy-border);
+}
+
+html[data-ui-theme] :is(.cy-project-card__details dt, .cy-project-card__details dd) {
+  color: var(--cy-text-muted);
+}
+
+/* Agent execution cards and native form controls must not fall back to black. */
+html[data-ui-theme] :is(
+  .cy-task-plan-card,
+  .cy-interaction-panel,
+  .cy-code-run-card,
+  .cy-todo
+) {
+  color: var(--cy-text);
+  background: var(--cy-surface-raised);
+  border-color: var(--cy-border);
+}
+
+html[data-ui-theme] :is(
+  .cy-interaction-panel input,
+  .cy-interaction-panel textarea,
+  .cy-interaction-panel button,
+  .cy-task-plan-card button,
+  .cy-todo input,
+  .cy-todo textarea
+) {
+  color: var(--cy-text);
+  background: var(--cy-surface-soft);
+  border-color: var(--cy-border-strong);
+}
+
+@media (prefers-contrast: more) {
+  html[data-ui-theme] {
+    --cy-border: var(--cy-border-strong);
+  }
+}

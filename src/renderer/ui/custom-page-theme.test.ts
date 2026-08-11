@@ -32,4 +32,11 @@ describe("custom page theme bridge", () => {
     expect(css).toContain(".cy-composer.ant-sender");
     expect(css).toContain(".cy-segment.is-active");
   });
+
+  it("keeps the pearl workspace shell on readable light surfaces", () => {
+    expect(css).toContain(".workspace .titlebar");
+    expect(css).toContain(".sidebar__brand-name");
+    expect(css).toContain(".overview-item-card");
+    expect(css).toContain("background: #fbf8fc");
+  });
 });

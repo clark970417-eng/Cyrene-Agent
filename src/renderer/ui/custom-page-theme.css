@@ -123,11 +123,13 @@
   color: var(--cy-text);
 }
 
-/* Unified workspace shell */
-[data-ui-theme="pearl-white"] {
+/* Unified workspace shell. The element qualifier intentionally outranks the
+   workspace stylesheet's later :root defaults in Vite's production order. */
+html[data-ui-theme="pearl-white"] {
   --bg-gradient: radial-gradient(circle at 76% 2%, rgba(242, 186, 223, 0.24), transparent 30%), linear-gradient(135deg, #faf7fb 0%, #f1edf4 100%);
   --panel-bg: rgba(255, 255, 255, 0.78);
   --border-color: rgba(64, 43, 73, 0.12);
+  --border-strong: rgba(64, 43, 73, 0.22);
   --text-primary: #241c29;
   --text-muted: #756879;
   --accent-color: #a43d82;
@@ -135,17 +137,91 @@
 }
 [data-ui-theme="pearl-white"] .workspace > .sidebar,
 [data-ui-theme="pearl-white"] .workspace > .info-panel,
-[data-ui-theme="pearl-white"] .workspace .topbar,
+[data-ui-theme="pearl-white"] .workspace .titlebar,
 [data-ui-theme="pearl-white"] .workspace .bottom-bar {
-  background: rgba(255, 255, 255, 0.86);
+  background: #fbf8fc;
   border-color: var(--cy-page-border);
   box-shadow: none;
 }
-[data-ui-theme="pearl-white"] .nav-item:hover,
-[data-ui-theme="pearl-white"] .nav-item.is-active,
-[data-ui-theme="pearl-white"] .recent-item.is-active {
-  color: #7f2f68;
-  background: rgba(183, 74, 143, 0.10);
+
+[data-ui-theme="pearl-white"] :is(
+  .sidebar__brand-name,
+  .info-panel__header,
+  .profile-card__name,
+  .overview-item-card,
+  .overview-combined-card,
+  .overview-feed-card__header,
+  .card-header,
+  .conn-item__name,
+  .ws-dropdown__value
+) {
+  color: var(--text-primary);
+}
+
+[data-ui-theme="pearl-white"] .sidebar__tab.is-active {
+  color: #662c58;
+  background: #eadff0;
+  border-color: #cbaed1;
+  box-shadow: none;
+}
+
+[data-ui-theme="pearl-white"] .sidebar__tab:hover {
+  color: #662c58;
+  background: #f1e8f3;
+}
+
+[data-ui-theme="pearl-white"] :is(
+  .sidebar__status-pill,
+  .info-panel__tabs,
+  .profile-card,
+  .pet-dock-slot,
+  .overview-item-card,
+  .overview-combined-card,
+  .overview-feed-card,
+  .next-card,
+  .conn-card,
+  .conn-item,
+  .action-btn--reset,
+  .ws-dropdown
+) {
+  color: var(--text-primary);
+  background: #ffffff;
+  border-color: var(--border-color);
+}
+
+[data-ui-theme="pearl-white"] .info-tab.is-active {
+  color: var(--text-primary);
+  background: #f0e8f2;
+  border-color: var(--border-color);
+}
+
+[data-ui-theme="pearl-white"] :is(
+  .titlebar__divider,
+  .stat-divider,
+  .overview-combined-divider
+) {
+  color: var(--text-muted);
+  background: var(--border-color);
+}
+
+[data-ui-theme="pearl-white"] :is(.titlebar__winbtn, .stat-val) {
+  color: var(--text-muted);
+}
+
+[data-ui-theme="pearl-white"] :is(.titlebar__winbtn:hover, .action-btn--reset:hover) {
+  color: var(--text-primary);
+  background: #f0e8f2;
+}
+
+[data-ui-theme="pearl-white"] .pet-dock-slot.is-docked {
+  border-color: var(--border-color);
+  box-shadow: inset 0 0 15px rgba(164, 61, 130, 0.04);
+}
+
+[data-ui-theme="pearl-white"] .card-empty-content {
+  color: var(--text-muted);
+  background: #f8f3f8;
+  border-color: var(--border-color);
 }
 [data-ui-theme="pearl-white"] .workspace iframe { background: #f7f4f8; }
 

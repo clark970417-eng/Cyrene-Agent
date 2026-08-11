@@ -3,9 +3,10 @@
   --info-panel-w: 280px;
   --bg-gradient: linear-gradient(135deg, #130a1c 0%, #0c0812 100%);
   --panel-bg: rgba(25, 18, 38, 0.45);
-  --border-color: rgba(255, 255, 255, 0.06);
+  --border-color: rgba(235, 216, 244, 0.14);
+  --border-strong: rgba(235, 216, 244, 0.22);
   --text-primary: #e0dcf0;
-  --text-muted: #8b839c;
+  --text-muted: #aaa0b5;
   --accent-color: #a855f7;
   --accent-hover: #c084fc;
 }
@@ -43,7 +44,7 @@ html, body {
   flex: 0 0 var(--sidebar-w);
   height: 100%;
   background: rgba(12, 8, 18, 0.7);
-  border-right: 1px solid var(--border-color);
+  border-right: 1px solid var(--border-strong);
   display: flex;
   flex-direction: column;
   padding: 20px 12px;
@@ -123,7 +124,7 @@ html, body {
 
 .sidebar__footer {
   padding-top: 12px;
-  border-top: 1px solid rgba(255, 255, 255, 0.04);
+  border-top: 1px solid var(--border-color);
 }
 
 /* 對話清單由新版 React 工作區統一管理，避免同一畫面出現兩份會話狀態。 */
@@ -140,7 +141,7 @@ body[data-content="react"] .titlebar__dropdowns {
   display: flex;
   align-items: center;
   background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border-color);
   padding: 8px 9px;
   border-radius: 12px;
   font-size: 11px;
@@ -189,7 +190,7 @@ body[data-content="react"] .titlebar__dropdowns {
   align-items: center;
   justify-content: space-between;
   padding: 0 16px;
-  border-bottom: 1px solid var(--border-color);
+  border-bottom: 1px solid var(--border-strong);
   background: rgba(14, 10, 20, 0.4);
   gap: 8px;
 }
@@ -311,6 +312,7 @@ body[data-content="react"] .titlebar__dropdowns {
   position: relative;
   overflow: hidden;
   background: transparent;
+  box-shadow: inset 1px 0 var(--border-color), inset -1px 0 var(--border-color);
 }
 
 .content-frame {
@@ -326,7 +328,7 @@ body[data-content="react"] .titlebar__dropdowns {
   flex: 0 0 var(--info-panel-w);
   height: 100%;
   background: rgba(12, 8, 18, 0.7);
-  border-left: 1px solid var(--border-color);
+  border-left: 1px solid var(--border-strong);
   display: flex;
   flex-direction: column;
   padding: 16px;
