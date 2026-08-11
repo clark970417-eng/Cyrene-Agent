@@ -2,106 +2,106 @@
 
 > An Electron and TypeScript desktop AI companion system with long-term memory, voice interaction, Discord integration, mobile access, cloud services, and game automation tools.
 
-## 專案定位
+## Overview
 
-這個 repository 是我基於 [Playa-0v0/Cyrene-Agent](https://github.com/Playa-0v0/Cyrene-Agent) 持續開發的個人擴充版本。原專案提供了 Live2D 桌面角色、AI 對話、記憶、語音與工具系統等重要基礎；我在此基礎上重新整理介面與互動流程，並加入遊戲房、工作空間、離線語音辨識、安全備份、Discord、雲端城市、Discord Activity、記憶視覺化與日常陪伴等功能。
+Cyrene Agent is my independently developed extension of the MIT-licensed [Playa-0v0/Cyrene-Agent](https://github.com/Playa-0v0/Cyrene-Agent) desktop companion framework. The upstream project provided the original Live2D desktop character, AI chat, memory, voice, and tool foundation. I redesigned and expanded the system with a new workspace experience, Discord automation, mobile access, cloud services, game features, safety tooling, reliability tests, and several custom interaction flows.
 
-本專案不是從零開始的獨立作品。原始程式依 MIT License 使用，原作者與素材來源列在本文末尾的「來源、授權與聲明」。
+This repository is not presented as a project built entirely from scratch. It is a substantial personal extension of an open-source codebase, with the original source, license, and asset credits preserved in the sections below.
 
-## 我在這個版本中的主要擴充
+## My Main Contributions
 
-### 1. 整合式工作空間
+### 1. Integrated Workspace
 
-- 建立新的 Workspace 介面，把聊天、模型狀態、連線狀態、工作階段與功能入口集中在同一個視窗。
-- 加入工作階段列表、模型／推理模式切換、使用統計與即時狀態同步。
-- 整合筆記本、遊戲房、記憶頁面、Discord 設定與畫板等子系統。
+- Built a new Workspace interface that centralizes chat, model state, connection status, sessions, and feature navigation.
+- Added session lists, model/reasoning mode controls, usage indicators, and live status synchronization.
+- Integrated the notebook, game room, memory page, Discord settings, drawing tools, and other subsystems into one desktop workflow.
 
-### 2. 遊戲房與互動內容
+### 2. Interactive Game and Activity Systems
 
-- 新增遊戲房與統計紀錄，讓 Live2D 角色能依遊戲結果播放反應。
-- 包含共鳴配對、井字棋、猜拳、翻牌記憶、四子棋、二十問、真心話卡、接續故事、昔漣問答與 Ropebound 繩索合作闖關等內容。
-- 新增 Ropebound Discord Activity 版本，支援在 Discord 內開啟合作遊戲，並透過 Supabase Realtime 同步房間與 Player 2 操作。
-- 將勝負、平手與遊玩次數保存在本機，形成可延續的互動紀錄。
-- 新增獨立遊戲攻略模式，能依中英文問題切換語言，整理配隊、關卡打法與攻略來源。
+- Added a game room with persistent play statistics and Live2D character reactions.
+- Implemented multiple interaction modes, including resonance matching, tic-tac-toe, rock-paper-scissors, memory cards, Connect Four, twenty questions, truth cards, story continuation, Cyrene quiz content, and Ropebound cooperative puzzles.
+- Built a Ropebound Discord Activity version with Supabase Realtime room synchronization and Player 2 controls.
+- Added persistent win/loss/draw tracking for continued interaction history.
+- Added a game strategy mode that can respond in English or Chinese and organize team, stage, and source-based advice.
 
-### 3. 筆記本、畫板與內容工具
+### 3. Notebook, Creative, and Study Tools
 
-- 新增支援 Markdown 分頁、章節導覽與翻頁效果的雙頁筆記本。
-- Shared Notebook can automatically collect songs played together on Discord and completed actions, then refresh immediately when the content changes.
-- 新增繪圖／圖片生成介面，支援提示詞整理、免費圖片來源與可配置的生成服務。
-- 新增專用學習模式，可依中英文問題切換語言，以 Markdown、LaTeX 與來源查證輔助學術解題。
-- 新增 AI 出題考試介面，可選科目、題數與推理強度，並提供計時、答題解析、成績與錯題回顧。
-- 強化文件、PDF、試算表與簡報相關工具，讓代理能處理更多實際工作。
-- 新增永晝花庭雲端城市入口，使用持久化資料與離線時間結算，讓城市在重新進入時延續成長狀態。
-- 新增手機端入口與本機 mobile server，讓部分陪伴與控制功能能從手機瀏覽器開啟。
-- 新增 WutheringWavesUID 入口與整合說明，支援鳴潮帳號資料、簽到與本機 OCR 輔助流程。
+- Added a two-page Markdown notebook with page turning, section navigation, and structured entries.
+- Added Shared Notebook collection logic for Discord music sessions and completed actions, with live refresh after content changes.
+- Built drawing and image-generation UI flows with prompt organization, free image-source helpers, and configurable generation services.
+- Added a study mode that supports Markdown, LaTeX, source checking, and bilingual academic problem solving.
+- Added an AI exam interface with subject selection, question count, reasoning strength, timers, explanations, scores, and missed-question review.
+- Expanded document, PDF, spreadsheet, and presentation tools for more practical agent workflows.
+- Added a persistent cloud-city entry point with offline time settlement and durable state.
+- Added mobile access and a local mobile server so selected companion and control features can run from a phone browser.
+- Added a WutheringWavesUID integration path for Wuthering Waves account data, check-ins, and local OCR helper workflows.
 
-### 4. 更完整的代理、記憶與陪伴行為
+### 4. Agent, Memory, and Companion Behavior
 
-- 新增 Agent Activity 記錄與摘要，追蹤工具執行的成功、失敗、拒絕與耗時，同時遮蔽敏感欄位。
-- 新增記憶圖譜檢視，將人物、地點、事件與長期記憶整理成節點與關係。
-- 新增早安、午後關心與晚安三種每日儀式，可結合近期記憶、待辦與天氣。
-- 加入安靜時段與主動開場策略，降低不合時宜的打擾。
-- 加入桌寵氣泡專用的短回覆整理與長度保護，避免桌面對話被過長內容佔滿。
+- Added agent activity logging and summaries for tool success, failure, refusal, timing, and sensitive-field redaction.
+- Added memory graph visualization for people, places, events, and long-term memories.
+- Added morning, afternoon, and bedtime rituals that can use recent memory, todos, and weather context.
+- Added quiet hours and proactive opening strategies to reduce poorly timed interruptions.
+- Added short-response shaping and length protection for desktop pet bubbles.
 
-### 5. 語音、通話與畫面理解
+### 5. Voice, Calls, and Visual Context
 
-- 新增以 `Xenova/whisper-base` 為基礎的離線語音辨識；模型首次使用時下載，之後保存在本機快取。
-- 改善通話中的語音分段、音訊處理、提早播放流程與通話使用量統計。
-- 加入共享畫面與入站圖片附件的上下文判斷，只有在使用者問題確實涉及畫面或圖片時才附加影像說明。
-- 擴充多種 TTS／語音服務的設定與測試流程。
+- Added offline speech recognition based on `Xenova/whisper-base`, with local model caching after first download.
+- Improved voice segmentation, audio processing, early playback, and call usage tracking.
+- Added context-aware screen and inbound-image handling so visual descriptions are attached only when the user's question is actually about images or the screen.
+- Expanded configuration and test coverage for multiple TTS and voice-service providers.
 
-### 6. 訊息平台與外部連線
+### 6. Messaging Platforms and External Integrations
 
-- 新增 Discord Bot adapter，支援頻道白名單、提及判斷、文字分段、附件與 embed 訊息。
-- 擴充 Discord Slash Commands、語音通話與狀態查詢，讓使用者可直接聊天、加入或離開語音頻道。
-- 新增 Discord 音樂播放，可用歌曲名稱搜尋，並處理 YouTube／Bilibili／SoundCloud／Spotify 連結、播放清單、Bilibili 合集與多分段內容。
-- 提供可即時更新的播放器卡片、私人佇列、播放歷史、收藏歌單、下一首預取、感知式音量、分類續播、循環、隨機、自動推薦與 Spotify 播放清單指令控制。
-- 新增 Discord achievements 與更完整的 help card 分類，整理聊天、遊戲代肝、音樂導播、生活陪伴與娛樂功能。
-- 新增 X/Twitter 與 Anilist 通知服務，可將指定作品或官方帳號更新整理後送到 Discord。
-- 新增 Spotify Premium 連線與播放控制，可透過 OAuth 授權、歌曲搜尋、Spotify 連結、個人播放清單或作者熱門歌曲播放、切換裝置、上一首／下一首、播放／暫停與音量控制，並以加密方式保存 Client Secret 與 Refresh Token。
-- 新增無視窗雲端 Discord Bot 服務，可部署在 Linux 容器中維持文字聊天、基本音樂控制、圖片理解、健康檢查與本機／雲端備援切換，電腦關機後仍能保持基本陪伴入口在線。
-- 外部訊息與 Discord 顯示文字會統一轉為台灣繁體中文，並保留使用者的原始輸入。
-- 持續整合飛書、微信與本機 inbound server，讓同一個代理核心可服務不同聊天入口。
-- 對平台能力進行分流，避免不支援的訊息格式或工具被錯誤調用。
-- 新增鳴潮任務工具，可將每日任務、4C 等遊戲代肝需求交給專用工具流程。
+- Added a Discord bot adapter with channel allowlists, mention detection, message chunking, attachments, and embed messages.
+- Expanded Discord slash commands, voice calls, and status queries so users can chat, join voice channels, leave voice channels, and inspect system status.
+- Added Discord music playback with search, YouTube/Bilibili/SoundCloud/Spotify links, playlists, Bilibili collections, and multi-part media handling.
+- Built live-updating player cards, private queues, playback history, favorites, prefetching, perceptual volume, category resume, repeat, shuffle, auto-recommendation, and Spotify playlist command support.
+- Added Discord achievements and a cleaner help-card structure for chat, game automation, music, daily companion features, and entertainment tools.
+- Added X/Twitter and Anilist notification services that can forward selected account or anime updates into Discord.
+- Added Spotify Premium connection and playback control with OAuth, search, links, playlists, artist top tracks, device switching, previous/next, play/pause, and volume control.
+- Added a headless cloud Discord bot service for Linux containers, including text chat, basic music controls, image understanding, health checks, and local/cloud failover.
+- Added Traditional Chinese normalization for external messages while preserving original user input.
+- Continued integrating Lark, WeChat, and local inbound server pathways so one agent core can serve multiple messaging entry points.
+- Added routing safeguards so platform-specific unsupported message formats or tools are not called incorrectly.
+- Added a Wuthering Waves task tool for daily tasks, 4C-related routines, and game automation workflows.
 
-### 7. 本機安全與備份
+### 7. Local Safety and Backup
 
-- 使用 Electron `safeStorage` 保護 API Key、Token 與郵件密碼等敏感設定。
-- 新增 Secret Vault 狀態檢查、舊資料遷移、遮蔽與保留既有密鑰的流程。
-- 新增分類式 `.cybackup` 備份，可選擇對話、記憶、規劃、個人化、知識與設定。
-- 還原前自動建立安全備份，並限制檔案數量、路徑與解壓後大小。
+- Used Electron `safeStorage` to protect API keys, tokens, and mail passwords.
+- Added Secret Vault status checks, migration support, masking, and preservation of existing secrets.
+- Added categorized `.cybackup` backups for conversations, memory, plans, personalization, knowledge, and settings.
+- Added pre-restore safety backups and limits on file count, paths, and extracted size.
 
-### 8. 測試與可靠性
+### 8. Reliability and Testing
 
-- 專案目前包含 97 個測試檔、652 項測試，涵蓋記憶、排程、工具、頻道、遊戲、語音、安全與 UI 邏輯。
-- 對 IPC 資料、共享畫面、備份路徑、訊息長度與代理活動紀錄加入界線檢查。
-- 提供 TypeScript 建置、Vitest 測試與 GitHub Actions workflow。
+- The project currently includes 97 test files and 652 tests covering memory, scheduling, tools, channels, games, voice, safety, and UI logic.
+- Added boundary checks for IPC payloads, screen context, backup paths, message length, and agent activity logs.
+- Provides TypeScript builds, Vitest tests, and GitHub Actions workflow support.
 
-## 原始專案提供的基礎
+## Foundation from the Upstream Project
 
-以下能力主要承接自原始 `Cyrene-Agent`，並在此版本中繼續整合或調整：
+The following capabilities originated from the upstream `Cyrene-Agent` project and are continued or adapted in this version:
 
-- Live2D 桌面角色、表情、動作與口型同步
-- 多模型 AI 對話與供應商切換
-- 長期記憶、RAG、世界書與關係系統
-- MCP、函式調用與內建工具
-- 語音辨識、語音合成與通話模式
-- 排程任務、待辦與主動訊息
-- 飛書、微信等聊天平台整合
+- Live2D desktop character, expressions, motions, and lip sync
+- Multi-model AI chat and provider switching
+- Long-term memory, RAG, worldbook, and relationship systems
+- MCP, function calling, and built-in tools
+- Speech recognition, speech synthesis, and call mode
+- Scheduled tasks, todos, and proactive messages
+- Lark and WeChat messaging integrations
 
-## 技術架構
+## Architecture
 
 ```text
 Electron Main Process
-├── Agent Orchestrator        # 模型、工具、MCP、上下文與子代理
-├── Memory & RAG              # 記憶、實體圖譜、檢索與衝突處理
-├── Channels                  # Discord、飛書、微信與 inbound server
-├── Voice & Call              # ASR、TTS、通話與畫面上下文
-├── Scheduler & Rituals       # 排程、待辦與每日陪伴儀式
-├── Security & Backup         # Secret Vault 與分類備份
-└── Game / Document Tools     # 遊戲代理與文件工具
+├── Agent Orchestrator        # models, tools, MCP, context, and agent flow
+├── Memory & RAG              # memory, graph, retrieval, and conflict handling
+├── Channels                  # Discord, Lark, WeChat, and inbound server
+├── Voice & Call              # ASR, TTS, calls, and visual context
+├── Scheduler & Rituals       # scheduled tasks, todos, and daily rituals
+├── Security & Backup         # Secret Vault and categorized backups
+└── Game / Document Tools     # game automation and document tools
 
 Electron Renderer
 ├── Live2D Desktop Pet
@@ -109,92 +109,93 @@ Electron Renderer
 ├── Workspace Dashboard
 ├── Notebook / Paint
 ├── Study / Exam
-└── Game Room
+├── Game Room
+└── WavesUID / Mobile Views
 ```
 
-主要技術：
+## Technology Stack
 
 - Electron 43
 - TypeScript
 - Vite
 - Vitest
 - PixiJS + `pixi-live2d-display`
-- LanceDB、LlamaIndex、BM25 與 Transformers.js
-- Discord.js、Lark SDK、WebSocket 與 MCP SDK
+- LanceDB, LlamaIndex, BM25, and Transformers.js
+- Discord.js, Lark SDK, WebSocket, and MCP SDK
 
-## 執行需求
+## Requirements
 
 - Node.js `>=24 <25`
 - npm `>=10`
 - Git
-- 可用的 AI 模型 API，或專案支援的本機模型服務
+- Access to a supported AI model API or a supported local model service
 
-部分原生套件、語音服務與桌面自動化功能具有作業系統相依性。若在不同平台執行，可能需要額外安裝編譯工具、音訊元件或模型檔案。
+Some native packages, voice services, and desktop automation features are operating-system dependent. Running the project on a different platform may require additional build tools, audio components, or model files.
 
-## 安裝與啟動
+## Installation
 
 ```bash
-git clone https://github.com/clark970417-eng/My-project-one.git
-cd My-project-one
+git clone https://github.com/clark970417-eng/Cyrene-Agent.git
+cd Cyrene-Agent
 npm ci
 npm run dev
 ```
 
-建立 production build：
+Create a production build:
 
 ```bash
 npm run build
 ```
 
-執行測試：
+Run tests:
 
 ```bash
 npm test
 ```
 
-## 初次設定
+## Initial Setup
 
-1. 開啟應用程式的「設定」。
-2. 選擇模型供應商、Base URL 與模型名稱。
-3. 在本機輸入對應的 API Key，儲存後先執行連線測試。
-4. 依需求啟用語音、Discord、飛書、微信、本機模型或每日儀式。
-5. 第一次啟用離線 Whisper 時，等待模型下載與快取完成。
+1. Open the application's Settings page.
+2. Select a model provider, base URL, and model name.
+3. Enter the required API key locally and run a connection test.
+4. Enable voice, Discord, Lark, WeChat, local models, daily rituals, or other integrations as needed.
+5. When enabling offline Whisper for the first time, wait for the model download and local cache setup to finish.
 
-請勿把 API Key、Bot Token、密碼或包含私密對話的備份提交到 Git。即使 repository 是 Private，也不應把密鑰直接寫進程式碼。
+Do not commit API keys, bot tokens, passwords, or backups containing private conversations. Even when a repository is private, secrets should never be written directly into source code.
 
-## 資料與隱私
+## Data and Privacy
 
-- 模型設定、聊天紀錄、記憶、任務與遊戲統計主要保存在 Electron 的本機 `userData` 目錄。
-- 支援的敏感設定會透過作業系統提供的安全儲存能力加密。
-- 備份功能預設不應匯出 API Key、Token 或郵件密碼。
-- 使用雲端模型、TTS、搜尋、Discord、飛書或微信時，資料會依所選服務的方式傳送；請自行閱讀各服務的隱私政策。
+- Model settings, chat history, memory, tasks, and game statistics are mainly stored in Electron's local `userData` directory.
+- Supported sensitive settings are encrypted through operating-system secure storage.
+- Backups should not export API keys, tokens, or mail passwords by default.
+- When using cloud models, TTS, search, Discord, Lark, or WeChat, data is transmitted according to the selected service's behavior. Users should review the relevant privacy policies.
 
-## 專案限制
+## Limitations
 
-- 這是一個持續開發中的個人專案，不保證所有模型供應商或平台組合都能直接使用。
-- 部分功能需要第三方 API、Bot 權限、本機模型或額外服務。
-- 離線 Whisper 首次使用仍需要下載模型。
-- GitHub Actions 的分支設定與發佈流程仍需要依 repository 的實際分支策略調整。
+- This is an actively developed personal project and does not guarantee that every model provider or platform combination will work out of the box.
+- Some features require third-party APIs, bot permissions, local models, or additional services.
+- Offline Whisper still requires a model download on first use.
+- GitHub Actions and release workflows may need adjustment depending on the actual branch and deployment strategy.
 
-## 來源、授權與聲明
+## Source, License, and Credits
 
-### 原始程式
+### Upstream Code
 
-- 上游專案：[Playa-0v0/Cyrene-Agent](https://github.com/Playa-0v0/Cyrene-Agent)
-- 原作者：Playa-0v0
-- 程式授權：[MIT License](./LICENSE)
-- 本 repository 的擴充版本由 [clark970417-eng](https://github.com/clark970417-eng) 維護。
+- Upstream project: [Playa-0v0/Cyrene-Agent](https://github.com/Playa-0v0/Cyrene-Agent)
+- Original author: Playa-0v0
+- License: [MIT License](./LICENSE)
+- This extended version is maintained by [clark970417-eng](https://github.com/clark970417-eng).
 
-MIT License 允許使用、修改與散布，但原始版權聲明與授權條款必須保留。此 README 明確標示上游來源，也用來區分原始基礎與本版本的擴充內容。
+The MIT License allows use, modification, and distribution, but the original copyright notice and license terms must be preserved. This README identifies the upstream source and distinguishes the original foundation from the additional work in this version.
 
-### Live2D 模型
+### Live2D Model and Character Assets
 
-- 模型作者：Bilibili 創作者「是依七哒」
-- 原始頁面：[space.bilibili.com/457683484](https://space.bilibili.com/457683484)
-- 完整說明：[MODEL_LICENSE.md](./MODEL_LICENSE.md)
+- Model author: Bilibili creator `是依七哒`
+- Original page: [space.bilibili.com/457683484](https://space.bilibili.com/457683484)
+- Full notes: [MODEL_LICENSE.md](./MODEL_LICENSE.md)
 
-模型與角色相關素材不屬於本 repository 維護者。昔漣／Cyrene 的角色名稱、設計與相關智慧財產權屬於 HoYoverse／miHoYo。本專案屬於非官方、非商業的粉絲衍生開發，與 HoYoverse／miHoYo 無隸屬或背書關係。
+The model and character-related assets are not owned by this repository maintainer. Cyrene, her character name, design, and related intellectual property belong to HoYoverse / miHoYo. This project is an unofficial, non-commercial fan development and is not affiliated with or endorsed by HoYoverse / miHoYo.
 
-## 學習與作品集說明
+## Portfolio Note
 
-此專案展示的是在既有開源系統上進行閱讀、整合、重構、功能擴充、安全設計與測試的能力。若將它用於課程、申請或作品集，應同時附上原始專案連結，並以本 README 的「主要擴充」章節說明自己的實際貢獻。
+This project demonstrates my ability to read, understand, extend, refactor, integrate, secure, test, and present a complex open-source system. For academic or portfolio review, the important contribution is not only the final feature list, but also the engineering process: connecting multiple services, improving reliability, designing user workflows, protecting local secrets, and documenting the boundary between upstream work and my own extensions.
