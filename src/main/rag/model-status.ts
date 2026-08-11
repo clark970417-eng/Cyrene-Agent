@@ -93,7 +93,13 @@ function probeCandidates(
 export function getProjectModelsDirCandidates(): string[] {
   const out: string[] = [];
   if (process.env.CYRENE_MODELS_DIR) out.push(process.env.CYRENE_MODELS_DIR);
-  const cwdModels = path.join(process.cwd(), "models");
+  let cwdModels = path.join(process.cwd(), "models");
+  try {
+    const appRoot = app.getAppPath();
+    // macOS maps /tmp to /private/tmp. When cwd and appPath are the same
+    // physical directory, keep appPath's stable spelling in diagnostics.
+    if (fs.realpathSync(process.cwd()) === fs.realpathSync(appRoot)) cwdModels = path.join(appRoot, "models");
+  } catch { /* app path or cwd may not exist yet */ }
   if (!out.includes(cwdModels)) out.push(cwdModels);
   try {
     const appModels = path.join(app.getAppPath(), "models");

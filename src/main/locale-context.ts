@@ -60,11 +60,11 @@ function normalizeLocale(value: unknown, fallback: string): string {
 // ── 默认值（中文） ──
 
 const DEFAULT_LOCALE: LocaleContext = {
-  uiLocale: "zh-CN",
-  dateLocale: "zh-CN",
+  uiLocale: "zh-TW",
+  dateLocale: "zh-TW",
   weatherLanguage: "zh",
-  responseLanguage: "zh-CN",
-  memoryLanguage: "zh-CN",
+  responseLanguage: "zh-TW",
+  memoryLanguage: "zh-TW",
   asrLanguage: "zh",
 };
 

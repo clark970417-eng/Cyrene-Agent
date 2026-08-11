@@ -50,7 +50,7 @@ function ConversationIcon() {
 }
 
 function formatModifiedTime(timestamp: number): string {
-  return new Intl.DateTimeFormat("zh-CN", {
+  return new Intl.DateTimeFormat("zh-TW", {
     year: "numeric",
     month: "2-digit",
     day: "2-digit",

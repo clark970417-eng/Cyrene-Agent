@@ -66,6 +66,14 @@ export function registerWindowSystemIpc(deps: WindowSystemIpcDependencies): void
     deps.windowManager?.createCallWindow();
   });
 
+  ipcMain.on(IPC.SIDEBAR_SET_PET_DOCK_VISIBLE, (_event, visible: boolean) => {
+    deps.windowManager?.setPetDockVisible(Boolean(visible));
+  });
+
+  ipcMain.on(IPC.SIDEBAR_REPORT_PET_SLOT, (_event, bounds: { x: number; y: number; width: number; height: number; isDocked: boolean }) => {
+    deps.windowManager?.updatePetDock(bounds);
+  });
+
   ipcMain.on(IPC.TASKS_MINIMIZE, () => {
     tasksWindow?.minimize();
   });

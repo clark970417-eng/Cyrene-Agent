@@ -2,15 +2,12 @@ import { BrowserWindow, screen, type NativeImage } from "electron";
 import { IPC } from "../../shared/ipc-channels";
 import { createMainWindow, PET_WINDOW_BASE_HEIGHT, PET_WINDOW_BASE_WIDTH, type MainWindowSettingsSlice } from "../startup/create-main-window";
 import {
-  createCallWindow,
   createReactChatWindow,
-  createSettingsWindow,
-  createSidebarWindow,
-  createStickerManagerWindow,
-  createTasksWindow,
+  navigateUnifiedWorkspace,
 } from "./create-aux-windows";
 import { broadcastToAllWindows } from "./broadcast";
 import { PetWindowMoveController } from "../pet-window-movement";
+import { reactChatWindow } from "./window-state";
 
 export interface WindowManagerOptions {
   getCurrentAppIconPath: () => string;
@@ -27,6 +24,8 @@ export interface WindowManager {
   createTasksWindow(): void;
   createStickerManagerWindow(): void;
   createCallWindow(): void;
+  setPetDockVisible(visible: boolean): void;
+  updatePetDock(bounds: { x: number; y: number; width: number; height: number; isDocked: boolean }): void;
 
   showMainWindow(): void;
   hideMainWindow(): void;
@@ -54,6 +53,8 @@ export interface WindowManager {
 
 export function createWindowManager(options: WindowManagerOptions): WindowManager {
   let mainWindow: BrowserWindow | null = null;
+  let petDockVisible = true;
+  let petDockBounds: { x: number; y: number; width: number; height: number; isDocked: boolean } | null = null;
   const readyHandlers: Array<(win: BrowserWindow) => void> = [];
   const closedHandlers: Array<() => void> = [];
   const movedHandlers: Array<(position: { x: number; y: number }) => void> = [];
@@ -68,6 +69,32 @@ export function createWindowManager(options: WindowManagerOptions): WindowManage
   function getUsableMainWindow(): BrowserWindow | null {
     if (!mainWindow || mainWindow.isDestroyed()) return null;
     return mainWindow;
+  }
+
+  function applyPetDock(): void {
+    const pet = getUsableMainWindow();
+    const host = reactChatWindow;
+    const slot = petDockBounds;
+    if (!pet || !host || host.isDestroyed() || !slot?.isDocked) return;
+    if (!petDockVisible || !host.isVisible()) {
+      pet.hide();
+      return;
+    }
+    const zoom = 0.45;
+    const width = Math.round(PET_WINDOW_BASE_WIDTH * zoom);
+    const height = Math.round(PET_WINDOW_BASE_HEIGHT * zoom);
+    const hostBounds = host.getBounds();
+    pet.setParentWindow(host);
+    pet.setAlwaysOnTop(false);
+    pet.setIgnoreMouseEvents(false);
+    pet.setBounds({
+      x: Math.round(hostBounds.x + slot.x + (slot.width - width) / 2),
+      y: Math.round(hostBounds.y + slot.y + slot.height - height + 16),
+      width,
+      height,
+    });
+    pet.webContents.send(IPC.PET_ZOOM, zoom);
+    pet.showInactive();
   }
 
   function setMainWindow(window: BrowserWindow): void {
@@ -113,11 +140,25 @@ export function createWindowManager(options: WindowManagerOptions): WindowManage
     },
 
     createReactChatWindow,
-    createSidebarWindow,
-    createSettingsWindow,
-    createTasksWindow,
-    createStickerManagerWindow,
-    createCallWindow,
+    createSidebarWindow(): void { navigateUnifiedWorkspace("overview"); },
+    createSettingsWindow(section?: string): void { navigateUnifiedWorkspace("settings", section); },
+    createTasksWindow(): void { navigateUnifiedWorkspace("tasks"); },
+    createStickerManagerWindow(): void { navigateUnifiedWorkspace("stickers"); },
+    createCallWindow(): void { navigateUnifiedWorkspace("call"); },
+    setPetDockVisible(visible: boolean): void {
+      petDockVisible = visible;
+      applyPetDock();
+    },
+    updatePetDock(bounds): void {
+      petDockBounds = bounds;
+      if (!bounds.isDocked) {
+        const pet = getUsableMainWindow();
+        pet?.setParentWindow(null);
+        reactChatWindow?.webContents.send("workspace:pet-dock-changed", false);
+        return;
+      }
+      applyPetDock();
+    },
 
     showMainWindow(): void {
       getUsableMainWindow()?.show();

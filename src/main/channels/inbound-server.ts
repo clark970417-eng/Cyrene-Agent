@@ -14,6 +14,7 @@ import type { ChannelId, IncomingMessage } from "./types";
 import { logger, LogTag } from "../logger";
 
 const LOG = "[InboundServer]";
+const PREFERRED_LOCAL_PORT = 53854;
 
 /** 给定 channelId + raw payload → IncomingMessage。每个 adapter 自己注册。 */
 export type NormalizeFn = (channel: ChannelId, raw: unknown) => IncomingMessage | null;
@@ -24,6 +25,11 @@ interface InboundRoute {
 }
 
 const routes: InboundRoute[] = [];
+const localRoutes = new Map<string, (req: http.IncomingMessage, res: http.ServerResponse) => Promise<void>>();
+
+export function registerLocalGetRoute(pathname: string, handler: (req: http.IncomingMessage, res: http.ServerResponse) => Promise<void>): void {
+  localRoutes.set(`GET ${pathname}`, handler);
+}
 
 /** adapter 在 start() 时调用一次注册自己的路由。重复注册按 id 覆盖。 */
 export function registerInboundRoute(channel: ChannelId, normalize: NormalizeFn): void {
@@ -73,6 +79,12 @@ async function handleRequest(
   res: http.ServerResponse,
   secret: string,
 ): Promise<void> {
+  const requestUrl = new URL(req.url || "/", "http://127.0.0.1");
+  const localHandler = localRoutes.get(`${req.method ?? "GET"} ${requestUrl.pathname}`);
+  if (localHandler) {
+    await localHandler(req, res);
+    return;
+  }
   // 健康检查：免密钥
   if (req.url === "/channels/healthz" && req.method === "GET") {
     sendJson(res, 200, { ok: true, channels: channelManager.listChannels() });
@@ -159,8 +171,8 @@ export async function startInboundServer(): Promise<InboundServerHandle> {
   // 1) 优先用 settings.inboundPort（如果非 0）
   // 2) 被占 → fallback 到 0（OS 随机分）
   // 3) 仍被占 → 最多重试 3 次（每次都换 server 实例）
-  const tryPorts: Array<number | "random"> = [];
-  if (settings.inboundPort > 0) tryPorts.push(settings.inboundPort);
+  const tryPorts: Array<number | "random"> = [PREFERRED_LOCAL_PORT];
+  if (settings.inboundPort > 0 && settings.inboundPort !== PREFERRED_LOCAL_PORT) tryPorts.push(settings.inboundPort);
   tryPorts.push("random");
 
   let lastErr: unknown = null;

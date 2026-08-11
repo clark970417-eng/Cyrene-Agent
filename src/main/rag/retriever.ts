@@ -318,7 +318,7 @@ export class HybridRetriever {
       // 只对 query 中出现的词做 BM25 计算
       const queryWordsSet = new Set(queryWords);
       const relevantDocTokens = docTokens.filter((t) => queryWordsSet.has(t.word));
-      
+
       // 如果 doc 没有命中任何 query 词，分数为 0
       if (relevantDocTokens.length === 0) {
         return {

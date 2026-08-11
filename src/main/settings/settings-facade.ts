@@ -35,7 +35,7 @@ const DEFAULT_GENERAL_SETTINGS: GeneralSettings = {
   sidebarVisible: true,
   tasksVisible: true,
   launchAtLogin: false,
-  language: "zh-CN",
+  language: "zh-TW",
   uiTheme: "pearl-white",
   windowCornerRadius: DEFAULT_WINDOW_CORNER_RADIUS,
   uiThemeRadius: false,
@@ -122,7 +122,7 @@ function notifyGeneralSettingsChanged(before: GeneralSettings, after: GeneralSet
   }
 }
 
-function normalizeGeneralSettings(
+export function normalizeGeneralSettings(
   input: Partial<GeneralSettings> | null | undefined,
 ): GeneralSettings {
   const windowVisibility = normalizeWindowVisibilitySettings(input);
@@ -142,7 +142,11 @@ function normalizeGeneralSettings(
     const num = typeof value === "number" ? value : Number(value);
     return Number.isFinite(num) ? Math.max(1000, Math.min(120000, Math.round(num))) : fallback;
   };
+  // Keep fields written by older/custom builds even when this version does not
+  // expose them yet.  Without this compatibility layer, opening Settings and
+  // saving a single value would silently erase user-added configuration.
   return {
+    ...(input ?? {}),
     citaEnabled: cita.enabled,
     citaSemanticEngine: cita.semanticEngine,
     chatSocialContextEnabled: normalizeChatSocialContextEnabled(input?.chatSocialContextEnabled),
@@ -165,7 +169,7 @@ function normalizeGeneralSettings(
     sidebarVisible: windowVisibility.sidebarVisible,
     tasksVisible: windowVisibility.tasksVisible,
     launchAtLogin: Boolean(input?.launchAtLogin),
-    language: "zh-CN",
+    language: "zh-TW",
     uiTheme: normalizeUiTheme(input?.uiTheme),
     windowCornerRadius: normalizeWindowCornerRadius(input?.windowCornerRadius),
     uiThemeRadius: input?.uiThemeRadius ?? true,

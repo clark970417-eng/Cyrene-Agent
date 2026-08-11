@@ -4,13 +4,24 @@
 
 import { channelsState } from "./state";
 import {
-  channelsWechatEnabledEl, channelsFeishuEnabledEl,
+  channelsWechatEnabledEl, channelsFeishuEnabledEl, channelsDiscordEnabledEl,
   channelsRateUserEl, channelsRateChannelEl,
   channelsTtsEl, channelsStickerEl, channelsMirrorEl,
   channelsToolSandboxOffEl, channelsToolSandboxAllEl, channelsToolSandboxSafeEl,
   channelsFeishuAppIdEl, channelsFeishuAppSecretEl, channelsFeishuAppSecretRevealBtn,
   channelsFeishuSaveBtn, channelsFeishuFeedbackEl,
-  channelsWechatStatusEl, channelsFeishuStatusEl,
+  channelsWechatStatusEl, channelsFeishuStatusEl, channelsDiscordStatusEl,
+  channelsDiscordTokenEl, channelsDiscordTokenRevealBtn,
+  channelsDiscordGuildIdsEl, channelsDiscordChannelIdsEl, channelsDiscordUserIdsEl,
+  channelsDiscordCodexOwnerIdEl, channelsDiscordRequireMentionEl, channelsDiscordVoiceEnabledEl,
+  channelsDiscordSaveBtn, channelsDiscordTestBtn, channelsDiscordFeedbackEl,
+  channelsDiscordUsernameEl, channelsDiscordActivityEl, channelsDiscordPresenceEl,
+  channelsDiscordProfileSaveBtn, channelsDiscordAvatarPickBtn, channelsDiscordBannerPickBtn, channelsDiscordProfileFeedbackEl,
+  channelsSpotifyClientIdEl, channelsSpotifyClientSecretEl, channelsSpotifySecretRevealBtn, channelsSpotifyQueryEl,
+  channelsSpotifyConnectBtn, channelsSpotifyDisconnectBtn, channelsSpotifyPreviousBtn, channelsSpotifyToggleBtn,
+  channelsSpotifyNextBtn, channelsSpotifyPlayQueryBtn, channelsSpotifyStatusEl, channelsSpotifyFeedbackEl,
+  channelsBilibiliConnectBtn, channelsBilibiliDisconnectBtn, channelsBilibiliStatusEl, channelsBilibiliFeedbackEl,
+  channelsCloudStatusEl, channelsCloudLocalBtn, channelsCloudRemoteBtn, channelsCloudRestartBtn, channelsCloudRefreshBtn, channelsCloudFeedbackEl,
   channelsWechatLoginBtn, channelsWechatRestartBtn, channelsWechatFeedbackEl,
   channelsLogListEl, channelsLogRefreshBtn, channelsLogClearBtn,
 } from "./dom";
@@ -50,6 +61,24 @@ function setFeishuFeedback(kind: "info" | "ok" | "err", msg: string): void {
   if (kind === "ok") channelsFeishuFeedbackEl.classList.add("channels-feedback--ok");
   else if (kind === "err") channelsFeishuFeedbackEl.classList.add("channels-feedback--err");
   else channelsFeishuFeedbackEl.classList.add("channels-feedback--info");
+}
+
+function setDiscordFeedback(kind: "info" | "ok" | "err", msg: string): void {
+  if (!channelsDiscordFeedbackEl) return;
+  channelsDiscordFeedbackEl.textContent = msg;
+  channelsDiscordFeedbackEl.className = "channels-feedback";
+  channelsDiscordFeedbackEl.classList.add(kind === "ok" ? "channels-feedback--ok" : kind === "err" ? "channels-feedback--err" : "channels-feedback--info");
+}
+
+function parseDiscordIds(value: string | undefined): string[] {
+  return [...new Set((value ?? "").split(/[\s,，]+/).map((id) => id.trim()).filter(Boolean))];
+}
+
+function setFeedback(el: HTMLElement | null, kind: "info" | "ok" | "err", message: string): void {
+  if (!el) return;
+  el.textContent = message;
+  el.className = "channels-feedback";
+  el.classList.add(kind === "ok" ? "channels-feedback--ok" : kind === "err" ? "channels-feedback--err" : "channels-feedback--info");
 }
 
 export interface LogEntry {
@@ -105,6 +134,7 @@ export async function loadChannelsPanel(): Promise<void> {
     const cfg = await window.settings.channelsGetConfig();
     if (channelsWechatEnabledEl) channelsWechatEnabledEl.checked = !!cfg.wechat.enabled;
     if (channelsFeishuEnabledEl) channelsFeishuEnabledEl.checked = !!cfg.feishu.enabled;
+    if (channelsDiscordEnabledEl) channelsDiscordEnabledEl.checked = !!cfg.discord?.enabled;
     if (channelsRateUserEl) channelsRateUserEl.value = String(cfg.rateLimitPerUser ?? 10);
     if (channelsRateChannelEl) channelsRateChannelEl.value = String(cfg.rateLimitPerChannel ?? 100);
     if (channelsTtsEl) channelsTtsEl.checked = cfg.ttsEnabled !== false;
@@ -122,12 +152,29 @@ export async function loadChannelsPanel(): Promise<void> {
         ? "已保存（输入新值会覆盖）"
         : "点击保存配置时加密保存";
     }
+    if (channelsDiscordTokenEl) {
+      channelsDiscordTokenEl.value = "";
+      channelsDiscordTokenEl.placeholder = cfg.discord?.botToken ? "已加密儲存（輸入新值會覆蓋）" : "儲存時會加密";
+    }
+    if (channelsDiscordGuildIdsEl) channelsDiscordGuildIdsEl.value = (cfg.discord?.allowedGuildIds ?? []).join(", ");
+    if (channelsDiscordChannelIdsEl) channelsDiscordChannelIdsEl.value = (cfg.discord?.allowedChannelIds ?? []).join(", ");
+    if (channelsDiscordUserIdsEl) channelsDiscordUserIdsEl.value = (cfg.discord?.allowedUserIds ?? []).join(", ");
+    if (channelsDiscordCodexOwnerIdEl) channelsDiscordCodexOwnerIdEl.value = cfg.discord?.codexImageOwnerId ?? "";
+    if (channelsDiscordRequireMentionEl) channelsDiscordRequireMentionEl.checked = cfg.discord?.requireMention !== false;
+    if (channelsDiscordVoiceEnabledEl) channelsDiscordVoiceEnabledEl.checked = cfg.discord?.voiceEnabled !== false;
+    if (channelsSpotifyClientIdEl) channelsSpotifyClientIdEl.value = cfg.spotify?.clientId ?? "";
+    if (channelsSpotifyClientSecretEl) channelsSpotifyClientSecretEl.placeholder = cfg.spotify?.clientSecret ? "已加密儲存（輸入新值會覆蓋）" : "Spotify Developer Dashboard Client Secret";
 
     // 拉一次渠道状态
     const status = (await window.settings.channelsGetStatus()) as Record<string, { phase: string; message?: string }>;
     renderProactiveDeliveryAvailability(status);
     renderChannelStatus(channelsWechatStatusEl, status.wechat?.phase ?? "offline", status.wechat?.message);
     renderChannelStatus(channelsFeishuStatusEl, status.feishu?.phase ?? "offline", status.feishu?.message);
+    renderChannelStatus(channelsDiscordStatusEl, status.discord?.phase ?? "offline", status.discord?.message);
+    void refreshDiscordProfile();
+    void refreshSpotify();
+    void refreshBilibili();
+    void refreshCloudStatus();
     // Phase 3.4：拉一次消息日志
     void refreshChannelsLog();
   } catch (err) {
@@ -141,6 +188,7 @@ export async function loadChannelsPanel(): Promise<void> {
       void window.settings.channelsSaveConfig({
         wechat: { enabled: channelsWechatEnabledEl?.checked ?? false },
         feishu: { enabled: channelsFeishuEnabledEl?.checked ?? false },
+        discord: { enabled: channelsDiscordEnabledEl?.checked ?? false },
         rateLimitPerUser: Number(channelsRateUserEl?.value) || 10,
         rateLimitPerChannel: Number(channelsRateChannelEl?.value) || 100,
         ttsEnabled: channelsTtsEl?.checked ?? true,
@@ -157,6 +205,7 @@ export async function loadChannelsPanel(): Promise<void> {
   for (const el of [
     channelsWechatEnabledEl,
     channelsFeishuEnabledEl,
+    channelsDiscordEnabledEl,
     channelsRateUserEl,
     channelsRateChannelEl,
     channelsTtsEl,
@@ -171,7 +220,7 @@ export async function loadChannelsPanel(): Promise<void> {
 
   // 监听安装进度（Phase 1+ 才会收到）
   window.settings.onChannelsInstallProgress((progress) => {
-    const target = progress.channel === "wechat" ? channelsWechatStatusEl : progress.channel === "feishu" ? channelsFeishuStatusEl : null;
+    const target = progress.channel === "wechat" ? channelsWechatStatusEl : progress.channel === "feishu" ? channelsFeishuStatusEl : progress.channel === "discord" ? channelsDiscordStatusEl : null;
     if (target) renderChannelStatus(target, "starting", `${progress.phase} ${progress.pct}%`);
   });
   window.settings.onChannelsStatusChanged((status) => {
@@ -179,6 +228,7 @@ export async function loadChannelsPanel(): Promise<void> {
     renderProactiveDeliveryAvailability(s);
     renderChannelStatus(channelsWechatStatusEl, s.wechat?.phase ?? "offline", s.wechat?.message);
     renderChannelStatus(channelsFeishuStatusEl, s.feishu?.phase ?? "offline", s.feishu?.message);
+    renderChannelStatus(channelsDiscordStatusEl, s.discord?.phase ?? "offline", s.discord?.message);
   });
 
   // ===== 飞书交互（Phase 2 长连接版） =====
@@ -217,6 +267,127 @@ export async function loadChannelsPanel(): Promise<void> {
       setFeishuFeedback("err", err instanceof Error ? err.message : String(err));
     }
   });
+
+  // ===== Discord：保留既有 Bot / 語音 / 音樂功能，只重建設定入口 =====
+  channelsDiscordTokenRevealBtn?.addEventListener("click", () => {
+    if (channelsDiscordTokenEl) channelsDiscordTokenEl.type = channelsDiscordTokenEl.type === "password" ? "text" : "password";
+  });
+
+  const saveDiscord = async (): Promise<void> => {
+    setDiscordFeedback("info", "正在安全儲存並重新連線…");
+    const discord: Record<string, unknown> = {
+      enabled: channelsDiscordEnabledEl?.checked ?? false,
+      allowedGuildIds: parseDiscordIds(channelsDiscordGuildIdsEl?.value),
+      allowedChannelIds: parseDiscordIds(channelsDiscordChannelIdsEl?.value),
+      allowedUserIds: parseDiscordIds(channelsDiscordUserIdsEl?.value),
+      codexImageOwnerId: channelsDiscordCodexOwnerIdEl?.value.trim() || undefined,
+      requireMention: channelsDiscordRequireMentionEl?.checked ?? true,
+      voiceEnabled: channelsDiscordVoiceEnabledEl?.checked ?? true,
+    };
+    if (channelsDiscordTokenEl?.value.trim()) discord.botToken = channelsDiscordTokenEl.value.trim();
+    await window.settings.channelsSaveConfig({ discord });
+    await window.settings.channelsRestart();
+    if (channelsDiscordTokenEl) {
+      channelsDiscordTokenEl.value = "";
+      channelsDiscordTokenEl.type = "password";
+      channelsDiscordTokenEl.placeholder = "已加密儲存（輸入新值會覆蓋）";
+    }
+    setDiscordFeedback("ok", "已儲存，Discord 正在重新連線。");
+  };
+
+  channelsDiscordSaveBtn?.addEventListener("click", () => {
+    void saveDiscord().catch((err) => setDiscordFeedback("err", err instanceof Error ? err.message : String(err)));
+  });
+  channelsDiscordTestBtn?.addEventListener("click", () => {
+    void (async () => {
+      setDiscordFeedback("info", "正在測試 Discord 連線…");
+      const result = await window.settings.channelsDiscordTestConnection();
+      setDiscordFeedback(result.ok ? "ok" : "err", result.ok ? (result.message ?? "Discord 連線正常。") : (result.error ?? result.message ?? "連線失敗"));
+    })().catch((err) => setDiscordFeedback("err", err instanceof Error ? err.message : String(err)));
+  });
+
+  let pendingAvatarPath: string | undefined;
+  let pendingBannerPath: string | undefined;
+  async function refreshDiscordProfile(): Promise<void> {
+    const profile = await window.settings.channelsDiscordGetProfile();
+    if (channelsDiscordUsernameEl && document.activeElement !== channelsDiscordUsernameEl) channelsDiscordUsernameEl.value = profile.username ?? "";
+    if (channelsDiscordActivityEl && document.activeElement !== channelsDiscordActivityEl) channelsDiscordActivityEl.value = profile.activityText ?? "";
+    if (channelsDiscordPresenceEl && profile.presenceStatus) channelsDiscordPresenceEl.value = profile.presenceStatus;
+    channelsDiscordProfileSaveBtn?.toggleAttribute("disabled", !profile.connected);
+    channelsDiscordAvatarPickBtn?.toggleAttribute("disabled", !profile.connected);
+    channelsDiscordBannerPickBtn?.toggleAttribute("disabled", !profile.connected);
+  }
+  channelsDiscordAvatarPickBtn?.addEventListener("click", () => void (async () => {
+    pendingAvatarPath = await window.settings.channelsDiscordPickAvatar() ?? undefined;
+    if (pendingAvatarPath) setFeedback(channelsDiscordProfileFeedbackEl, "info", "已選擇新頭像，按「更新 Discord 身分」套用。");
+  })());
+  channelsDiscordBannerPickBtn?.addEventListener("click", () => void (async () => {
+    pendingBannerPath = await window.settings.channelsDiscordPickBanner() ?? undefined;
+    if (pendingBannerPath) setFeedback(channelsDiscordProfileFeedbackEl, "info", "已選擇新 Banner，按「更新 Discord 身分」套用。");
+  })());
+  channelsDiscordProfileSaveBtn?.addEventListener("click", () => void (async () => {
+    setFeedback(channelsDiscordProfileFeedbackEl, "info", "正在更新 Discord 身分…");
+    const result = await window.settings.channelsDiscordUpdateProfile({ username: channelsDiscordUsernameEl?.value.trim() || undefined, activityText: channelsDiscordActivityEl?.value.trim() || "", status: channelsDiscordPresenceEl?.value || "online", avatarPath: pendingAvatarPath, bannerPath: pendingBannerPath });
+    if (!result.ok) throw new Error(result.error ?? "更新失敗");
+    pendingAvatarPath = undefined; pendingBannerPath = undefined;
+    setFeedback(channelsDiscordProfileFeedbackEl, "ok", "Discord 身分已更新。");
+    await refreshDiscordProfile();
+  })().catch((err) => setFeedback(channelsDiscordProfileFeedbackEl, "err", err instanceof Error ? err.message : String(err))));
+
+  async function refreshSpotify(): Promise<void> {
+    const status = await window.settings.channelsSpotifyGetStatus();
+    if (channelsSpotifyStatusEl) channelsSpotifyStatusEl.textContent = status.connected ? `${status.accountName ?? "已連線"}${status.product ? ` · ${status.product}` : ""}` : status.configured ? "已設定，等待授權" : "尚未連線";
+    if (status.error) setFeedback(channelsSpotifyFeedbackEl, "err", status.error);
+    if (channelsSpotifyToggleBtn) channelsSpotifyToggleBtn.textContent = status.playback?.active && !status.playback.paused ? "暫停" : "播放";
+  }
+  channelsSpotifySecretRevealBtn?.addEventListener("click", () => { if (channelsSpotifyClientSecretEl) channelsSpotifyClientSecretEl.type = channelsSpotifyClientSecretEl.type === "password" ? "text" : "password"; });
+  channelsSpotifyConnectBtn?.addEventListener("click", () => void (async () => {
+    setFeedback(channelsSpotifyFeedbackEl, "info", "正在開啟 Spotify 授權…");
+    const result = await window.settings.channelsSpotifyAuthorize({ clientId: channelsSpotifyClientIdEl?.value.trim() || undefined, clientSecret: channelsSpotifyClientSecretEl?.value.trim() || undefined });
+    if (!result.ok) throw new Error(result.error ?? result.message ?? "授權失敗");
+    if (channelsSpotifyClientSecretEl) { channelsSpotifyClientSecretEl.value = ""; channelsSpotifyClientSecretEl.type = "password"; channelsSpotifyClientSecretEl.placeholder = "已加密儲存（輸入新值會覆蓋）"; }
+    setFeedback(channelsSpotifyFeedbackEl, "ok", result.message ?? "已開啟 Spotify 授權頁。");
+    window.setTimeout(() => void refreshSpotify(), 1500);
+  })().catch((err) => setFeedback(channelsSpotifyFeedbackEl, "err", err instanceof Error ? err.message : String(err))));
+  channelsSpotifyDisconnectBtn?.addEventListener("click", () => void window.settings.channelsSpotifyDisconnect().then(() => refreshSpotify()));
+  const spotifyCommand = (command: string, query?: string) => void (async () => {
+    const result = await window.settings.channelsSpotifyControl({ command, query });
+    setFeedback(channelsSpotifyFeedbackEl, result.ok ? "ok" : "err", result.message);
+    await refreshSpotify();
+  })();
+  channelsSpotifyPreviousBtn?.addEventListener("click", () => spotifyCommand("previous"));
+  channelsSpotifyNextBtn?.addEventListener("click", () => spotifyCommand("next"));
+  channelsSpotifyToggleBtn?.addEventListener("click", async () => { const status = await window.settings.channelsSpotifyGetStatus(); spotifyCommand(status.playback?.active && !status.playback.paused ? "pause" : "resume"); });
+  channelsSpotifyPlayQueryBtn?.addEventListener("click", () => spotifyCommand("play", channelsSpotifyQueryEl?.value.trim()));
+
+  async function refreshBilibili(): Promise<void> {
+    const status = await window.settings.channelsBilibiliGetStatus();
+    if (channelsBilibiliStatusEl) channelsBilibiliStatusEl.textContent = status.connected ? "已連接" : "尚未連接";
+    channelsBilibiliDisconnectBtn?.toggleAttribute("disabled", !status.connected);
+  }
+  channelsBilibiliConnectBtn?.addEventListener("click", () => void (async () => {
+    setFeedback(channelsBilibiliFeedbackEl, "info", "正在確認 Opera GX 的 Bilibili 登入狀態…");
+    const result = await window.settings.channelsBilibiliConnect();
+    setFeedback(channelsBilibiliFeedbackEl, result.ok ? "ok" : "err", result.message ?? result.error ?? "連接失敗");
+    await refreshBilibili();
+  })().catch((err) => setFeedback(channelsBilibiliFeedbackEl, "err", err instanceof Error ? err.message : String(err))));
+  channelsBilibiliDisconnectBtn?.addEventListener("click", () => void (async () => {
+    const result = await window.settings.channelsBilibiliDisconnect();
+    setFeedback(channelsBilibiliFeedbackEl, "ok", result.message ?? "已解除連接");
+    await refreshBilibili();
+  })());
+
+  async function refreshCloudStatus(): Promise<void> {
+    try {
+      const status = await window.settings.channelsDiscordCloudStatus();
+      if (channelsCloudStatusEl) channelsCloudStatusEl.textContent = status?.mode === "local" ? "這台 Mac 接管中" : status?.mode === "cloud" ? "Google Cloud 接管中" : "交接中";
+    } catch (err) { setFeedback(channelsCloudFeedbackEl, "err", err instanceof Error ? err.message : String(err)); }
+  }
+  const cloudControl = (action: "local" | "cloud" | "restart-cloud") => void window.settings.channelsDiscordCloudControl(action).then(() => { setFeedback(channelsCloudFeedbackEl, "ok", "雲端接管狀態已更新。"); return refreshCloudStatus(); }).catch((err) => setFeedback(channelsCloudFeedbackEl, "err", err instanceof Error ? err.message : String(err)));
+  channelsCloudLocalBtn?.addEventListener("click", () => cloudControl("local"));
+  channelsCloudRemoteBtn?.addEventListener("click", () => cloudControl("cloud"));
+  channelsCloudRestartBtn?.addEventListener("click", () => cloudControl("restart-cloud"));
+  channelsCloudRefreshBtn?.addEventListener("click", () => void refreshCloudStatus());
 
   // ===== 微信交互（扫码登录走 iLink HTTP API，详见 src/main/channels/adapters/wechat/） =====
 

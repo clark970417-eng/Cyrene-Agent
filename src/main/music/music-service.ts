@@ -26,7 +26,7 @@ import type {
 } from "./types";
 
 	import type { MusicStatusSnapshot } from "../../shared/music-view-state";
-	
+
 	const SET_TTL_MS = 30 * 60_000;
 
 export interface PresentResult {

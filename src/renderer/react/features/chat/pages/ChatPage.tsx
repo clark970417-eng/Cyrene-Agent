@@ -1827,9 +1827,10 @@ export function ChatPage() {
   const currentPendingQueue = activeSessionId
     ? (pendingQueueBySession[activeSessionId] ?? []).map((item) => ({ id: item.id, content: item.visibleContent }))
     : [];
+  const isEmbedded = window.self !== window.top;
 
   return (
-    <div className={`cy-page ${collapsed ? "is-collapsed" : ""}`}>
+    <div className={`cy-page ${collapsed ? "is-collapsed" : ""} ${isEmbedded ? "is-embedded" : ""}`}>
       <div className="cy-page-toggle">
         <SidebarToggle collapsed={collapsed} onToggle={() => setCollapsed((v) => !v)} />
       </div>

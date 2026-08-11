@@ -1,4 +1,4 @@
-import * as path from "node:path";
+import { pathApiFor } from "./path-utils";
 
 export type ScreenshotMode = "clipboard-only" | "clipboard-and-file";
 
@@ -109,9 +109,10 @@ export function resolveCompletedFile(outputDirectory: string, fileName: string):
   if (!UUID_V4_PNG_FILE_NAME.test(fileName)) {
     throw new Error("INVALID_SCREENSHOT_FILE_NAME");
   }
-  const directory = path.resolve(outputDirectory);
-  const resolved = path.resolve(directory, fileName);
-  if (path.dirname(resolved) !== directory) {
+  const pathApi = pathApiFor(outputDirectory);
+  const directory = pathApi.resolve(outputDirectory);
+  const resolved = pathApi.resolve(directory, fileName);
+  if (pathApi.dirname(resolved) !== directory) {
     throw new Error("INVALID_SCREENSHOT_FILE_NAME");
   }
   return resolved;

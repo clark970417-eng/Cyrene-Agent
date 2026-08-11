@@ -5,7 +5,9 @@ import { app, BrowserWindow, globalShortcut, ipcMain, nativeImage } from "electr
 import { randomUUID } from "crypto";
 import { IPC } from "../../shared/ipc-channels";
 import { ElectronScreenshotHelperClient } from "./helper-client";
+import type { ScreenshotHelperClient } from "./helper-client";
 import { resolveScreenshotHelperPath } from "./helper-path";
+import { MacScreenshotClient } from "./macos-screenshot-client";
 import {
   createScreenshotService,
   validateScreenshotInsert,
@@ -73,7 +75,7 @@ export function initializeScreenshotService(
     };
   };
 
-  const client = new ElectronScreenshotHelperClient({
+  const windowsClient = new ElectronScreenshotHelperClient({
     spawnImpl: (command, args) =>
       spawn(command, args, {
         stdio: ["pipe", "pipe", "pipe"],
@@ -89,6 +91,23 @@ export function initializeScreenshotService(
     screenshotDirectory,
     logger: console,
   });
+
+  const macClient = new MacScreenshotClient({
+    screenshotDirectory,
+    ensureDirectory: (directory) => fs.promises.mkdir(directory, { recursive: true }).then(() => undefined),
+    capture: (args) => new Promise<void>((resolve, reject) => {
+      const child = spawn("/usr/sbin/screencapture", args, { stdio: "ignore" });
+      child.once("error", reject);
+      child.once("exit", (code) => code === 0 ? resolve() : reject(new Error(code === 1 ? "SCREENSHOT_CANCELLED" : `SCREENSHOT_FAILED:${code ?? "unknown"}`)));
+    }),
+    probeImage: (filePath) => {
+      const image = nativeImage.createFromPath(filePath);
+      const size = image.getSize();
+      return { empty: image.isEmpty(), width: size.width, height: size.height };
+    },
+  });
+
+  const client: ScreenshotHelperClient = process.platform === "darwin" ? macClient : windowsClient;
 
   const service = createScreenshotService({
     client,

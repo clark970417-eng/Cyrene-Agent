@@ -32,7 +32,7 @@ export interface GeneralSettings extends ChatAppearanceSettings {
   sidebarVisible: boolean;
   tasksVisible: boolean;
   launchAtLogin: boolean;
-  language: "zh-CN";
+  language: "zh-TW";
   uiTheme: UiTheme;
   windowCornerRadius: number;
   /** @deprecated 旧版透明窗口开关，仅保留用于配置兼容。 */

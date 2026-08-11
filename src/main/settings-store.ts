@@ -18,7 +18,7 @@ export const DEFAULT_USER_PROFILE: UserProfile = {
   nickname: "",
   callPreference: "",
   birthday: "",
-  timezone: "Asia/Shanghai",
+  timezone: "Asia/Taipei",
   avatarPath: "",
   defaultCity: "",
   gender: "secret",

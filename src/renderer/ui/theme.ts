@@ -1,4 +1,5 @@
 import "./window-corner-radius";
+import "./traditional-chinese";
 import { normalizeUiTheme, type UiTheme } from "../../shared/ui-theme";
 import { DEFAULT_UI_FONT, normalizeUiFont, type UiFont } from "../../shared/ui-font";
 import type { ChatAppearanceSettings } from "../../shared/chat-appearance";
@@ -31,7 +32,7 @@ function applyRadius(radius: boolean): void {
 }
 
 const CUSTOM_FONT_STYLE_ID = "cyrene-custom-font";
-const DEFAULT_FONT_STACK = '"Noto Sans SC", -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif';
+const DEFAULT_FONT_STACK = '"Noto Sans TC", -apple-system, BlinkMacSystemFont, "PingFang TC", "Helvetica Neue", "Segoe UI", sans-serif';
 
 function applyFont(value: unknown): void {
   const font = normalizeUiFont(value);

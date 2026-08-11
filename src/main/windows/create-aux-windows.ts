@@ -41,11 +41,11 @@ export function createReactChatWindow(sessionId?: string): void {
   const window = new BrowserWindow({
     x: layout.chat.x,
     y: layout.chat.y,
-    width: 1280,
-    height: 760,
-    minWidth: 960,
-    minHeight: 540,
-    title: "Cyrene · 聊天",
+    width: 1500,
+    height: 900,
+    minWidth: 1040,
+    minHeight: 640,
+    title: "昔漣 · 統一工作台",
     icon: getCurrentAppIconPath(),
     backgroundColor: "#00000000",
     autoHideMenuBar: true,
@@ -57,6 +57,7 @@ export function createReactChatWindow(sessionId?: string): void {
       preload: path.join(app.getAppPath(), "dist", "preload", "preload", "index.js"),
       contextIsolation: true,
       nodeIntegration: false,
+      nodeIntegrationInSubFrames: true,
       sandbox: false,
     },
   });
@@ -68,11 +69,11 @@ export function createReactChatWindow(sessionId?: string): void {
 
   // search 字段必须含前导 "?"（Electron url.format() 要求）
   const search = sessionId ? `?sessionId=${encodeURIComponent(sessionId)}` : undefined;
-  const indexPath = path.join(__dirname, "..", "..", "renderer", "react", "index.html");
+  const indexPath = path.join(__dirname, "..", "..", "renderer", "workspace", "index.html");
 
   if (isDev) {
     void window
-      .loadURL(`http://localhost:5173/react/${search ?? ""}`)
+      .loadURL(`http://localhost:5173/workspace/${search ?? ""}`)
       .catch((error) => console.error("[ReactChatWindow] loadURL failed:", error));
   } else {
     void window
@@ -91,6 +92,15 @@ export function createReactChatWindow(sessionId?: string): void {
       reactChatSession.reset();
     }
   });
+}
+
+export function navigateUnifiedWorkspace(section: string, detail?: string): void {
+  createReactChatWindow();
+  const window = reactChatWindow;
+  if (!window || window.isDestroyed()) return;
+  const send = () => window.webContents.send(IPC.WORKSPACE_NAVIGATE, { section, detail });
+  if (window.webContents.isLoading()) window.webContents.once("did-finish-load", send);
+  else send();
 }
 
 export function dispatchOrQueueReactSession(sessionId: string): void {
@@ -400,4 +410,3 @@ export function createCallWindow(): void {
   // 绑定给 call-manager
   setCallWindow(window);
 }
-

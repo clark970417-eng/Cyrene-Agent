@@ -163,6 +163,9 @@ import {
 import { createProactiveLifecycle } from "./proactive/proactive-lifecycle";
 import { createCitaService } from "./services/cita/cita-service";
 import { contextRefRegistry } from "./orchestrator/tool-context";
+import { registerCustomFeaturesIpc } from "./custom-features-ipc";
+import { registerWavesUidIpc } from "./wavesuid-ipc";
+import { registerPaintIpc } from "./paint-ipc";
 
 
 configureDocumentIndexQueue(runDocumentIndexJob);
@@ -293,6 +296,9 @@ if (loadGeneralSettings().disableGpuElectron) {
 }
 
 app.whenReady().then(async () => {
+  registerCustomFeaturesIpc();
+  registerWavesUidIpc();
+  registerPaintIpc();
   // Print the banner once at startup. It is plain text (no color, no log
   // prefix) so it stands apart from logger output as a brand artifact.
   process.stdout.write("\n" + renderBanner() + "\n\n");
@@ -447,8 +453,6 @@ app.whenReady().then(async () => {
   createWindow(manager);
   setLive2dWindowSender((channel, payload) => manager.sendToMainWindow(channel, payload));
   manager.createReactChatWindow();
-  if (generalSettings.sidebarVisible) manager.createSidebarWindow();
-  if (generalSettings.tasksVisible) manager.createTasksWindow();
   tray = createTray({
     toggleMainWindow: () => manager.toggleMainWindow(),
     createSidebarWindow: () => manager.createSidebarWindow(),

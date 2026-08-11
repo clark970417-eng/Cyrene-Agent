@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest"
 import {
   buildAgentRunOptions,
   buildChannelSystem,
+  buildDesktopLocaleSystem,
   onAgentRunFinished,
   type BuildOptionsDeps,
   type OnRunFinishedDeps,
@@ -45,6 +46,17 @@ function createBuildDeps(): BuildOptionsDeps {
     loadAskQuotesPrompt: () => "ASK_QUOTES",
   }
 }
+
+describe("desktop Taiwan locale defaults", () => {
+  it("uses Taiwan defaults only for the desktop channel", () => {
+    expect(buildDesktopLocaleSystem()).toContain("台灣政府")
+    expect(buildDesktopLocaleSystem()).toContain("新台幣")
+    expect(buildDesktopLocaleSystem()).toContain("攝氏")
+    expect(buildDesktopLocaleSystem("discord")).toBe("")
+    expect(buildDesktopLocaleSystem("wechat")).toBe("")
+    expect(buildDesktopLocaleSystem("feishu")).toBe("")
+  })
+})
 
 describe("build-options", () => {
   it("builds the lightweight Ask Soul prompt in the approved order with trusted identity only", async () => {

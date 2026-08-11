@@ -1,4 +1,4 @@
-import * as path from "node:path";
+import { pathApiFor } from "./path-utils";
 
 export interface ScreenshotHelperPathEnvironment {
   isPackaged: boolean;
@@ -9,8 +9,9 @@ export interface ScreenshotHelperPathEnvironment {
 
 export function resolveScreenshotHelperPath(environment: ScreenshotHelperPathEnvironment): string {
   if (environment.envOverride?.trim()) return environment.envOverride;
+  const pathApi = pathApiFor(environment.isPackaged ? environment.resourcesPath : environment.appPath);
   if (environment.isPackaged) {
-    return path.join(environment.resourcesPath, "bin", "cyrene-screenshot.exe");
+    return pathApi.join(environment.resourcesPath, "bin", "cyrene-screenshot.exe");
   }
-  return path.join(environment.appPath, "native", "cyrene-screenshot", "target", "release", "cyrene-screenshot.exe");
+  return pathApi.join(environment.appPath, "native", "cyrene-screenshot", "target", "release", "cyrene-screenshot.exe");
 }

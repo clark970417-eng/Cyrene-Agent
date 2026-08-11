@@ -121,7 +121,7 @@ describe("buildClineSystemPromptWithPreferences 装配", () => {
     // 没有 userPrefs source → userPrefs.content 为空
     // memoryStore 默认 profile 只带系统语言 → L0 块保留常用语言
     const sysPrompt = await buildClineSystemPromptWithPreferences();
-    expect(sysPrompt).toBe("[用户画像]\n常用语言：zh-CN");
+    expect(sysPrompt).toBe("[用户画像]\n常用语言：zh-TW");
   });
 
   it("只有 identity → 拼装包含 identity 内容", async () => {

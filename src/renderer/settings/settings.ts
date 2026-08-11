@@ -204,7 +204,7 @@ if (!window.settings) {
       sidebarVisible: true,
       tasksVisible: true,
       launchAtLogin: false,
-      language: "zh-CN",
+      language: "zh-TW",
       uiTheme: "pearl-white",
       windowCornerRadius: DEFAULT_WINDOW_CORNER_RADIUS,
       defaultChatMode: "chat",
@@ -220,6 +220,9 @@ if (!window.settings) {
     saveGeneral: (c) => Promise.resolve(c as GeneralSettings),
     openCustomStylePrompt: async () => ({ ok: false, error: "settings api unavailable" }),
     channelsGetStatus: () => Promise.resolve({}),
+    channelsBilibiliConnect: async () => ({ ok: false, error: "僅桌面版可連接 Opera GX" }),
+    channelsBilibiliGetStatus: async () => ({ connected: false, browser: "Opera GX", profilePath: "" }),
+    channelsBilibiliDisconnect: async () => ({ ok: true, message: "尚未連接" }),
     onChannelsStatusChanged: () => () => {},
     beginScreenshotHotkeyCapture: () => Promise.resolve(true),
     endScreenshotHotkeyCapture: () => Promise.resolve(true),
@@ -351,7 +354,7 @@ function applyStickerSizeSelection(value: "small" | "standard" | "large"): void 
   });
 }
 
-function applyLanguageSelection(language: "zh-CN"): void {
+function applyLanguageSelection(language: "zh-TW"): void {
   languageSelect.querySelectorAll<HTMLButtonElement>(".language-option").forEach((button) => {
     const active = button.dataset.lang === language;
     button.classList.toggle("is-active", active);
@@ -938,7 +941,7 @@ async function loadGeneralSettings(): Promise<void> {
     void window.settings!.channelsGetStatus()
       .then((status: unknown) => renderProactiveDeliveryAvailability(status as Record<string, { phase?: string }>))
       .catch(() => renderProactiveDeliveryAvailability({}));
-    applyLanguageSelection("zh-CN");
+    applyLanguageSelection("zh-TW");
     setPreferencesSaveStatus("等待保存");
     setAppearanceSaveStatus("等待保存");
     setGeneralSaveStatus("等待保存");
@@ -1362,7 +1365,7 @@ generalForm.addEventListener("submit", async (e) => {
       sidebarVisible: sidebarVisibleInput.checked,
       tasksVisible: tasksVisibleInput.checked,
       launchAtLogin: launchAtLoginInput.checked,
-      language: "zh-CN",
+      language: "zh-TW",
     });
     setGeneralSaveStatus("已保存", "is-ok");
   } catch {
@@ -1553,7 +1556,10 @@ function switchSection(section: string): void {
 document.querySelectorAll(".nav-item").forEach((el) => {
   el.addEventListener("click", () => {
     const section = (el as HTMLElement).dataset.section;
-    if (section) switchSection(section);
+    if (section) {
+      switchSection(section);
+      if (window.location.hash !== `#${section}`) history.replaceState(null, "", `#${section}`);
+    }
   });
 });
 
@@ -1647,6 +1653,9 @@ void loadChannelsPanel();
 // 无 hash 默认 general。
 const initialSection = (window.location.hash || "#general").slice(1);
 switchSection(initialSection);
+window.addEventListener("hashchange", () => {
+  switchSection((window.location.hash || "#general").slice(1));
+});
 // 监听 main 发来的切标签事件（窗口已打开时，main 不重新 loadURL，改发事件）
 window.settings?.onSwitchSection?.((section) => {
   switchSection(section);

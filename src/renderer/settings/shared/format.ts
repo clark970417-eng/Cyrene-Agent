@@ -6,7 +6,7 @@ export function formatDateTime(timestamp: number): string {
   if (!timestamp) return "暂无时间";
   const date = new Date(timestamp);
   if (Number.isNaN(date.getTime())) return "暂无时间";
-  return date.toLocaleString("zh-CN", {
+  return date.toLocaleString("zh-TW", {
     year: "numeric",
     month: "2-digit",
     day: "2-digit",

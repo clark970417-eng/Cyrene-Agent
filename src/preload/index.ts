@@ -163,6 +163,25 @@ const sidebarApi = {
   openTasks: () => ipcRenderer.send(IPC.SIDEBAR_OPEN_TASKS),
   openSettings: (section?: string) => ipcRenderer.send(IPC.SIDEBAR_OPEN_SETTINGS, section),
   openCall: () => ipcRenderer.send(IPC.SIDEBAR_OPEN_CALL),
+  setPetDockVisible: (visible: boolean) => ipcRenderer.send(IPC.SIDEBAR_SET_PET_DOCK_VISIBLE, visible),
+  readSharedNotebook: () => ipcRenderer.invoke("sidebar:read-shared-notebook"),
+  openSharedNotebook: () => ipcRenderer.invoke("sidebar:open-shared-notebook"),
+  getNotebookEntries: () => ipcRenderer.invoke("sidebar:get-notebook-entries"),
+  addNotebookEntry: (options: unknown) => ipcRenderer.invoke("sidebar:add-notebook-entry", options),
+  updateNotebookEntry: (id: string, content: string, title?: string) => ipcRenderer.invoke("sidebar:update-notebook-entry", id, content, title),
+  deleteNotebookEntry: (id: string) => ipcRenderer.invoke("sidebar:delete-notebook-entry", id),
+  onSharedNotebookChanged: (callback: () => void) => {
+    const listener = () => callback();
+    ipcRenderer.on("shared-notebook:changed", listener);
+    return () => ipcRenderer.off("shared-notebook:changed", listener);
+  },
+  reportSlotBounds: (bounds: { x: number; y: number; width: number; height: number; isDocked: boolean }) =>
+    ipcRenderer.send(IPC.SIDEBAR_REPORT_PET_SLOT, bounds),
+  onPetDockChanged: (callback: (docked: boolean) => void) => {
+    const listener = (_event: unknown, docked: boolean) => callback(docked);
+    ipcRenderer.on("workspace:pet-dock-changed", listener);
+    return () => ipcRenderer.off("workspace:pet-dock-changed", listener);
+  },
 };
 
 const tasksApi = {
@@ -177,6 +196,40 @@ const tasksApi = {
 
 contextBridge.exposeInMainWorld("sidebar", sidebarApi);
 contextBridge.exposeInMainWorld("tasks", tasksApi);
+
+contextBridge.exposeInMainWorld("wavesUid", {
+  status: () => ipcRenderer.invoke(IPC.WAVES_UID_STATUS),
+  run: (command: string, attachments?: Array<{ name: string; url: string; contentType?: string }>) => ipcRenderer.invoke(IPC.WAVES_UID_RUN, { command, attachments: attachments ?? [] }),
+  pickFile: () => ipcRenderer.invoke(IPC.WAVES_UID_PICK_FILE),
+  captureDiscord: () => ipcRenderer.invoke(IPC.WAVES_UID_CAPTURE_DISCORD),
+  login: () => ipcRenderer.invoke(IPC.WAVES_UID_LOGIN),
+  loginStatus: () => ipcRenderer.invoke(IPC.WAVES_UID_LOGIN_STATUS),
+  dataStatus: () => ipcRenderer.invoke(IPC.WAVES_UID_DATA_STATUS),
+  deleteData: (uid: string) => ipcRenderer.invoke(IPC.WAVES_UID_DELETE_DATA, uid),
+});
+
+contextBridge.exposeInMainWorld("gameRoom", {
+  getStats: () => ipcRenderer.invoke(IPC.GAME_ROOM_GET_STATS),
+  recordResult: (payload: { game: string; outcome: "user" | "cyrene" | "draw"; matches?: number }) => ipcRenderer.invoke(IPC.GAME_ROOM_RECORD_RESULT, payload),
+  resetStats: () => ipcRenderer.invoke(IPC.GAME_ROOM_RESET_STATS),
+  react: (name: string) => ipcRenderer.send(IPC.GAME_ROOM_REACT, name),
+});
+
+contextBridge.exposeInMainWorld("paint", {
+  buildPrompt: (description: string) => ipcRenderer.invoke("paint:build-prompt", description),
+  getConnections: () => ipcRenderer.invoke("paint:get-connections"),
+  generateImage: (payload: unknown) => ipcRenderer.invoke("paint:generate-image", payload),
+  openSettings: () => ipcRenderer.send(IPC.SIDEBAR_OPEN_SETTINGS, "api"),
+});
+
+const workspaceApi = {
+  onNavigate: (callback: (target: { section: string; detail?: string }) => void) => {
+    const listener = (_event: unknown, target: { section: string; detail?: string }) => callback(target);
+    ipcRenderer.on(IPC.WORKSPACE_NAVIGATE, listener);
+    return () => ipcRenderer.off(IPC.WORKSPACE_NAVIGATE, listener);
+  },
+};
+contextBridge.exposeInMainWorld("workspace", workspaceApi);
 
 // 通话窗口 API
 const callApi = {
@@ -329,6 +382,24 @@ const settingsApi = {
   channelsWechatRuntimeUpdate: () => ipcRenderer.invoke(IPC.CHANNELS_WECHAT_RUNTIME_UPDATE),
   channelsFeishuTestConnection: () => ipcRenderer.invoke(IPC.CHANNELS_FEISHU_TEST_CONNECTION),
   channelsFeishuTestWebhookReachable: () => ipcRenderer.invoke(IPC.CHANNELS_FEISHU_TEST_WEBHOOK_REACHABLE),
+  channelsDiscordTestConnection: () => ipcRenderer.invoke(IPC.CHANNELS_DISCORD_TEST_CONNECTION),
+  channelsDiscordGetProfile: () => ipcRenderer.invoke(IPC.CHANNELS_DISCORD_GET_PROFILE),
+  channelsDiscordGetMusicState: () => ipcRenderer.invoke(IPC.CHANNELS_DISCORD_GET_MUSIC_STATE),
+  channelsDiscordGetMusicHistory: () => ipcRenderer.invoke(IPC.CHANNELS_DISCORD_GET_MUSIC_HISTORY),
+  channelsDiscordGetMusicFavorites: () => ipcRenderer.invoke(IPC.CHANNELS_DISCORD_GET_MUSIC_FAVORITES),
+  channelsDiscordControlMusic: (input: unknown) => ipcRenderer.invoke(IPC.CHANNELS_DISCORD_CONTROL_MUSIC, input),
+  channelsDiscordUpdateProfile: (profile: unknown) => ipcRenderer.invoke(IPC.CHANNELS_DISCORD_UPDATE_PROFILE, profile),
+  channelsDiscordPickAvatar: () => ipcRenderer.invoke(IPC.CHANNELS_DISCORD_PICK_AVATAR),
+  channelsDiscordPickBanner: () => ipcRenderer.invoke(IPC.CHANNELS_DISCORD_PICK_BANNER),
+  channelsDiscordCloudStatus: () => ipcRenderer.invoke(IPC.CHANNELS_DISCORD_CLOUD_STATUS),
+  channelsDiscordCloudControl: (action: "local" | "cloud" | "restart-cloud") => ipcRenderer.invoke(IPC.CHANNELS_DISCORD_CLOUD_CONTROL, action),
+  channelsSpotifyAuthorize: (input: { clientId?: string; clientSecret?: string }) => ipcRenderer.invoke(IPC.CHANNELS_SPOTIFY_AUTHORIZE, input),
+  channelsSpotifyGetStatus: () => ipcRenderer.invoke(IPC.CHANNELS_SPOTIFY_GET_STATUS),
+  channelsSpotifyControl: (input: { command: string; value?: number; deviceId?: string; query?: string }) => ipcRenderer.invoke(IPC.CHANNELS_SPOTIFY_CONTROL, input),
+  channelsSpotifyDisconnect: () => ipcRenderer.invoke(IPC.CHANNELS_SPOTIFY_DISCONNECT),
+  channelsBilibiliConnect: () => ipcRenderer.invoke(IPC.CHANNELS_BILIBILI_CONNECT),
+  channelsBilibiliGetStatus: () => ipcRenderer.invoke(IPC.CHANNELS_BILIBILI_GET_STATUS),
+  channelsBilibiliDisconnect: () => ipcRenderer.invoke(IPC.CHANNELS_BILIBILI_DISCONNECT),
   // Phase 3.4：消息日志
   channelsLogGet: (limit?: number) => ipcRenderer.invoke(IPC.CHANNELS_LOG_GET, limit ?? 100),
   channelsLogClear: () => ipcRenderer.invoke(IPC.CHANNELS_LOG_CLEAR),

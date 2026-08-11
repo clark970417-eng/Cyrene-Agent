@@ -11,11 +11,11 @@ import {
 beforeEach(() => {
   // Reset to defaults before each test
   updateLocaleContext({
-    uiLocale: "zh-CN",
-    dateLocale: "zh-CN",
+    uiLocale: "zh-TW",
+    dateLocale: "zh-TW",
     weatherLanguage: "zh",
-    responseLanguage: "zh-CN",
-    memoryLanguage: "zh-CN",
+    responseLanguage: "zh-TW",
+    memoryLanguage: "zh-TW",
     asrLanguage: "zh",
   });
 });
@@ -23,9 +23,9 @@ beforeEach(() => {
 describe("LocaleContext defaults", () => {
   it("returns Chinese defaults before any update", () => {
     // After reset, should be defaults
-    expect(getDateLocale()).toBe("zh-CN");
+    expect(getDateLocale()).toBe("zh-TW");
     expect(getWeatherLanguage()).toBe("zh");
-    expect(getMemoryLanguage()).toBe("zh-CN");
+    expect(getMemoryLanguage()).toBe("zh-TW");
     expect(getAsrLanguage()).toBe("zh");
   });
 });
@@ -36,7 +36,7 @@ describe("updateLocaleContext", () => {
     expect(getDateLocale()).toBe("en-US");
     // Others unchanged
     expect(getWeatherLanguage()).toBe("zh");
-    expect(getMemoryLanguage()).toBe("zh-CN");
+    expect(getMemoryLanguage()).toBe("zh-TW");
   });
 
   it("auto-derives weatherLanguage from uiLocale", () => {
@@ -60,12 +60,12 @@ describe("updateLocaleContext", () => {
 describe("normalization", () => {
   it("empty string falls back to default", () => {
     updateLocaleContext({ dateLocale: "" });
-    expect(getDateLocale()).toBe("zh-CN");
+    expect(getDateLocale()).toBe("zh-TW");
   });
 
   it("whitespace-only falls back to default", () => {
     updateLocaleContext({ dateLocale: "   " });
-    expect(getDateLocale()).toBe("zh-CN");
+    expect(getDateLocale()).toBe("zh-TW");
   });
 
   it("trims whitespace from valid value", () => {

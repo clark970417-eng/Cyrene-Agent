@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-CN" data-ui-theme="pearl-white">
+<html lang="zh-TW" data-ui-theme="pearl-white">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -644,7 +644,7 @@
                 <span>当前仅支持中文，其他语言待开发。</span>
               </div>
               <div class="language-options" id="language-select" role="radiogroup" aria-label="语言">
-                <button type="button" class="language-option is-active" data-lang="zh-CN" aria-pressed="true">中文</button>
+                <button type="button" class="language-option is-active" data-lang="zh-TW" aria-pressed="true">繁體中文（台灣）</button>
                 <button type="button" class="language-option" data-lang="en" disabled aria-pressed="false">EN</button>
                 <button type="button" class="language-option" data-lang="ja" disabled aria-pressed="false">日文</button>
                 <button type="button" class="language-option" data-lang="ko" disabled aria-pressed="false">韩语</button>
@@ -1108,7 +1108,7 @@
             </div>
           </details>
           <h1><svg width="22" height="22" viewBox="0 0 48 48" fill="none" aria-hidden="true" style="vertical-align:-3px"><title>连接手机</title><rect x="11" y="4" width="26" height="40" rx="3" fill="none" stroke="currentColor" stroke-width="4"/><path d="M22 10L26 10" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 38H28" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></svg> 连接手机</h1>
-          <p class="panel-hint">把 Cyrene 接到微信、飞书等聊天平台。在外部渠道里的每个用户会拥有独立的对话上下文与记忆。</p>
+          <p class="panel-hint">把昔漣接到 Discord、微信、飛書等聊天平台。每位外部使用者都有獨立的對話上下文與記憶；台灣在地資訊只套用於桌面對話，不會改寫外部頻道語境。</p>
 
           <div class="channels-card">
             <div class="channels-card__header">
@@ -1177,6 +1177,70 @@
             </div>
           </div>
 
+          <div class="channels-card channels-card--discord" id="channels-discord-card" tabindex="-1">
+            <div class="channels-card__header">
+              <h2><span aria-hidden="true" style="color:#5865f2">●</span> Discord</h2>
+              <span class="switch"><input id="channels-discord-enabled" type="checkbox" /><span class="switch__track"><span class="switch__thumb"></span></span></span>
+            </div>
+            <div class="channels-card__body">
+              <div class="channels-status" id="channels-discord-status">
+                <span class="channels-status__dot channels-status__dot--offline"></span>
+                <span class="channels-status__text">未啟用</span>
+              </div>
+              <div class="form-row"><label class="form-label" for="channels-discord-username">Bot 顯示名稱</label><input type="text" id="channels-discord-username" class="form-input form-input--wide" minlength="2" maxlength="32" placeholder="連線後可修改" /></div>
+              <div class="form-row"><label class="form-label" for="channels-discord-activity">活動文字</label><input type="text" id="channels-discord-activity" class="form-input form-input--wide" maxlength="128" placeholder="例如：陪你聊天" /></div>
+              <div class="form-row"><label class="form-label" for="channels-discord-presence">上線狀態</label><select id="channels-discord-presence" class="form-input"><option value="online">在線</option><option value="idle">閒置</option><option value="dnd">請勿打擾</option><option value="invisible">隱形</option></select></div>
+              <div class="channels-card__actions"><button type="button" class="btn-secondary" id="channels-discord-profile-save">更新 Discord 身分</button><button type="button" class="btn-secondary" id="channels-discord-avatar-pick">更換頭像</button><button type="button" class="btn-secondary" id="channels-discord-banner-pick">更換 Banner</button></div>
+              <div class="channels-feedback" id="channels-discord-profile-feedback" aria-live="polite"></div>
+              <p class="channels-card__hint">保留既有 Discord Bot、文字回覆、語音通話、音樂與繪圖指令。Token 只會加密保存在這台電腦；留空白名單代表不限制。</p>
+              <div class="form-row">
+                <label class="form-label" for="channels-discord-token">Bot Token</label>
+                <div class="form-input-with-action">
+                  <input type="password" id="channels-discord-token" class="form-input form-input--wide" placeholder="儲存時會加密" autocomplete="off" />
+                  <button type="button" class="btn-reveal" id="channels-discord-token-reveal" title="顯示／隱藏">👁</button>
+                </div>
+              </div>
+              <div class="form-row"><label class="form-label" for="channels-discord-guild-ids">允許的伺服器 ID</label><input type="text" id="channels-discord-guild-ids" class="form-input form-input--wide" placeholder="多個 ID 請用逗號或換行分隔" /></div>
+              <div class="form-row"><label class="form-label" for="channels-discord-channel-ids">允許的頻道 ID</label><input type="text" id="channels-discord-channel-ids" class="form-input form-input--wide" placeholder="多個 ID 請用逗號或換行分隔" /></div>
+              <div class="form-row"><label class="form-label" for="channels-discord-user-ids">允許的使用者 ID</label><input type="text" id="channels-discord-user-ids" class="form-input form-input--wide" placeholder="多個 ID 請用逗號或換行分隔" /></div>
+              <div class="form-row"><label class="form-label" for="channels-discord-codex-owner-id">繪圖功能擁有者 ID</label><input type="text" id="channels-discord-codex-owner-id" class="form-input form-input--wide" inputmode="numeric" placeholder="只有這位使用者可建立繪圖任務" /></div>
+              <div class="form-row form-row--inline"><span class="switch"><input id="channels-discord-require-mention" type="checkbox" checked /><span class="switch__track"><span class="switch__thumb"></span></span></span><span class="form-row__label">伺服器內必須 @昔漣（私訊不受限）</span></div>
+              <div class="form-row form-row--inline"><span class="switch"><input id="channels-discord-voice-enabled" type="checkbox" checked /><span class="switch__track"><span class="switch__thumb"></span></span></span><span class="form-row__label">允許 Discord 語音通話與音樂</span></div>
+              <div class="channels-card__actions">
+                <button type="button" class="btn-secondary" id="channels-discord-save">儲存並連接</button>
+                <button type="button" class="btn-secondary" id="channels-discord-test">測試連線</button>
+                <a class="btn-secondary" href="https://discord.com/developers/applications" target="_blank" rel="noopener">Developer Portal ↗</a>
+              </div>
+              <div class="channels-feedback" id="channels-discord-feedback" aria-live="polite"></div>
+            </div>
+          </div>
+
+          <div class="channels-card" id="channels-spotify-card">
+            <div class="channels-card__header"><h2><span aria-hidden="true" style="color:#1ed760">●</span> Spotify Premium</h2><strong id="channels-spotify-status">尚未連線</strong></div>
+            <div class="channels-card__body">
+              <p class="channels-card__hint">保留你原本新增的 Spotify OAuth 與跨裝置播放控制。授權資料會加密保存在 macOS Keychain。</p>
+              <div class="form-row"><label class="form-label" for="channels-spotify-client-id">Client ID</label><input type="text" id="channels-spotify-client-id" class="form-input form-input--wide" autocomplete="off" /></div>
+              <div class="form-row"><label class="form-label" for="channels-spotify-client-secret">Client Secret</label><div class="form-input-with-action"><input type="password" id="channels-spotify-client-secret" class="form-input form-input--wide" autocomplete="off" /><button type="button" class="btn-reveal" id="channels-spotify-secret-reveal" title="顯示／隱藏">👁</button></div></div>
+              <div class="form-row"><label class="form-label" for="channels-spotify-query">播放歌曲／播放清單</label><input type="text" id="channels-spotify-query" class="form-input form-input--wide" placeholder="輸入歌曲名稱或 Spotify 網址" /></div>
+              <div class="channels-card__actions"><button type="button" class="btn-secondary" id="channels-spotify-connect">連接 Spotify</button><button type="button" class="btn-secondary" id="channels-spotify-disconnect">中斷連線</button><button type="button" class="btn-secondary" id="channels-spotify-previous">上一首</button><button type="button" class="btn-secondary" id="channels-spotify-toggle">播放／暫停</button><button type="button" class="btn-secondary" id="channels-spotify-next">下一首</button><button type="button" class="btn-secondary" id="channels-spotify-play-query">播放指定內容</button></div>
+              <div class="channels-feedback" id="channels-spotify-feedback" aria-live="polite"></div>
+            </div>
+          </div>
+
+          <div class="channels-card" id="channels-bilibili-card">
+            <div class="channels-card__header"><h2><span aria-hidden="true" style="color:#fb7299">●</span> Bilibili（Opera GX）</h2><strong id="channels-bilibili-status">尚未連接</strong></div>
+            <div class="channels-card__body">
+              <p class="channels-card__hint">讓 Discord 音樂功能僅在播放 Bilibili／b23.tv 連結時，讀取這台 Mac 的 Opera GX 登入狀態。昔漣不會保存帳號、密碼或 Cookie。</p>
+              <div class="channels-card__actions"><button type="button" class="btn-secondary" id="channels-bilibili-connect">連接 Bilibili</button><button type="button" class="btn-secondary" id="channels-bilibili-disconnect">解除連接</button><a class="btn-secondary" href="https://www.bilibili.com/" target="_blank" rel="noopener">開啟 Bilibili ↗</a></div>
+              <div class="channels-feedback" id="channels-bilibili-feedback" aria-live="polite"></div>
+            </div>
+          </div>
+
+          <div class="channels-card" id="channels-cloud-card">
+            <div class="channels-card__header"><h2>☁️ Discord 雲端接管</h2><strong id="channels-cloud-status">讀取中…</strong></div>
+            <div class="channels-card__body"><p class="channels-card__hint">保留你原本的本機／雲端 Gateway 交接；可在 Mac 關機前切到雲端，避免兩邊重複登入。</p><div class="channels-card__actions"><button type="button" class="btn-secondary" id="channels-cloud-local">這台 Mac 接管</button><button type="button" class="btn-secondary" id="channels-cloud-remote">Google Cloud 接管</button><button type="button" class="btn-secondary" id="channels-cloud-restart">重新啟動雲端 Bot</button><button type="button" class="btn-secondary" id="channels-cloud-refresh">重新整理</button></div><div class="channels-feedback" id="channels-cloud-feedback" aria-live="polite"></div></div>
+          </div>
+
           <div class="channels-card channels-card--global">
             <div class="channels-card__header">
               <h2>全局</h2>
@@ -1216,7 +1280,7 @@
                     <input type="radio" name="channels-tool-sandbox" value="all" id="channels-tool-sandbox-all" />
                     <div class="tool-permission-option__text">
                       <span class="tool-permission-option__title">全部开启</span>
-                      <span class="tool-permission-option__desc">允许天气、搜索、翻译、文件等工具在飞书/微信中使用。</span>
+                      <span class="tool-permission-option__desc">允許天氣、搜尋、翻譯、檔案等工具在 Discord／飛書／微信中使用。</span>
                     </div>
                   </label>
                   <label class="tool-permission-option">

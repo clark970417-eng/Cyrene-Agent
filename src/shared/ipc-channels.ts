@@ -27,6 +27,7 @@ export const IPC = {
   CHAT_CLOSE: "chat:close",
   CHAT_TOGGLE_MAXIMIZE: "chat:toggle-maximize",
   CHAT_IS_MAXIMIZED: "chat:is-maximized",
+  WORKSPACE_NAVIGATE: "workspace:navigate",
   CHAT_INGEST_FILES: "chat:ingest-files",
   CHAT_PROCESS_DOCUMENTS: "chat:process-documents",
   CHAT_DOCUMENT_INDEX_PROGRESS: "chat:document-index-progress",
@@ -51,6 +52,8 @@ export const IPC = {
   SIDEBAR_OPEN_SETTINGS: "sidebar:open-settings",
   SIDEBAR_OPEN_TASKS: "sidebar:open-tasks",
   SIDEBAR_OPEN_CALL: "sidebar:open-call",
+  SIDEBAR_SET_PET_DOCK_VISIBLE: "sidebar:set-pet-dock-visible",
+  SIDEBAR_REPORT_PET_SLOT: "sidebar:report-pet-slot",
 
   // tasks window (read-only display, no per-element interactions)
   TASKS_CLOSE: "tasks:close",
@@ -65,6 +68,14 @@ export const IPC = {
   SETTINGS_SAVE_CONFIG: "settings:save-config",
   SETTINGS_TEST_CONNECTION: "settings:test-connection",
   SETTINGS_TEST_VISION: "settings:test-vision",
+  WAVES_UID_STATUS: "wavesuid:status",
+  WAVES_UID_RUN: "wavesuid:run",
+  WAVES_UID_PICK_FILE: "wavesuid:pick-file",
+  WAVES_UID_CAPTURE_DISCORD: "wavesuid:capture-discord",
+  WAVES_UID_LOGIN: "wavesuid:login",
+  WAVES_UID_LOGIN_STATUS: "wavesuid:login-status",
+  WAVES_UID_DATA_STATUS: "wavesuid:data-status",
+  WAVES_UID_DELETE_DATA: "wavesuid:delete-data",
   SETTINGS_GET_GENERAL: "settings:get-general",
   SETTINGS_SAVE_GENERAL: "settings:save-general",
   SETTINGS_GET_TIMEOUT_SETTINGS: "settings:get-timeout-settings",
@@ -247,6 +258,10 @@ export const IPC = {
   GAME_BOT_START: "game-bot:start",
   GAME_BOT_STOP: "game-bot:stop",
   GAME_BOT_PROGRESS: "game-bot:progress",
+  GAME_ROOM_GET_STATS: "game-room:get-stats",
+  GAME_ROOM_RECORD_RESULT: "game-room:record-result",
+  GAME_ROOM_RESET_STATS: "game-room:reset-stats",
+  GAME_ROOM_REACT: "game-room:react",
 
   // token usage statistics
   TOKEN_USAGE_GET: "token-usage:get",
@@ -327,6 +342,24 @@ export const IPC = {
   // 飞书专属
   CHANNELS_FEISHU_TEST_CONNECTION: "channels:feishu:test-connection",
   CHANNELS_FEISHU_TEST_WEBHOOK_REACHABLE: "channels:feishu:test-webhook-reachable",
+  CHANNELS_DISCORD_TEST_CONNECTION: "channels:discord:test-connection",
+  CHANNELS_DISCORD_GET_PROFILE: "channels:discord:get-profile",
+  CHANNELS_DISCORD_GET_MUSIC_STATE: "channels:discord:get-music-state",
+  CHANNELS_DISCORD_GET_MUSIC_HISTORY: "channels:discord:get-music-history",
+  CHANNELS_DISCORD_GET_MUSIC_FAVORITES: "channels:discord:get-music-favorites",
+  CHANNELS_DISCORD_CONTROL_MUSIC: "channels:discord:control-music",
+  CHANNELS_DISCORD_UPDATE_PROFILE: "channels:discord:update-profile",
+  CHANNELS_DISCORD_PICK_AVATAR: "channels:discord:pick-avatar",
+  CHANNELS_DISCORD_PICK_BANNER: "channels:discord:pick-banner",
+  CHANNELS_DISCORD_CLOUD_STATUS: "channels:discord:cloud-status",
+  CHANNELS_DISCORD_CLOUD_CONTROL: "channels:discord:cloud-control",
+  CHANNELS_SPOTIFY_AUTHORIZE: "channels:spotify:authorize",
+  CHANNELS_SPOTIFY_GET_STATUS: "channels:spotify:get-status",
+  CHANNELS_SPOTIFY_CONTROL: "channels:spotify:control",
+  CHANNELS_SPOTIFY_DISCONNECT: "channels:spotify:disconnect",
+  CHANNELS_BILIBILI_CONNECT: "channels:bilibili:connect",
+  CHANNELS_BILIBILI_GET_STATUS: "channels:bilibili:get-status",
+  CHANNELS_BILIBILI_DISCONNECT: "channels:bilibili:disconnect",
   // Phase 3.4：消息日志
   CHANNELS_LOG_GET: "channels:log:get",
   CHANNELS_LOG_CLEAR: "channels:log:clear",
@@ -355,4 +388,3 @@ export const IPC = {
   // TODO 卡片：初始加载当前状态（常驻需求）
   TODOS_GET_CURRENT: "todos:get-current",
 } as const;
-

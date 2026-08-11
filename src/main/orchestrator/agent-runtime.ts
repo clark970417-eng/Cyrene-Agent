@@ -77,7 +77,7 @@ type SchedulerRunOptions = Omit<CyreneRunOptions, "toolSystemContent" | "soulSys
 
 export interface AgentRuntime {
   buildOptions(input: AguiRunInput): Promise<{ options: CyreneRunOptions; latestUserText: string }>;
-  onRunFinished(result: CyreneRunResult, latestUserText: string, channel?: "wechat" | "feishu", conversationId?: string): Promise<{ sticker: string | null }>;
+  onRunFinished(result: CyreneRunResult, latestUserText: string, channel?: import("../relationship/relationship-log").RelationshipChannel, conversationId?: string): Promise<{ sticker: string | null }>;
   buildSchedulerOptions(task: ScheduledTask): Promise<SchedulerRunOptions>;
 }
 

@@ -94,15 +94,15 @@ tags: []
 
 ## What I already know
 
-- 
+-
 
 ## Questions
 
-- 
+-
 
 ## Key resources
 
-- 
+-
 
 ## Key concepts
 
@@ -137,15 +137,15 @@ updated: {{date}}
 
 ## Active topics
 
-- 
+-
 
 ## Completed
 
-- 
+-
 
 ## To start
 
-- 
+-
 `;
 
 /**

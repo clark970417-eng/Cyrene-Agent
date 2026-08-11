@@ -125,7 +125,7 @@ export interface GeneralSettings extends ChatAppearanceSettings {
   sidebarVisible: boolean;
   tasksVisible: boolean;
   launchAtLogin: boolean;
-  language: "zh-CN";
+  language: "zh-TW";
   uiTheme: UiTheme;
   windowCornerRadius: number;
   uiThemeRadius: boolean;
@@ -258,6 +258,35 @@ export interface SettingsApi {
   testVision?: (config: { baseUrl: string; apiKey: string; model: string }) => Promise<{ ok: boolean; latency: number; sample?: string; error?: string }>;
   // main → settings：要求切到指定标签（窗口已打开时由 main 发这个事件）
   onSwitchSection?: (callback: (section: string) => void) => (() => void) | void;
+  channelsGetConfig: () => Promise<{
+    wechat: { enabled: boolean };
+    feishu: { enabled: boolean; appId?: string; appSecret?: string };
+    discord?: { enabled: boolean; botToken?: string; allowedGuildIds?: string[]; allowedChannelIds?: string[]; allowedUserIds?: string[]; codexImageOwnerId?: string; requireMention?: boolean; voiceEnabled?: boolean };
+    spotify?: { enabled?: boolean; clientId?: string; clientSecret?: string };
+    rateLimitPerUser?: number; rateLimitPerChannel?: number; ttsEnabled?: boolean; stickerEnabled?: boolean; mirrorToDesktop?: boolean; toolSandbox?: "off" | "safe-only" | "all";
+  }>;
+  channelsSaveConfig: (patch: Record<string, unknown>) => Promise<unknown>;
+  channelsRestart: () => Promise<unknown>;
+  channelsDiscordTestConnection: () => Promise<{ ok: boolean; message?: string; error?: string }>;
+  channelsDiscordGetProfile: () => Promise<{ connected: boolean; username?: string; activityText?: string; presenceStatus?: "online" | "idle" | "dnd" | "invisible" }>;
+  channelsDiscordUpdateProfile: (profile: Record<string, unknown>) => Promise<{ ok: boolean; error?: string }>;
+  channelsDiscordPickAvatar: () => Promise<string | null>;
+  channelsDiscordPickBanner: () => Promise<string | null>;
+  channelsDiscordCloudStatus: () => Promise<{ mode?: "local" | "cloud" | "transition" } | undefined>;
+  channelsDiscordCloudControl: (action: "local" | "cloud" | "restart-cloud") => Promise<unknown>;
+  channelsSpotifyAuthorize: (input: { clientId?: string; clientSecret?: string }) => Promise<{ ok: boolean; message?: string; error?: string }>;
+  channelsSpotifyGetStatus: () => Promise<{ configured: boolean; connected: boolean; accountName?: string; product?: string; error?: string; playback?: { active: boolean; paused: boolean } }>;
+  channelsSpotifyControl: (input: { command: string; query?: string; value?: number; deviceId?: string }) => Promise<{ ok: boolean; message: string }>;
+  channelsSpotifyDisconnect: () => Promise<{ ok: boolean }>;
+  channelsBilibiliConnect: () => Promise<{ ok: boolean; message?: string; error?: string }>;
+  channelsBilibiliGetStatus: () => Promise<{ connected: boolean; browser: string; profilePath: string }>;
+  channelsBilibiliDisconnect: () => Promise<{ ok: boolean; message?: string }>;
+  channelsLogGet: (limit?: number) => Promise<unknown[]>;
+  channelsLogClear: () => Promise<unknown>;
+  onChannelsInstallProgress: (callback: (progress: { channel: string; phase: string; pct: number }) => void) => (() => void) | void;
+  onChannelsWechatQrcode: (callback: (dataUrl: string) => void) => (() => void) | void;
+  onChannelsWechatLoginDone: (callback: (payload: { ok: boolean; botId?: string; error?: string }) => void) => (() => void) | void;
+  channelsWechatLoginStart: () => Promise<{ ok: boolean; error?: string }>;
   channelsGetStatus: () => Promise<Record<string, { phase?: string; message?: string }>>;
   onChannelsStatusChanged: (callback: (status: unknown) => void) => (() => void) | void;
   beginScreenshotHotkeyCapture: () => Promise<boolean>;

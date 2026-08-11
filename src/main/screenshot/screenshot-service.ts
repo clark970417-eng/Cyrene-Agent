@@ -1,5 +1,4 @@
-import * as path from "node:path";
-import { pathToFileURL } from "node:url";
+import { pathApiFor, screenshotFileUrl } from "./path-utils";
 import type { ScreenshotInsertPayload } from "../../shared/ipc-channels";
 import type { ScreenshotHelperClient } from "./helper-client";
 
@@ -36,15 +35,16 @@ export function validateScreenshotInsert(
   screenshotDirectory: string,
   loadImage: (filePath: string) => ScreenshotImageProbe,
 ): ScreenshotInsertData | null {
-  const root = path.win32.resolve(screenshotDirectory);
-  const filePath = path.win32.resolve(data.filePath);
-  const relative = path.win32.relative(root, filePath);
+  const pathApi = pathApiFor(screenshotDirectory);
+  const root = pathApi.resolve(screenshotDirectory);
+  const filePath = pathApi.resolve(data.filePath);
+  const relative = pathApi.relative(root, filePath);
   if (
     relative.length === 0
     || relative === ".."
-    || relative.startsWith(`..${path.win32.sep}`)
-    || path.win32.isAbsolute(relative)
-    || path.win32.extname(filePath).toLowerCase() !== ".png"
+    || relative.startsWith(`..${pathApi.sep}`)
+    || pathApi.isAbsolute(relative)
+    || pathApi.extname(filePath).toLowerCase() !== ".png"
   ) {
     return null;
   }
@@ -63,7 +63,7 @@ export function validateScreenshotInsert(
   return {
     ...data,
     filePath,
-    previewUrl: pathToFileURL(filePath).toString(),
+    previewUrl: screenshotFileUrl(filePath),
   };
 }
 
@@ -97,7 +97,7 @@ export function createScreenshotService(deps: ScreenshotServiceDeps): Screenshot
         width: result.width,
         height: result.height,
         mime: result.mime,
-        previewUrl: pathToFileURL(result.filePath).toString(),
+        previewUrl: screenshotFileUrl(result.filePath),
         hasAnnotations: result.hasAnnotations,
       });
       return { ok: true };

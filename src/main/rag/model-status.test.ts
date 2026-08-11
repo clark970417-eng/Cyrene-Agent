@@ -112,7 +112,7 @@ describe("model-status: getProjectModelsDirCandidates priority", () => {
   });
 
   it("getProjectModelsDir() returns the highest-priority candidate", () => {
-    expect(getProjectModelsDir()).toBe(path.join(process.cwd(), "models"));
+    expect(getProjectModelsDir()).toBe(path.join(ISOLATED_ROOT, "models"));
   });
 
   it("de-duplicates candidates when multiple paths resolve to the same value", () => {

@@ -5,7 +5,8 @@
 //   - Phase 2: 接入 FeishuAdapter（自建飞书应用 + 事件订阅）
 //
 // 注意：initChannels 必须晚于 initRAG / initMcpManager / loadModelSettings。
-import { app, BrowserWindow, ipcMain } from "electron";
+import { app, BrowserWindow, dialog, ipcMain } from "electron";
+import { readFile, stat } from "node:fs/promises";
 import { IPC } from "../../shared/ipc-channels";
 import {
   loadChannelsSettings,
@@ -16,6 +17,15 @@ import { channelDispatcher } from "./dispatcher";
 import { startInboundServer, stopInboundServer } from "./inbound-server";
 import { FeishuAdapter } from "./adapters/feishu";
 import { ILinkBotAdapter, loadCredentials } from "./adapters/wechat/ilink-bot-adapter";
+import { DiscordAdapter } from "./adapters/discord";
+import { loadDiscordMusicHistory } from "./adapters/discord/music-history";
+import { loadDiscordMusicFavorites } from "./adapters/discord/music-favorites";
+import { controlSpotify, disconnectSpotify, getSpotifyStatus, startSpotifyAuthorization } from "./spotify-control";
+import {
+  configureBilibiliBrowserCookies,
+  getOperaGxProfilePath,
+  testBilibiliBrowserCookies,
+} from "./adapters/discord/music-source";
 import { getRecentLog, clearLog } from "./message-log";
 import { logger, LogTag } from "../logger";
 
@@ -38,6 +48,8 @@ let wxAdapter: ILinkBotAdapter | null = null;
 export async function initChannels(): Promise<void> {
   if (initialized) return;
   initialized = true;
+  channelDispatcher.reloadSettings();
+  configureBilibiliBrowserCookies(loadChannelsSettings().bilibili.enabled);
 
   // 注入 dispatcher 到 manager
   channelManager.setDispatcher(async (msg) => {
@@ -65,6 +77,12 @@ export async function initChannels(): Promise<void> {
   const feishuAdapter = new FeishuAdapter();
   channelManager.register(feishuAdapter);
 
+  const discordAdapter = new DiscordAdapter(
+    async (msg) => await channelManager.dispatchOnly(msg),
+    () => broadcastChannelsStatus(),
+  );
+  channelManager.register(discordAdapter);
+
   // 注册微信 adapter（iLink 直连微信，不依赖 OpenClaw Gateway）
   // 改为 module-level handle，UI 登录按钮也能拿到
   wxAdapter = new ILinkBotAdapter();
@@ -89,7 +107,10 @@ function registerChannelsIpc(): void {
   ipcMain.handle(IPC.CHANNELS_GET_CONFIG, () => loadChannelsSettings());
 
   ipcMain.handle(IPC.CHANNELS_SAVE_CONFIG, (_e, patch: unknown) => {
-    return saveChannelsSettings(patch as Parameters<typeof saveChannelsSettings>[0]);
+    const saved = saveChannelsSettings(patch as Parameters<typeof saveChannelsSettings>[0]);
+    channelDispatcher.reloadSettings();
+    configureBilibiliBrowserCookies(saved.bilibili.enabled);
+    return saved;
   });
 
   ipcMain.handle(IPC.CHANNELS_LIST, () => channelManager.listChannels());
@@ -216,6 +237,126 @@ function registerChannelsIpc(): void {
       ok: true,
       message: "长连接模式不需要公网 URL — SDK 已自动建立 WSS 连接",
     };
+  });
+
+  ipcMain.handle(IPC.CHANNELS_DISCORD_TEST_CONNECTION, async () => {
+    const adapter = channelManager.getAdapter("discord") as DiscordAdapter | undefined;
+    if (!adapter) return { ok: false, error: "Discord adapter 未註冊" };
+    try {
+      await adapter.rebuild();
+      let status = adapter.getStatus();
+      if (status.enabled && status.phase === "starting") {
+        for (let i = 0; i < 10 && status.phase === "starting"; i++) {
+          await new Promise((resolve) => setTimeout(resolve, 400));
+          status = adapter.getStatus();
+        }
+      }
+      broadcastChannelsStatus();
+      return status.phase === "running" || status.phase === "starting" || (!status.enabled && status.phase === "offline")
+        ? { ok: true, message: status.message ?? "Discord Gateway 已連接" }
+        : { ok: false, error: status.message ?? "連接失敗" };
+    } catch (error) {
+      broadcastChannelsStatus();
+      return { ok: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  });
+
+  ipcMain.handle(IPC.CHANNELS_DISCORD_GET_PROFILE, () => {
+    const adapter = channelManager.getAdapter("discord") as DiscordAdapter | undefined;
+    return adapter?.getProfile() ?? { connected: false, guildCount: 0, guilds: [], voiceActive: false };
+  });
+  ipcMain.handle(IPC.CHANNELS_DISCORD_GET_MUSIC_STATE, () => {
+    const adapter = channelManager.getAdapter("discord") as DiscordAdapter | undefined;
+    return adapter?.getMusicState() ?? { active: false, paused: false, current: null, queue: [], volume: 100, repeat: "off", shuffle: false, autoplay: false, elapsed: 0 };
+  });
+  ipcMain.handle(IPC.CHANNELS_DISCORD_GET_MUSIC_HISTORY, () => loadDiscordMusicHistory(50));
+  ipcMain.handle(IPC.CHANNELS_DISCORD_GET_MUSIC_FAVORITES, () => loadDiscordMusicFavorites(500));
+  ipcMain.handle(IPC.CHANNELS_DISCORD_CONTROL_MUSIC, async (_event, raw: unknown) => {
+    const adapter = channelManager.getAdapter("discord") as DiscordAdapter | undefined;
+    if (!adapter) return { ok: false, message: "Discord adapter 未註冊" };
+    const input = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+    return adapter.controlMusic({
+      command: input.command as Parameters<DiscordAdapter["controlMusic"]>[0]["command"],
+      value: typeof input.value === "number" ? input.value : undefined,
+    });
+  });
+  ipcMain.handle(IPC.CHANNELS_DISCORD_CLOUD_STATUS, async () => {
+    const adapter = channelManager.getAdapter("discord") as DiscordAdapter | undefined;
+    return adapter?.getCloudControlStatus();
+  });
+  ipcMain.handle(IPC.CHANNELS_DISCORD_CLOUD_CONTROL, async (_event, action: "local" | "cloud" | "restart-cloud") => {
+    const adapter = channelManager.getAdapter("discord") as DiscordAdapter | undefined;
+    if (!adapter) throw new Error("Discord adapter 未初始化");
+    return adapter.controlCloud(action);
+  });
+  ipcMain.handle(IPC.CHANNELS_DISCORD_PICK_AVATAR, async () => {
+    const result = await dialog.showOpenDialog({ properties: ["openFile"], filters: [{ name: "圖片", extensions: ["png", "jpg", "jpeg", "webp", "gif"] }] });
+    return result.canceled ? null : result.filePaths[0] ?? null;
+  });
+  ipcMain.handle(IPC.CHANNELS_DISCORD_PICK_BANNER, async () => {
+    const result = await dialog.showOpenDialog({ properties: ["openFile"], filters: [{ name: "圖片", extensions: ["png", "jpg", "jpeg", "webp", "gif"] }] });
+    return result.canceled ? null : result.filePaths[0] ?? null;
+  });
+  ipcMain.handle(IPC.CHANNELS_DISCORD_UPDATE_PROFILE, async (_event, raw: unknown) => {
+    const adapter = channelManager.getAdapter("discord") as DiscordAdapter | undefined;
+    if (!adapter) return { ok: false, error: "Discord adapter 未註冊" };
+    const input = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+    try {
+      let avatar: Buffer | undefined;
+      let banner: Buffer | undefined;
+      if (typeof input.avatarPath === "string" && input.avatarPath) {
+        if ((await stat(input.avatarPath)).size > 8 * 1024 * 1024) throw new Error("頭像檔案不可超過 8 MB");
+        avatar = await readFile(input.avatarPath);
+      }
+      if (typeof input.bannerPath === "string" && input.bannerPath) {
+        if ((await stat(input.bannerPath)).size > 10 * 1024 * 1024) throw new Error("Banner 檔案不可超過 10 MB");
+        banner = await readFile(input.bannerPath);
+      }
+      const profile = await adapter.updateProfile({
+        username: typeof input.username === "string" ? input.username : undefined,
+        activityText: typeof input.activityText === "string" ? input.activityText : undefined,
+        status: typeof input.status === "string" ? input.status as "online" | "idle" | "dnd" | "invisible" : undefined,
+        avatar,
+        banner,
+      });
+      return { ok: true, profile };
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  });
+
+  ipcMain.handle(IPC.CHANNELS_SPOTIFY_AUTHORIZE, (_event, input: { clientId?: string; clientSecret?: string }) => startSpotifyAuthorization(input ?? {}));
+  ipcMain.handle(IPC.CHANNELS_SPOTIFY_GET_STATUS, () => getSpotifyStatus());
+  ipcMain.handle(IPC.CHANNELS_SPOTIFY_CONTROL, (_event, input: { command?: string; value?: number; deviceId?: string; query?: string }) => controlSpotify(input ?? {}));
+  ipcMain.handle(IPC.CHANNELS_SPOTIFY_DISCONNECT, () => { disconnectSpotify(); return { ok: true }; });
+
+  ipcMain.handle(IPC.CHANNELS_BILIBILI_GET_STATUS, () => {
+    const config = loadChannelsSettings().bilibili;
+    return {
+      connected: config.enabled,
+      browser: "Opera GX",
+      profilePath: getOperaGxProfilePath(),
+    };
+  });
+  ipcMain.handle(IPC.CHANNELS_BILIBILI_CONNECT, async () => {
+    try {
+      const verified = await testBilibiliBrowserCookies();
+      saveChannelsSettings({ bilibili: { enabled: true, browser: "opera-gx" } });
+      configureBilibiliBrowserCookies(true);
+      return { ok: true, message: "已連接 Opera GX 的 Bilibili 登入狀態", ...verified };
+    } catch (error) {
+      configureBilibiliBrowserCookies(false);
+      saveChannelsSettings({ bilibili: { enabled: false, browser: "opera-gx" } });
+      return {
+        ok: false,
+        error: `無法讀取 Opera GX 的 Bilibili 登入狀態：${error instanceof Error ? error.message : String(error)}`,
+      };
+    }
+  });
+  ipcMain.handle(IPC.CHANNELS_BILIBILI_DISCONNECT, () => {
+    configureBilibiliBrowserCookies(false);
+    saveChannelsSettings({ bilibili: { enabled: false, browser: "opera-gx" } });
+    return { ok: true, message: "Bilibili 已解除連接；Opera GX 登入不受影響" };
   });
 
   // Phase 3.4：消息日志

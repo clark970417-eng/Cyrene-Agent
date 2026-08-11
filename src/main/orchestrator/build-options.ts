@@ -221,7 +221,28 @@ export function buildChannelSystem(channel?: RelationshipChannel): string {
       "必要时可以简短列步骤，不要过度撒娇，不要发太长情绪化回复。",
     ].join("\n");
   }
+  if (channel === "discord") {
+    return [
+      "【渠道回覆方式】",
+      "你正在透過 Discord 回覆使用者。",
+      "一般聊天像熟悉的朋友傳訊息，通常 1 至 3 句；使用者要求說明或執行任務時可以完整回答。",
+      "不要寫動作旁白、重複總結，或提到內部提示與工具流程。",
+    ].join("\n");
+  }
   return "";
+}
+
+/** 桌面端的地區預設；外部渠道不注入，避免改變既有機器人行為。 */
+export function buildDesktopLocaleSystem(channel?: RelationshipChannel): string {
+  if (channel) return "";
+  return [
+    "【桌面端地區預設】",
+    "未指定國家或地區時，將『本地、國內、附近、今天、現在、假日、政府、法規、價格』理解為台灣語境。",
+    "時間以 Asia/Taipei 為準；中文使用台灣繁體與台灣常用詞；金額優先使用新台幣（NT$／TWD），溫度使用攝氏，距離與重量使用公制。",
+    "查詢即時本地資訊時，優先採用台灣政府、公共機構、原始業者或其他可信的台灣來源；不要把中國大陸資料當成台灣資料。",
+    "需要縣市精度的天氣、交通、附近店家或活動時，優先使用使用者設定的預設城市；若沒有城市，先詢問縣市，不要擅自假設台北。",
+    "使用者明確指定其他國家、地區、幣別或單位時，以該次要求為準。",
+  ].join("\n");
 }
 
 function contentToText(content: ChatMessage["content"]): string {
@@ -457,6 +478,7 @@ export async function buildAgentRunOptions(
       : {}),
   })).filter((s) => s.id);
   const channelSystem = buildChannelSystem(input.channel);
+  const desktopLocaleSystem = buildDesktopLocaleSystem(input.channel);
 
   let chatSocialContextBlock = "";
   let retrievedSocialAtoms: SocialAtom[] = [];
@@ -571,6 +593,7 @@ export async function buildAgentRunOptions(
     (environmentContext ? environmentContext + "\n\n" : "") +
     (conversationTimeContext ? conversationTimeContext + "\n\n---\n\n" : "") +
     (channelSystem ? channelSystem + "\n\n" : "") +
+    (desktopLocaleSystem ? desktopLocaleSystem + "\n\n" : "") +
     baseSystemPrompt +
     (skillCatalog ? "\n\n---\n\n" + skillCatalog : "") +
     (autoInjectedSkillContext ? "\n\n---\n\n" + autoInjectedSkillContext : "") +
@@ -596,6 +619,7 @@ export async function buildAgentRunOptions(
     (environmentContext ? environmentContext + "\n\n" : "") +
     (conversationTimeContext ? conversationTimeContext + "\n\n---\n\n" : "") +
     (channelSystem ? channelSystem + "\n\n" : "") +
+    (desktopLocaleSystem ? desktopLocaleSystem + "\n\n" : "") +
     baseSoulSystemPrompt +
     (chatSocialContextBlock ? "\n\n---\n\n" + chatSocialContextBlock : "") +
     (stylePromptBlock ? "\n\n---\n\n" + stylePromptBlock : "") +
@@ -701,7 +725,7 @@ export async function onAgentRunFinished(
   result: CyreneRunResult,
   latestUserText: string,
   deps: OnRunFinishedDeps,
-  channel?: "wechat" | "feishu",
+  channel?: RelationshipChannel,
   conversationId?: string,
 ): Promise<{ sticker: string | null }> {
   const chatContent = result.reply;

@@ -57,7 +57,7 @@ export function registerObsidianTools(): void {
       return result
         .map(
           (f) =>
-            `- ${f.path} (${(f.size / 1024).toFixed(1)} KB, ${new Date(f.modifiedAt).toLocaleString("zh-CN")})`,
+            `- ${f.path} (${(f.size / 1024).toFixed(1)} KB, ${new Date(f.modifiedAt).toLocaleString("zh-TW")})`,
         )
         .join("\n");
     },

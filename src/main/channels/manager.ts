@@ -78,6 +78,15 @@ export class ChannelManager {
     return Array.from(this.adapters.keys());
   }
 
+  /** Discord 語音通話需要取得回覆但自行播放，不再由文字 adapter 重複發送。 */
+  async dispatchOnly(msg: IncomingMessage): Promise<OutgoingMessage | null> {
+    if (!this.dispatchFn) {
+      console.warn(LOG, `收到入站消息但 dispatcher 未註冊 [${msg.channel}]`);
+      return null;
+    }
+    return this.dispatchFn(msg);
+  }
+
   /** 给 UI 用：所有渠道的实时状态 */
   getAllStatus(): Record<ChannelId, ChannelStatus> {
     const out: Partial<Record<ChannelId, ChannelStatus>> = {};
