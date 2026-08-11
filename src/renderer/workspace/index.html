@@ -61,11 +61,12 @@
       </nav>
 
       <div class="sidebar__sessions">
-        <div class="sidebar__sessions-header">
-          <span>最近對話</span>
-          <button type="button" class="sidebar__sessions-new" id="sidebar-new-session-btn" title="新對話">+</button>
-        </div>
-        <ul class="sidebar__sessions-list" id="sidebar-sessions-list"></ul>
+        <button type="button" class="sidebar__sessions-create" id="sidebar-new-session-btn" title="新建對話">
+          <span class="sidebar__sessions-create-icon" aria-hidden="true">＋</span>
+          <span class="sidebar__sessions-create-label">新建對話</span>
+        </button>
+        <div class="sidebar__sessions-heading">對話</div>
+        <ul class="sidebar__sessions-list" id="sidebar-sessions-list" aria-live="polite"></ul>
       </div>
 
       <div class="sidebar__footer">

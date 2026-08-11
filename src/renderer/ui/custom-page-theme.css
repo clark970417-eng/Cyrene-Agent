@@ -171,6 +171,28 @@ html[data-ui-theme="pearl-white"] {
 }
 
 [data-ui-theme="pearl-white"] :is(
+  .sidebar__session-item.is-active,
+  .sidebar__session-item.is-menu-open
+) {
+  color: #662c58;
+  background: #eadff0;
+  border-color: #cbaed1;
+  box-shadow: none;
+}
+
+[data-ui-theme="pearl-white"] :is(
+  .sidebar__session-item:hover,
+  .sidebar__sessions-create:hover
+) {
+  color: var(--text-primary);
+  background: #f1e8f3;
+}
+
+[data-ui-theme="pearl-white"] .sidebar__sessions-list::-webkit-scrollbar-thumb {
+  background: #cbbdce;
+}
+
+[data-ui-theme="pearl-white"] :is(
   .sidebar__status-pill,
   .info-panel__tabs,
   .profile-card,

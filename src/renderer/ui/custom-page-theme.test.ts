@@ -36,6 +36,7 @@ describe("custom page theme bridge", () => {
   it("keeps the pearl workspace shell on readable light surfaces", () => {
     expect(css).toContain(".workspace .titlebar");
     expect(css).toContain(".sidebar__brand-name");
+    expect(css).toContain(".sidebar__session-item.is-active");
     expect(css).toContain(".overview-item-card");
     expect(css).toContain("background: #fbf8fc");
   });

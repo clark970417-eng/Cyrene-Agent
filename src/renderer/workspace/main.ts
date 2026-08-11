@@ -935,6 +935,14 @@ async function renderSidebarSessionsList() {
     const list = await window.chatStore.list();
     sidebarSessionsList.innerHTML = "";
 
+    if (list.length === 0) {
+      const empty = document.createElement("li");
+      empty.className = "sidebar__sessions-empty";
+      empty.textContent = "還沒有對話";
+      sidebarSessionsList.appendChild(empty);
+      return;
+    }
+
     list.forEach((session) => {
       const li = document.createElement("li");
       li.className = "sidebar__session-item";

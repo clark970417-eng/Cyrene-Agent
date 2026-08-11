@@ -94,10 +94,15 @@ html, body {
 .cy-page.is-embedded {
   border: 0;
   border-radius: 0;
+  padding-left: 10px;
 }
 
 .cy-page.is-embedded .cy-page-windows,
-.cy-page.is-embedded .cy-page-settings {
+.cy-page.is-embedded .cy-page-settings,
+.cy-page.is-embedded .cy-page-toggle,
+.cy-page.is-embedded .cy-page-newtask,
+.cy-page.is-embedded .cy-page-conversations,
+.cy-page.is-embedded .cy-page-user {
   display: none;
 }
 
