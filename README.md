@@ -1,213 +1,246 @@
 # Cyrene Agent
 
-> An Electron and TypeScript desktop AI companion system with long-term memory, voice interaction, Discord integration, mobile access, cloud services, and game automation tools.
+<div align="center">
+
+<img src="./docs/image/preview.png" alt="Cyrene Agent desktop companion" width="820">
+
+**A local-first, memory-aware AI desktop companion inspired by Cyrene.**
+
+Built with Electron, TypeScript, React, Live2D, and an extensible agent runtime.
+
+[Features](#features) · [Architecture](#architecture) · [Quick Start](#quick-start) · [Configuration](#configuration) · [Development](#development) · [Safety](#security-and-privacy)
+
+</div>
+
+> [!NOTE]
+> This repository is a community-maintained fork of [Playa-0v0/Cyrene-Agent](https://github.com/Playa-0v0/Cyrene-Agent). It is an unofficial fan project and is not affiliated with HoYoverse.
 
 ## Overview
 
-Cyrene Agent is my independently developed extension of the MIT-licensed [Playa-0v0/Cyrene-Agent](https://github.com/Playa-0v0/Cyrene-Agent) desktop companion framework. The upstream project provided the original Live2D desktop character, AI chat, memory, voice, and tool foundation. I redesigned and expanded the system with a new workspace experience, Discord automation, mobile access, cloud services, game features, safety tooling, reliability tests, and several custom interaction flows.
+Cyrene Agent combines character-driven conversation, persistent memory, voice interaction, tool execution, learning support, coding assistance, games, and optional messaging integrations in one desktop application.
 
-This repository is not presented as a project built entirely from scratch. It is a substantial personal extension of an open-source codebase, with the original source, license, and asset credits preserved in the sections below.
+The desktop experience uses a unified workspace: chat, tasks, settings, the notebook, study tools, games, Wuthering Waves utilities, and image creation stay inside one window, while the companion panel keeps Cyrene visible. A synchronized **Cyrene Night** and **Pearl Light** theme system applies across the workspace and embedded tools.
 
-## My Main Contributions
+The agent supports five focused modes:
 
-### 1. Integrated Workspace
+| Mode | Purpose |
+| --- | --- |
+| **Chat** | Character-focused conversation using recent context, user preferences, and long-term memory |
+| **Work** | Tool-enabled planning and execution with visible progress, approval gates, and result verification |
+| **Code** | Scoped coding assistance for trusted directories, including file edits, commands, and tests |
+| **Learn** | Obsidian-assisted study, note organization, exercise generation, and learning progress |
+| **Daily** | General questions, information organization, reminders, and lightweight everyday tasks |
 
-- Built a new Workspace interface that centralizes chat, model state, connection status, sessions, and feature navigation.
-- Added session lists, model/reasoning mode controls, usage indicators, and live status synchronization.
-- Integrated the notebook, game room, memory page, Discord settings, drawing tools, and other subsystems into one desktop workflow.
+## Features
 
-### 2. Interactive Game and Activity Systems
+### Companion and conversation
 
-- Added a game room with persistent play statistics and Live2D character reactions.
-- Implemented multiple interaction modes, including resonance matching, tic-tac-toe, rock-paper-scissors, memory cards, Connect Four, twenty questions, truth cards, story continuation, Cyrene quiz content, and Ropebound cooperative puzzles.
-- Built a Ropebound Discord Activity version with Supabase Realtime room synchronization and Player 2 controls.
-- Added persistent win/loss/draw tracking for continued interaction history.
-- Added a game strategy mode that can respond in English or Chinese and organize team, stage, and source-based advice.
+- Live2D desktop companion with expressions, motion, mood, status, speech bubbles, and stickers
+- Multi-session chat with conversation history, pinned sessions, and configurable response styling
+- Traditional Chinese (Taiwan) localization throughout the desktop interface
+- Taiwan-first locale context for local time, weather, holidays, services, and regional information
+- Proactive messages with quiet-hour and delivery-target controls
+- Unified dark and light themes, custom fonts, corner radius, chat spacing, and companion sizing
 
-### 3. Notebook, Creative, and Study Tools
+### DMAE memory system
 
-- Added a two-page Markdown notebook with page turning, section navigation, and structured entries.
-- Added Shared Notebook collection logic for Discord music sessions and completed actions, with live refresh after content changes.
-- Built drawing and image-generation UI flows with prompt organization, free image-source helpers, and configurable generation services.
-- Added a study mode that supports Markdown, LaTeX, source checking, and bilingual academic problem solving.
-- Added an AI exam interface with subject selection, question count, reasoning strength, timers, explanations, scores, and missed-question review.
-- Expanded document, PDF, spreadsheet, and presentation tools for more practical agent workflows.
-- Added a persistent cloud-city entry point with offline time settlement and durable state.
-- Added mobile access and a local mobile server so selected companion and control features can run from a phone browser.
-- Added a WutheringWavesUID integration path for Wuthering Waves account data, check-ins, and local OCR helper workflows.
+- L0, L1, and L2 memory layers for identity, relationships, events, and working context
+- DMAE Worldbook for long-term character and relationship continuity
+- LLM-assisted entity and event extraction
+- Hybrid RAG retrieval with vector search, BM25, optional reranking, and source traceability
+- Obsidian Vault binding, manual synchronization, and structured notebook workflows
+- User-controlled memory inspection and deletion
 
-### 4. Agent, Memory, and Companion Behavior
+### Agent and tool runtime
 
-- Added agent activity logging and summaries for tool success, failure, refusal, timing, and sensitive-field redaction.
-- Added memory graph visualization for people, places, events, and long-term memories.
-- Added morning, afternoon, and bedtime rituals that can use recent memory, todos, and weather context.
-- Added quiet hours and proactive opening strategies to reduce poorly timed interruptions.
-- Added short-response shaping and length protection for desktop pet bubbles.
+- Direct and plan-based execution modes
+- Structured tool calls with execution policy, permission levels, and repair budgets
+- Streaming reasoning, tool state, task plans, and confirmation cards
+- Web search, webpage reading, local files, documents, email, maps, weather, music, screenshots, and MCP tools
+- Provider profiles for OpenAI-compatible, Anthropic-compatible, and custom model endpoints
+- Configurable timeout, iteration, retry, context-window, and multimodal settings
 
-### 5. Voice, Calls, and Visual Context
+### Voice
 
-- Added offline speech recognition based on `Xenova/whisper-base`, with local model caching after first download.
-- Improved voice segmentation, audio processing, early playback, and call usage tracking.
-- Added context-aware screen and inbound-image handling so visual descriptions are attached only when the user's question is actually about images or the screen.
-- Expanded configuration and test coverage for multiple TTS and voice-service providers.
+- Text-to-speech through MiniMax, MiMo, GPT-SoVITS, Mossland, or a custom cloud endpoint
+- Streaming playback and automatic reading
+- Natural vocal enhancement for pauses, breathing, laughter, and conversational cadence
+- Real-time speech recognition, voice calls, and VAD silence detection
+- Local reference-audio selection for supported voice engines
 
-### 6. Messaging Platforms and External Integrations
+### Built-in workspaces
 
-- Added a Discord bot adapter with channel allowlists, mention detection, message chunking, attachments, and embed messages.
-- Expanded Discord slash commands, voice calls, and status queries so users can chat, join voice channels, leave voice channels, and inspect system status.
-- Added Discord music playback with search, YouTube/Bilibili/SoundCloud/Spotify links, playlists, Bilibili collections, and multi-part media handling.
-- Built live-updating player cards, private queues, playback history, favorites, prefetching, perceptual volume, category resume, repeat, shuffle, auto-recommendation, and Spotify playlist command support.
-- Added Discord achievements and a cleaner help-card structure for chat, game automation, music, daily companion features, and entertainment tools.
-- Added X/Twitter and Anilist notification services that can forward selected account or anime updates into Discord.
-- Added Spotify Premium connection and playback control with OAuth, search, links, playlists, artist top tracks, device switching, previous/next, play/pause, and volume control.
-- Added a headless cloud Discord bot service for Linux containers, including text chat, basic music controls, image understanding, health checks, and local/cloud failover.
-- Added Traditional Chinese normalization for external messages while preserving original user input.
-- Continued integrating Lark, WeChat, and local inbound server pathways so one agent core can serve multiple messaging entry points.
-- Added routing safeguards so platform-specific unsupported message formats or tools are not called incorrectly.
-- Added a Wuthering Waves task tool for daily tasks, 4C-related routines, and game automation workflows.
+- Shared notebook with categories, search, page navigation, and editable entries
+- Exam mode for generated quizzes, explanations, scoring, and review
+- Game room with relationship quizzes, board games, memory games, story choices, and Ropebound
+- Wuthering Waves tools with local macOS Vision OCR support
+- Image studio with prompt building, reference images, character consistency, and multiple providers
+- Discord Activity lobby for the Ropebound cooperative experience
 
-### 7. Local Safety and Backup
+### Optional integrations
 
-- Used Electron `safeStorage` to protect API keys, tokens, and mail passwords.
-- Added Secret Vault status checks, migration support, masking, and preservation of existing secrets.
-- Added categorized `.cybackup` backups for conversations, memory, plans, personalization, knowledge, and settings.
-- Added pre-restore safety backups and limits on file count, paths, and extracted size.
+- Discord bot and Activity support
+- Feishu / Lark and WeChat iLink messaging
+- Spotify and NetEase Cloud Music controls
+- Optional cloud-bot runtime and failover tooling
+- MCP servers over stdio, SSE, and HTTP
+- User-defined Skills and reusable tool instructions
 
-### 8. Reliability and Testing
+## Screenshots
 
-- The project currently includes 97 test files and 652 tests covering memory, scheduling, tools, channels, games, voice, safety, and UI logic.
-- Added boundary checks for IPC payloads, screen context, backup paths, message length, and agent activity logs.
-- Provides TypeScript builds, Vitest tests, and GitHub Actions workflow support.
+<div align="center">
 
-## Foundation from the Upstream Project
+<img src="./docs/image/preview2.png" alt="Cyrene Agent Work mode using a weather tool" width="820">
 
-The following capabilities originated from the upstream `Cyrene-Agent` project and are continued or adapted in this version:
+*Work mode streaming a tool-assisted weather request.*
 
-- Live2D desktop character, expressions, motions, and lip sync
-- Multi-model AI chat and provider switching
-- Long-term memory, RAG, worldbook, and relationship systems
-- MCP, function calling, and built-in tools
-- Speech recognition, speech synthesis, and call mode
-- Scheduled tasks, todos, and proactive messages
-- Lark and WeChat messaging integrations
-
-## Standalone Module Repositories
-
-To make the engineering work easier to review, several major subsystems were also separated into smaller public repositories. These modules are intended as focused, reusable examples rather than replacements for the complete desktop application:
-
-- [discord-cloud-agent](https://github.com/clark970417-eng/discord-cloud-agent) — cloud Discord agent runtime with chat, music, Spotify control, check-ins, health checks, and deployment examples.
-- [long-term-memory-engine](https://github.com/clark970417-eng/long-term-memory-engine) — reusable memory, retrieval, conflict resolution, scheduled compression, and RAG utilities for AI agents.
-- [mobile-agent-dashboard](https://github.com/clark970417-eng/mobile-agent-dashboard) — mobile web dashboard and local server bridge for controlling an agent from a phone.
-- [game-automation-tools](https://github.com/clark970417-eng/game-automation-tools) — scriptable TypeScript toolkit for game automation, screenshots, coordinate handling, and recipe-based workflows.
-- [wuthering-waves-agent-tools](https://github.com/clark970417-eng/wuthering-waves-agent-tools) — focused Wuthering Waves helper tools for agent workflows, including UID parsing and a lightweight renderer interface.
-- [realtime-discord-activity](https://github.com/clark970417-eng/realtime-discord-activity) — Discord activity layer with slash commands, voice, music, notebook, image queue, and shared activity features.
-- [ai-companion-desktop-system](https://github.com/clark970417-eng/ai-companion-desktop-system) — full Electron and TypeScript desktop AI companion system showing how the modules fit together.
+</div>
 
 ## Architecture
 
 ```text
 Electron Main Process
-├── Agent Orchestrator        # models, tools, MCP, context, and agent flow
-├── Memory & RAG              # memory, graph, retrieval, and conflict handling
-├── Channels                  # Discord, Lark, WeChat, and inbound server
-├── Voice & Call              # ASR, TTS, calls, and visual context
-├── Scheduler & Rituals       # scheduled tasks, todos, and daily rituals
-├── Security & Backup         # Secret Vault and categorized backups
-└── Game / Document Tools     # game automation and document tools
-
-Electron Renderer
-├── Live2D Desktop Pet
-├── Chat / Call / Settings
-├── Workspace Dashboard
-├── Notebook / Paint
-├── Study / Exam
-├── Game Room
-└── WavesUID / Mobile Views
+├── DMAE memory, RAG, relationship, and locale services
+├── Agent orchestration, execution policy, tools, and Skills
+├── TTS, ASR, media, screenshot, and notification services
+├── Optional Discord, Feishu, WeChat, music, and cloud adapters
+└── Secure preload bridges
+    └── Unified React / HTML workspace
+        ├── Chat, Work, Code, Learn, and Daily
+        ├── Tasks, settings, notebook, and exam mode
+        ├── Game room, Wuthering Waves tools, and image studio
+        └── Shared theme, typography, and Traditional Chinese runtime
 ```
 
-## Technology Stack
+Important directories:
 
-- Electron 43
-- TypeScript
-- Vite
-- Vitest
-- PixiJS + `pixi-live2d-display`
-- LanceDB, LlamaIndex, BM25, and Transformers.js
-- Discord.js, Lark SDK, WebSocket, and MCP SDK
+| Path | Description |
+| --- | --- |
+| `src/main/` | Electron main process, agent runtime, memory, tools, voice, and integrations |
+| `src/preload/` | Context-isolated APIs exposed to renderer windows |
+| `src/renderer/` | Unified workspace, React chat, settings, companion UI, and embedded tools |
+| `src/shared/` | Shared types, IPC channels, normalization, and cross-process contracts |
+| `prompts/` | Character, phone, Work, and system prompt layers |
+| `skills/` | Built-in agent Skills and reference resources |
 
-## Requirements
+## Platform Support
 
-- Node.js `>=24 <25`
-- npm `>=10`
-- Git
-- Access to a supported AI model API or a supported local model service
+| Platform | Status | Notes |
+| --- | :---: | --- |
+| **macOS** | ✅ Source build tested | Native screenshot capture uses `/usr/sbin/screencapture`; local Vision OCR is available for supported tools |
+| **Windows 10 / 11** | ✅ Supported | Primary upstream platform; includes the Rust screenshot helper and Windows-specific automation |
+| **Linux** | 🧪 Experimental | Desktop environment, keyring, transparent-window, and native automation behavior may vary |
 
-Some native packages, voice services, and desktop automation features are operating-system dependent. Running the project on a different platform may require additional build tools, audio components, or model files.
+Some channel connectors and native automation features remain platform-specific. The core Electron application, memory system, chat, workspace, and most tools are cross-platform.
 
-## Installation
+## Quick Start
+
+### Requirements
+
+- Node.js 24 LTS
+- npm 10 or newer
+- A supported LLM API key
+- macOS 13+ or Windows 10 / 11
+
+Clone this fork and install the locked dependencies:
 
 ```bash
 git clone https://github.com/clark970417-eng/Cyrene-Agent.git
 cd Cyrene-Agent
 npm ci
-npm run dev
 ```
 
-Create a production build:
+Build and start the desktop application:
 
 ```bash
 npm run build
+npm start
 ```
 
-Run tests:
+For active development:
 
 ```bash
-npm test
+npm run dev
 ```
 
-## Initial Setup
+### Windows screenshot helper
 
-1. Open the application's Settings page.
-2. Select a model provider, base URL, and model name.
-3. Enter the required API key locally and run a connection test.
-4. Enable voice, Discord, Lark, WeChat, local models, daily rituals, or other integrations as needed.
-5. When enabling offline Whisper for the first time, wait for the model download and local cache setup to finish.
+Windows source builds require Rust stable and Visual Studio 2022 Build Tools with the C++ desktop workload:
 
-Do not commit API keys, bot tokens, passwords, or backups containing private conversations. Even when a repository is private, secrets should never be written directly into source code.
+```powershell
+npm run build:screenshot-helper
+npm run build
+npm start
+```
 
-## Data and Privacy
+The packaged Windows directory build is available through:
 
-- Model settings, chat history, memory, tasks, and game statistics are mainly stored in Electron's local `userData` directory.
-- Supported sensitive settings are encrypted through operating-system secure storage.
-- Backups should not export API keys, tokens, or mail passwords by default.
-- When using cloud models, TTS, search, Discord, Lark, or WeChat, data is transmitted according to the selected service's behavior. Users should review the relevant privacy policies.
+```bash
+npm run package:win:dir
+```
 
-## Limitations
+macOS uses the system screenshot utility and does not require the Windows Rust helper.
 
-- This is an actively developed personal project and does not guarantee that every model provider or platform combination will work out of the box.
-- Some features require third-party APIs, bot permissions, local models, or additional services.
-- Offline Whisper still requires a model download on first use.
-- GitHub Actions and release workflows may need adjustment depending on the actual branch and deployment strategy.
+## Configuration
 
-## Source, License, and Credits
+Open **Settings** in the application and configure:
 
-### Upstream Code
+1. **Model provider** — API key, endpoint, model, transport, and optional vision model.
+2. **Appearance** — Cyrene Night or Pearl Light, font, spacing, window radius, and companion behavior.
+3. **Memory and RAG** — embedding model, reranker, document imports, and optional Obsidian Vault.
+4. **Voice** — TTS engine, voice ID or reference audio, streaming, speed, volume, and optional ASR.
+5. **Permissions** — read-only, scoped, per-action, or full tool execution.
+6. **Optional channels** — Discord, Feishu, WeChat, Spotify, music, and cloud services.
 
-- Upstream project: [Playa-0v0/Cyrene-Agent](https://github.com/Playa-0v0/Cyrene-Agent)
-- Original author: Playa-0v0
-- License: [MIT License](./LICENSE)
-- This extended version is maintained by [Clark (clark970417-eng)](https://github.com/clark970417-eng).
+Most settings are stored under Electron's platform-specific `userData` directory and are applied without restarting the app.
 
-The MIT License allows use, modification, and distribution, but the original copyright notice and license terms must be preserved. This README identifies the upstream source and distinguishes the original foundation from the additional work in this version.
+## Development
 
-### Live2D Model and Character Assets
+Common commands:
 
-- Model author: Bilibili creator `是依七哒`
-- Original page: [space.bilibili.com/457683484](https://space.bilibili.com/457683484)
-- Full notes: [MODEL_LICENSE.md](./MODEL_LICENSE.md)
+```bash
+npm test                    # Run the Vitest suite
+npm run build:main          # Compile the Electron main process
+npm run build:preload       # Compile context-isolated preload bridges
+npm run build:renderer      # Build all renderer entry points
+npm run build               # Build Skills, main, preload, CLI, and renderer
+npm run dev                 # Start Vite and Electron in development mode
+```
 
-The model and character-related assets are not owned by this repository maintainer. Cyrene, her character name, design, and related intellectual property belong to HoYoverse / miHoYo. This project is an unofficial, non-commercial fan development and is not affiliated with or endorsed by HoYoverse / miHoYo.
+The current unified macOS integration was verified with:
 
-## Portfolio Note
+- 282 passing test files
+- 2,580 passing tests
+- Successful main, preload, and renderer builds
+- Browser checks for dark/light switching and embedded workspace synchronization
 
-This project demonstrates my ability to read, understand, extend, refactor, integrate, secure, test, and present a complex open-source system. For academic or portfolio review, the important contribution is not only the final feature list, but also the engineering process: connecting multiple services, improving reliability, designing user workflows, protecting local secrets, and documenting the boundary between upstream work and my own extensions.
+> [!TIP]
+> The active unified macOS implementation is published on the `codex/unified-upstream-integration` branch. The existing `main` history is retained to protect earlier cloud, Discord, WavesUID, and documentation work while the two histories are consolidated safely.
+
+## Security and Privacy
+
+Cyrene Agent is local-first, but external model providers and optional integrations receive the data required to perform their configured tasks.
+
+- Never commit or share the Electron `userData` directory, local settings, tokens, cookies, logs, or private memory files.
+- API keys for some services may be stored as local configuration files.
+- Supported credentials use Electron `safeStorage` where implemented: DPAPI on Windows, Keychain on macOS, and libsecret on Linux.
+- Review the selected tool permission level before enabling command execution or external services.
+- Use only trusted MCP servers, Skills, model endpoints, and code directories.
+
+This is experimental companion and agent software. Keep backups of important notes and review tool actions before granting broad permissions.
+
+## Project Status
+
+Core desktop conversation, memory, agent execution, voice configuration, themes, notebook, exam mode, games, and primary tools are implemented. RAG, third-party MCP compatibility, proactive delivery, cloud failover, and some messaging integrations remain experimental and may require additional setup.
+
+Contributions, reproducible bug reports, and platform-specific verification are welcome.
+
+## License and Credits
+
+See [LICENSE](./LICENSE) and [MODEL_LICENSE.md](./MODEL_LICENSE.md) for code and model asset terms.
+
+- Original project: [Playa-0v0/Cyrene-Agent](https://github.com/Playa-0v0/Cyrene-Agent)
+- Wuthering Waves ecosystem integration: [WutheringWavesUID](https://github.com/tyql688/WutheringWavesUID)
+- Music integration: [cloud-music-mcp](https://github.com/Code-MonkeyZhang/cloud-music-mcp)
+
+Characters, names, and related game assets belong to their respective owners.
