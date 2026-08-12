@@ -367,6 +367,7 @@ export const IPC = {
   CHANNELS_DISCORD_UPDATE_PROFILE: "channels:discord:update-profile",
   CHANNELS_DISCORD_PICK_AVATAR: "channels:discord:pick-avatar",
   CHANNELS_DISCORD_PICK_BANNER: "channels:discord:pick-banner",
+  CHANNELS_DISCORD_PICK_CLOUD_KEY: "channels:discord:pick-cloud-key",
   CHANNELS_DISCORD_CLOUD_STATUS: "channels:discord:cloud-status",
   CHANNELS_DISCORD_CLOUD_CONTROL: "channels:discord:cloud-control",
   CHANNELS_SPOTIFY_AUTHORIZE: "channels:spotify:authorize",

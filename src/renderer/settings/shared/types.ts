@@ -284,7 +284,7 @@ export interface SettingsApi {
   channelsGetConfig: () => Promise<{
     wechat: { enabled: boolean };
     feishu: { enabled: boolean; appId?: string; appSecret?: string };
-    discord?: { enabled: boolean; botToken?: string; allowedGuildIds?: string[]; allowedChannelIds?: string[]; allowedUserIds?: string[]; codexImageOwnerId?: string; requireMention?: boolean; voiceEnabled?: boolean };
+    discord?: { enabled: boolean; botToken?: string; allowedGuildIds?: string[]; allowedChannelIds?: string[]; allowedUserIds?: string[]; codexImageOwnerId?: string; requireMention?: boolean; voiceEnabled?: boolean; cloudPrimary?: boolean; cloudPingUrl?: string; cloudStandbyEnabled?: boolean; cloudStandbyHost?: string; cloudStandbyUser?: string; cloudStandbyKeyPath?: string };
     spotify?: { enabled?: boolean; clientId?: string; clientSecret?: string; clientSecretRecoveryRequired?: boolean; refreshTokenRecoveryRequired?: boolean };
     rateLimitPerUser?: number; rateLimitPerChannel?: number; ttsEnabled?: boolean; stickerEnabled?: boolean; mirrorToDesktop?: boolean; toolSandbox?: "off" | "safe-only" | "all";
   }>;
@@ -295,7 +295,8 @@ export interface SettingsApi {
   channelsDiscordUpdateProfile: (profile: Record<string, unknown>) => Promise<{ ok: boolean; error?: string }>;
   channelsDiscordPickAvatar: () => Promise<string | null>;
   channelsDiscordPickBanner: () => Promise<string | null>;
-  channelsDiscordCloudStatus: () => Promise<{ mode?: "local" | "cloud" | "transition" } | undefined>;
+  channelsDiscordPickCloudKey: () => Promise<string | null>;
+  channelsDiscordCloudStatus: () => Promise<{ reachable?: boolean; cloudService?: "active" | "inactive" | "activating" | "failed" | "unknown"; watchdog?: "active" | "inactive" | "failed" | "unknown"; heartbeatAge?: number | null; localConnected?: boolean; mode?: "local" | "cloud" | "transition" } | undefined>;
   channelsDiscordCloudControl: (action: "local" | "cloud" | "restart-cloud") => Promise<unknown>;
   channelsDiscordGetMusicState: () => Promise<{ active: boolean; paused: boolean; current?: { title?: string } | null; volume: number }>;
   channelsDiscordGetMusicHistory: () => Promise<Array<{ title?: string; url?: string; playedAt?: string }>>;

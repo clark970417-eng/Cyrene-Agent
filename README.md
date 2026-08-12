@@ -84,7 +84,7 @@ The agent supports five focused modes:
 - Discord bot and Activity support
 - Feishu / Lark and WeChat iLink messaging
 - Spotify and NetEase Cloud Music controls
-- Optional cloud-bot runtime and failover tooling
+- Optional Google Cloud bot runtime with a desktop failover dashboard, editable macOS SSH connection settings, live Gateway/watchdog/heartbeat status, and manual local/cloud handoff controls
 - MCP servers over stdio, SSE, and HTTP
 - User-defined Skills and reusable tool instructions
 - X account and AniList airing notifications with per-account routing controls

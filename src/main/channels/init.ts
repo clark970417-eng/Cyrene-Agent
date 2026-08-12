@@ -398,6 +398,14 @@ function registerChannelsIpc(): void {
     });
     return result.canceled ? null : (result.filePaths[0] ?? null);
   });
+  ipcMain.handle(IPC.CHANNELS_DISCORD_PICK_CLOUD_KEY, async () => {
+    const result = await dialog.showOpenDialog({
+      title: "選擇 Google Cloud SSH 私鑰",
+      buttonLabel: "使用這個私鑰",
+      properties: ["openFile", "showHiddenFiles"],
+    });
+    return result.canceled ? null : (result.filePaths[0] ?? null);
+  });
   ipcMain.handle(
     IPC.CHANNELS_DISCORD_UPDATE_PROFILE,
     async (_event, raw: unknown) => {

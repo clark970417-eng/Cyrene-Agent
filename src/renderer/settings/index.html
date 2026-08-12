@@ -1155,7 +1155,7 @@
           <h1><svg width="22" height="22" viewBox="0 0 48 48" fill="none" aria-hidden="true" style="vertical-align:-3px"><title>连接手机</title><rect x="11" y="4" width="26" height="40" rx="3" fill="none" stroke="currentColor" stroke-width="4"/><path d="M22 10L26 10" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 38H28" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></svg> 连接手机</h1>
           <p class="panel-hint">把昔漣接到 Discord、微信、飛書等聊天平台。每位外部使用者都有獨立的對話上下文與記憶；台灣在地資訊只套用於桌面對話，不會改寫外部頻道語境。</p>
 
-          <div class="channels-card">
+          <div class="channels-card channels-card--service channels-card--wechat">
             <div class="channels-card__header">
               <h2><svg width="18" height="18" viewBox="0 0 24 24" fill="#07C160" aria-hidden="true" style="vertical-align:-3px"><title>微信</title><path d="M8.691 2.188C3.891 2.188 0 5.476 0 9.53c0 2.212 1.17 4.203 3.002 5.55a.59.59 0 0 1 .213.665l-.39 1.48c-.019.07-.048.141-.048.213 0 .163.13.295.29.295a.326.326 0 0 0 .167-.054l1.903-1.114a.864.864 0 0 1 .717-.098 10.16 10.16 0 0 0 2.837.403c.276 0 .543-.027.811-.05-.857-2.578.157-4.972 1.932-6.446 1.703-1.415 3.882-1.98 5.853-1.838-.576-3.583-4.196-6.348-8.596-6.348zM5.785 5.991c.642 0 1.162.529 1.162 1.18a1.17 1.17 0 0 1-1.162 1.178A1.17 1.17 0 0 1 4.623 7.17c0-.651.52-1.18 1.162-1.18zm5.813 0c.642 0 1.162.529 1.162 1.18a1.17 1.17 0 0 1-1.162 1.178 1.17 1.17 0 0 1-1.162-1.178c0-.651.52-1.18 1.162-1.18zm5.34 2.867c-1.797-.052-3.746.512-5.28 1.786-1.72 1.428-2.687 3.72-1.78 6.22.942 2.453 3.666 4.229 6.884 4.229.826 0 1.622-.12 2.361-.336a.722.722 0 0 1 .598.082l1.584.926a.272.272 0 0 0 .14.047c.134 0 .24-.111.24-.247 0-.06-.023-.12-.038-.177l-.327-1.233a.582.582 0 0 1-.023-.156.49.49 0 0 1 .201-.398C23.024 18.48 24 16.82 24 14.98c0-3.21-2.931-5.837-6.656-6.088V8.89c-.135-.01-.27-.027-.407-.03zm-2.53 3.274c.535 0 .969.44.969.982a.976.976 0 0 1-.969.983.976.976 0 0 1-.969-.983c0-.542.434-.982.97-.982zm4.844 0c.535 0 .969.44.969.982a.976.976 0 0 1-.969.983.976.976 0 0 1-.969-.983c0-.542.434-.982.969-.982z"/></svg> 微信</h2>
               <span class="switch"><input id="channels-wechat-enabled" type="checkbox" /><span class="switch__track"><span class="switch__thumb"></span></span></span>
@@ -1186,7 +1186,7 @@
             </div>
           </div>
 
-          <div class="channels-card">
+          <div class="channels-card channels-card--service channels-card--feishu">
             <div class="channels-card__header">
               <h2><svg width="18" height="18" viewBox="0 0 48 48" fill="none" aria-hidden="true" style="vertical-align:-3px"><title>飞书</title><path d="M10 8c0 1 7 3.5 14.745 16.744 0 0 4.184-4.363 6.255-5.744 1.5-1 2.712-1.332 2.712-1.332C33.712 15.156 29.5 8 28 8H10Z" fill="#00D6B9"/><path d="M43.5 18.5c-1-.667-3.65-1.771-6.5-1.5a14.945 14.945 0 0 0-3.288.668S32.5 18 31 19c-2.07 1.38-6.255 5.744-6.255 5.744-1.428 1.397-3.05 2.732-5.245 3.756 0 0 7 3 11.5 3 5.063 0 7-3.5 7-3.5 1.5-3.305 3.5-7 5.5-9.5Z" fill="#163C9A"/><path d="M4 17.5v17c0 1 6 5.5 15 5.5 10 0 17.05-7.705 19-12 0 0-1.937 3.5-7 3.5-4.5 0-11.5-3-11.5-3-5.117-2.239-10.03-6.577-12.906-9.117C4.974 17.953 4 17.093 4 17.5Z" fill="#3370FF"/></svg> 飞书</h2>
               <span class="switch"><input id="channels-feishu-enabled" type="checkbox" /><span class="switch__track"><span class="switch__thumb"></span></span></span>
@@ -1222,7 +1222,7 @@
             </div>
           </div>
 
-          <div class="channels-card channels-card--discord" id="channels-discord-card" tabindex="-1">
+          <div class="channels-card channels-card--service channels-card--discord" id="channels-discord-card" tabindex="-1">
             <div class="channels-card__header">
               <h2><span aria-hidden="true" style="color:#5865f2">●</span> Discord</h2>
               <span class="switch"><input id="channels-discord-enabled" type="checkbox" /><span class="switch__track"><span class="switch__thumb"></span></span></span>
@@ -1260,7 +1260,7 @@
             </div>
           </div>
 
-          <div class="channels-card" id="channels-spotify-card">
+          <div class="channels-card channels-card--service channels-card--spotify" id="channels-spotify-card">
             <div class="channels-card__header"><h2><span aria-hidden="true" style="color:#1ed760">●</span> Spotify Premium</h2><strong id="channels-spotify-status">尚未連線</strong></div>
             <div class="channels-card__body">
               <p class="channels-card__hint">保留你原本新增的 Spotify OAuth 與跨裝置播放控制。授權資料會加密保存在 macOS Keychain。</p>
@@ -1272,7 +1272,7 @@
             </div>
           </div>
 
-          <div class="channels-card" id="channels-bilibili-card">
+          <div class="channels-card channels-card--service channels-card--bilibili" id="channels-bilibili-card">
             <div class="channels-card__header"><h2><span aria-hidden="true" style="color:#fb7299">●</span> Bilibili（Opera GX）</h2><strong id="channels-bilibili-status">尚未連接</strong></div>
             <div class="channels-card__body">
               <p class="channels-card__hint">讓 Discord 音樂功能僅在播放 Bilibili／b23.tv 連結時，讀取這台 Mac 的 Opera GX 登入狀態。昔漣不會保存帳號、密碼或 Cookie。</p>
@@ -1281,12 +1281,33 @@
             </div>
           </div>
 
-          <div class="channels-card" id="channels-cloud-card">
+          <div class="channels-card channels-card--service channels-card--google-cloud" id="channels-cloud-card">
             <div class="channels-card__header"><h2>☁️ Discord 雲端接管</h2><strong id="channels-cloud-status">讀取中…</strong></div>
-            <div class="channels-card__body"><p class="channels-card__hint">保留你原本的本機／雲端 Gateway 交接；可在 Mac 關機前切到雲端，避免兩邊重複登入。</p><div class="channels-card__actions"><button type="button" class="btn-secondary" id="channels-cloud-local">這台 Mac 接管</button><button type="button" class="btn-secondary" id="channels-cloud-remote">Google Cloud 接管</button><button type="button" class="btn-secondary" id="channels-cloud-restart">重新啟動雲端 Bot</button><button type="button" class="btn-secondary" id="channels-cloud-refresh">重新整理</button></div><div class="channels-feedback" id="channels-cloud-feedback" aria-live="polite"></div></div>
+            <div class="channels-card__body">
+              <p class="channels-card__hint">Mac 開啟時由本機服務；關閉程式或手動交接後由 Google Cloud 繼續陪伴，並避免兩邊重複登入 Discord。</p>
+              <div class="cloud-handoff" aria-label="雲端接管服務狀態">
+                <div class="cloud-handoff__node" id="channels-cloud-node-local" data-state="unknown"><span class="cloud-handoff__dot"></span><span>這台 Mac · 本機主控</span><strong id="channels-cloud-local-state">讀取中</strong></div>
+                <div class="cloud-handoff__line" aria-hidden="true"></div>
+                <div class="cloud-handoff__node" id="channels-cloud-node-service" data-state="unknown" title="instance-20260728-054602"><span class="cloud-handoff__dot"></span><span>雲端 Gateway</span><strong id="channels-cloud-service-state">讀取中</strong></div>
+                <div class="cloud-handoff__node" id="channels-cloud-node-watchdog" data-state="unknown"><span class="cloud-handoff__dot"></span><span>故障轉移監看 · 15 秒</span><strong id="channels-cloud-watchdog-state">讀取中</strong></div>
+                <div class="cloud-handoff__node" id="channels-cloud-node-heartbeat" data-state="unknown"><span class="cloud-handoff__dot"></span><span>本機心跳 · 20 秒</span><strong id="channels-cloud-heartbeat-state">讀取中</strong></div>
+              </div>
+              <div class="cloud-safety"><span aria-hidden="true">◇</span><div><strong>本機優先保護</strong><small>這台 Mac 中斷後，Google Cloud 會在約 60–75 秒內自動接手。</small></div></div>
+              <div class="form-row form-row--inline">
+                <input type="checkbox" id="channels-cloud-enabled" />
+                <label class="form-row__label" for="channels-cloud-enabled">啟用 Google Cloud 自動接管</label>
+              </div>
+              <div class="cloud-settings-grid">
+                <div class="form-row"><label class="form-label" for="channels-cloud-host">雲端主機</label><input class="form-input form-input--wide" id="channels-cloud-host" type="text" inputmode="url" autocomplete="off" placeholder="例如 35.202.130.71" /></div>
+                <div class="form-row"><label class="form-label" for="channels-cloud-user">SSH 帳號</label><input class="form-input form-input--wide" id="channels-cloud-user" type="text" autocomplete="username" placeholder="Google Cloud VM 使用者" /></div>
+              </div>
+              <div class="form-row"><label class="form-label" for="channels-cloud-key-path">macOS SSH 私鑰</label><div class="form-input-with-action"><input class="form-input form-input--wide" id="channels-cloud-key-path" type="text" autocomplete="off" spellcheck="false" placeholder="選擇用來連線 Google Cloud 的私鑰" /><button type="button" class="btn-reveal" id="channels-cloud-pick-key">選擇檔案</button></div><p class="form-hint">路徑只儲存在這台 Mac，不會上傳私鑰內容。</p></div>
+              <div class="channels-card__actions"><button type="button" class="btn-secondary" id="channels-cloud-save">儲存並驗證</button><button type="button" class="btn-secondary cloud-action" id="channels-cloud-local">⌘ 這台 Mac 接管</button><button type="button" class="btn-secondary cloud-action" id="channels-cloud-remote">☁ Google Cloud 接管</button><button type="button" class="btn-secondary" id="channels-cloud-restart">↻ 重新啟動雲端 Bot</button><button type="button" class="btn-secondary" id="channels-cloud-refresh">重新整理</button><a href="https://console.cloud.google.com/compute/instancesDetail/zones/us-central1-a/instances/instance-20260728-054602?project=project-8d91f4e9-9534-454f-a32" target="_blank" rel="noopener" class="btn-secondary cloud-console-link">Google Cloud Console ↗</a></div>
+              <div class="channels-feedback" id="channels-cloud-feedback" aria-live="polite"></div>
+            </div>
           </div>
 
-          <div class="channels-card" id="channels-discord-music-card">
+          <div class="channels-card channels-card--service channels-card--discord" id="channels-discord-music-card">
             <div class="channels-card__header">
               <h2>🎵 Discord 音樂控制</h2>
               <strong id="channels-discord-music-status">尚未播放</strong>

@@ -411,6 +411,7 @@ const settingsApi = {
   channelsDiscordUpdateProfile: (profile: unknown) => ipcRenderer.invoke(IPC.CHANNELS_DISCORD_UPDATE_PROFILE, profile),
   channelsDiscordPickAvatar: () => ipcRenderer.invoke(IPC.CHANNELS_DISCORD_PICK_AVATAR),
   channelsDiscordPickBanner: () => ipcRenderer.invoke(IPC.CHANNELS_DISCORD_PICK_BANNER),
+  channelsDiscordPickCloudKey: () => ipcRenderer.invoke(IPC.CHANNELS_DISCORD_PICK_CLOUD_KEY),
   channelsDiscordCloudStatus: () => ipcRenderer.invoke(IPC.CHANNELS_DISCORD_CLOUD_STATUS),
   channelsDiscordCloudControl: (action: "local" | "cloud" | "restart-cloud") => ipcRenderer.invoke(IPC.CHANNELS_DISCORD_CLOUD_CONTROL, action),
   channelsSpotifyAuthorize: (input: { clientId?: string; clientSecret?: string }) => ipcRenderer.invoke(IPC.CHANNELS_SPOTIFY_AUTHORIZE, input),

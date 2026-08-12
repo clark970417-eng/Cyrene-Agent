@@ -21,7 +21,11 @@ import {
   channelsSpotifyConnectBtn, channelsSpotifyDisconnectBtn, channelsSpotifyPreviousBtn, channelsSpotifyToggleBtn,
   channelsSpotifyNextBtn, channelsSpotifyPlayQueryBtn, channelsSpotifyStatusEl, channelsSpotifyFeedbackEl,
   channelsBilibiliConnectBtn, channelsBilibiliDisconnectBtn, channelsBilibiliStatusEl, channelsBilibiliFeedbackEl,
-  channelsCloudStatusEl, channelsCloudLocalBtn, channelsCloudRemoteBtn, channelsCloudRestartBtn, channelsCloudRefreshBtn, channelsCloudFeedbackEl,
+  channelsCloudStatusEl, channelsCloudEnabledEl, channelsCloudHostEl, channelsCloudUserEl, channelsCloudKeyPathEl,
+  channelsCloudPickKeyBtn, channelsCloudSaveBtn, channelsCloudLocalStateEl, channelsCloudServiceStateEl,
+  channelsCloudWatchdogStateEl, channelsCloudHeartbeatStateEl, channelsCloudLocalNodeEl, channelsCloudServiceNodeEl,
+  channelsCloudWatchdogNodeEl, channelsCloudHeartbeatNodeEl, channelsCloudLocalBtn, channelsCloudRemoteBtn,
+  channelsCloudRestartBtn, channelsCloudRefreshBtn, channelsCloudFeedbackEl,
   channelsWechatLoginBtn, channelsWechatRestartBtn, channelsWechatFeedbackEl,
   channelsLogListEl, channelsLogRefreshBtn, channelsLogClearBtn,
 } from "./dom";
@@ -162,6 +166,10 @@ export async function loadChannelsPanel(): Promise<void> {
     if (channelsDiscordCodexOwnerIdEl) channelsDiscordCodexOwnerIdEl.value = cfg.discord?.codexImageOwnerId ?? "";
     if (channelsDiscordRequireMentionEl) channelsDiscordRequireMentionEl.checked = cfg.discord?.requireMention !== false;
     if (channelsDiscordVoiceEnabledEl) channelsDiscordVoiceEnabledEl.checked = cfg.discord?.voiceEnabled !== false;
+    if (channelsCloudEnabledEl) channelsCloudEnabledEl.checked = cfg.discord?.cloudStandbyEnabled === true;
+    if (channelsCloudHostEl) channelsCloudHostEl.value = cfg.discord?.cloudStandbyHost ?? "";
+    if (channelsCloudUserEl) channelsCloudUserEl.value = cfg.discord?.cloudStandbyUser ?? "";
+    if (channelsCloudKeyPathEl) channelsCloudKeyPathEl.value = cfg.discord?.cloudStandbyKeyPath ?? "";
     if (channelsSpotifyClientIdEl) channelsSpotifyClientIdEl.value = cfg.spotify?.clientId ?? "";
     if (channelsSpotifyClientSecretEl) {
       channelsSpotifyClientSecretEl.placeholder = cfg.spotify?.clientSecretRecoveryRequired
@@ -392,14 +400,70 @@ export async function loadChannelsPanel(): Promise<void> {
   async function refreshCloudStatus(): Promise<void> {
     try {
       const status = await window.settings.channelsDiscordCloudStatus();
-      if (channelsCloudStatusEl) channelsCloudStatusEl.textContent = status?.mode === "local" ? "這台 Mac 接管中" : status?.mode === "cloud" ? "Google Cloud 接管中" : "交接中";
+      if (channelsCloudStatusEl) channelsCloudStatusEl.textContent = status?.reachable === false ? "VM 無法連線" : status?.mode === "local" ? "這台 Mac 接管中" : status?.mode === "cloud" ? "Google Cloud 接管中" : "交接中";
+      const setCloudNode = (node: HTMLElement | null, label: HTMLElement | null, state: "ok" | "idle" | "error" | "unknown", text: string) => {
+        if (node) node.dataset.state = state;
+        if (label) label.textContent = text;
+      };
+      setCloudNode(channelsCloudLocalNodeEl, channelsCloudLocalStateEl, status?.localConnected ? "ok" : "idle", status?.localConnected ? "已連線" : "待命");
+      const service = status?.cloudService ?? "unknown";
+      setCloudNode(channelsCloudServiceNodeEl, channelsCloudServiceStateEl, service === "active" ? "ok" : service === "failed" ? "error" : service === "inactive" ? "idle" : "unknown", service === "active" ? "運作中" : service === "inactive" ? "待命" : service === "activating" ? "啟動中" : service === "failed" ? "異常" : "未確認");
+      const watchdog = status?.watchdog ?? "unknown";
+      setCloudNode(channelsCloudWatchdogNodeEl, channelsCloudWatchdogStateEl, watchdog === "active" ? "ok" : watchdog === "failed" ? "error" : watchdog === "inactive" ? "idle" : "unknown", watchdog === "active" ? "已啟用" : watchdog === "inactive" ? "未啟用" : watchdog === "failed" ? "異常" : "未確認");
+      const age = status?.heartbeatAge;
+      const heartbeatText = typeof age === "number" ? (age < 60 ? `${Math.round(age)} 秒前` : `${Math.floor(age / 60)} 分鐘前`) : "尚無資料";
+      const heartbeatState = !status?.reachable ? "error" : typeof age === "number" && age <= 120 ? "ok" : "idle";
+      setCloudNode(channelsCloudHeartbeatNodeEl, channelsCloudHeartbeatStateEl, heartbeatState, status?.reachable === false ? "無法連線" : heartbeatText);
+      channelsCloudLocalBtn?.classList.toggle("is-active", status?.mode === "local");
+      channelsCloudRemoteBtn?.classList.toggle("is-active", status?.mode === "cloud");
+      channelsCloudLocalBtn?.setAttribute("aria-pressed", String(status?.mode === "local"));
+      channelsCloudRemoteBtn?.setAttribute("aria-pressed", String(status?.mode === "cloud"));
+      if (channelsCloudRestartBtn) channelsCloudRestartBtn.toggleAttribute("disabled", status?.mode === "local");
     } catch (err) { setFeedback(channelsCloudFeedbackEl, "err", err instanceof Error ? err.message : String(err)); }
   }
-  const cloudControl = (action: "local" | "cloud" | "restart-cloud") => void window.settings.channelsDiscordCloudControl(action).then(() => { setFeedback(channelsCloudFeedbackEl, "ok", "雲端接管狀態已更新。"); return refreshCloudStatus(); }).catch((err) => setFeedback(channelsCloudFeedbackEl, "err", err instanceof Error ? err.message : String(err)));
+  const cloudControl = (action: "local" | "cloud" | "restart-cloud") => void (async () => {
+    const buttons = [channelsCloudLocalBtn, channelsCloudRemoteBtn, channelsCloudRestartBtn, channelsCloudRefreshBtn, channelsCloudSaveBtn];
+    buttons.forEach((button) => button?.setAttribute("disabled", ""));
+    setFeedback(channelsCloudFeedbackEl, "info", action === "local" ? "正在切換到這台 Mac…" : action === "cloud" ? "正在交給 Google Cloud…" : "正在重新啟動雲端 Bot…");
+    try {
+      await window.settings.channelsDiscordCloudControl(action);
+      setFeedback(channelsCloudFeedbackEl, "ok", action === "local" ? "這台 Mac 已接管 Discord。" : action === "cloud" ? "Google Cloud 已接管 Discord。" : "雲端 Bot 已重新啟動。");
+    } finally {
+      buttons.forEach((button) => button?.removeAttribute("disabled"));
+      await refreshCloudStatus();
+    }
+  })().catch(async (err) => {
+    setFeedback(channelsCloudFeedbackEl, "err", err instanceof Error ? err.message : String(err));
+  });
   channelsCloudLocalBtn?.addEventListener("click", () => cloudControl("local"));
   channelsCloudRemoteBtn?.addEventListener("click", () => cloudControl("cloud"));
   channelsCloudRestartBtn?.addEventListener("click", () => cloudControl("restart-cloud"));
   channelsCloudRefreshBtn?.addEventListener("click", () => void refreshCloudStatus());
+  channelsCloudPickKeyBtn?.addEventListener("click", () => void (async () => {
+    const selected = await window.settings.channelsDiscordPickCloudKey();
+    if (selected && channelsCloudKeyPathEl) channelsCloudKeyPathEl.value = selected;
+  })().catch((err) => setFeedback(channelsCloudFeedbackEl, "err", err instanceof Error ? err.message : String(err))));
+  channelsCloudSaveBtn?.addEventListener("click", () => void (async () => {
+    const enabled = channelsCloudEnabledEl?.checked ?? false;
+    const host = channelsCloudHostEl?.value.trim() ?? "";
+    const user = channelsCloudUserEl?.value.trim() ?? "";
+    const keyPath = channelsCloudKeyPathEl?.value.trim() ?? "";
+    if (enabled && (!host || !user || !keyPath)) {
+      setFeedback(channelsCloudFeedbackEl, "err", "啟用自動接管前，請完整填寫雲端主機、SSH 帳號與私鑰。");
+      return;
+    }
+    setFeedback(channelsCloudFeedbackEl, "info", "正在儲存並驗證 Google Cloud…");
+    await window.settings.channelsSaveConfig({ discord: {
+      cloudPrimary: false,
+      cloudStandbyEnabled: enabled,
+      cloudStandbyHost: host || undefined,
+      cloudStandbyUser: user || undefined,
+      cloudStandbyKeyPath: keyPath || undefined,
+    } });
+    await window.settings.channelsRestart();
+    await refreshCloudStatus();
+    setFeedback(channelsCloudFeedbackEl, "ok", enabled ? "已儲存；Google Cloud 自動接管可正常使用。" : "已儲存；Google Cloud 自動接管目前關閉。");
+  })().catch((err) => setFeedback(channelsCloudFeedbackEl, "err", err instanceof Error ? err.message : String(err))));
 
   // ===== 舊版 Discord 音樂桌面控制 =====
   const discordMusicStatusEl = document.getElementById("channels-discord-music-status");

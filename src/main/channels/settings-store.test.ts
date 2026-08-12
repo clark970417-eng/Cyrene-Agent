@@ -98,6 +98,25 @@ describe("channels/settings-store", () => {
     expect(loadChannelsSettings().toolSandbox).toBe("off");
   });
 
+  it("preserves Discord credentials while saving Google Cloud failover settings", () => {
+    saveChannelsSettings({ discord: { enabled: true, botToken: "discord-secret" } });
+    saveChannelsSettings({ discord: {
+      enabled: true,
+      cloudPrimary: false,
+      cloudStandbyEnabled: true,
+      cloudStandbyHost: "35.202.130.71",
+      cloudStandbyUser: "bluearchive6888",
+      cloudStandbyKeyPath: "/Users/test/.ssh/cyrene-gcp",
+    } });
+
+    const loaded = loadChannelsSettings();
+    expect(loaded.discord.botToken).toBe("discord-secret");
+    expect(loaded.discord.cloudStandbyEnabled).toBe(true);
+    expect(loaded.discord.cloudStandbyHost).toBe("35.202.130.71");
+    expect(loaded.discord.cloudStandbyUser).toBe("bluearchive6888");
+    expect(loaded.discord.cloudStandbyKeyPath).toBe("/Users/test/.ssh/cyrene-gcp");
+  });
+
   it("preserves settings written by older or custom channel builds", () => {
     const saved = saveChannelsSettings({
       legacyMobileBridge: { enabled: true, deviceName: "iPhone" },
