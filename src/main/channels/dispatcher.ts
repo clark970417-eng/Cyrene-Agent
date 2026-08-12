@@ -24,7 +24,7 @@ import type {
   OutgoingPart,
 } from "./types";
 import { channelManager, type ChannelManager } from "./manager";
-import { loadChannelsSettings, type ChannelsSettings } from "./settings-store";
+import { getDefaultChannelsSettings, loadChannelsSettings, type ChannelsSettings } from "./settings-store";
 import { appendLog, reloadLogFromDisk } from "./message-log";
 import { appendHistory as appendChannelHistory } from "./history-log";
 import { resolveLocalStickerPath } from "../sticker-protocol";
@@ -37,6 +37,7 @@ import {
   type MobileMessageSegmentationMode,
 } from "../../shared/preferences";
 import { rememberProactiveChannelRecipient } from "./proactive-delivery";
+import { toTraditionalTaiwan } from "../utils/opencc";
 
 /** Phase A：用于拼接历史对话的轻量 ChatMessage 形状（与 orchestrator ChatMessage 兼容）。 */
 interface ChatMessage {
@@ -216,7 +217,9 @@ export class ChannelDispatcher {
 
   constructor(deps: DispatcherDeps) {
     this.deps = deps;
-    this.settings = loadChannelsSettings();
+    // 此單例在 Electron ready 前就會建構；先用無 I/O 預設值，真正啟動
+    // adapter 時 reloadSettings() 才讀 Keychain，避免 Discord 等憑證假性遺失。
+    this.settings = getDefaultChannelsSettings();
     this.limiter = new RateLimiter(this.settings);
     reloadLogFromDisk();
   }
@@ -309,6 +312,10 @@ export class ChannelDispatcher {
       replyText = `[echo][${msg.channel}][${msg.senderId}] ${msg.text}`;
       console.log(LOG, "Phase 0 echo (无 buildAndRunAgent):", replyText);
     }
+
+    // 外部頻道也統一使用台灣繁體。Prompt 已要求 zh-TW，但模型偶爾仍會
+    // 回簡體；在送往 Discord／微信／飛書前做最後一道確定性轉換。
+    replyText = toTraditionalTaiwan(replyText);
 
     // 构造 OutgoingMessage parts
     const mobileMessageSegmentation = normalizeMobileMessageSegmentationMode(

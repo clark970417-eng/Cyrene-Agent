@@ -16,11 +16,11 @@ const LABELS: Record<BackupCategory, string> = {
 };
 
 const PATHS: Record<BackupCategory, string[]> = {
-  conversations: ["cyrene-chats", "conversation-archive", "channels"],
+  conversations: ["cyrene-chats", "conversation-archive", "channels", "agent-activity.jsonl"],
   memories: ["memory.json", "entity-graph.json", "relationship-log.json", "friends-vague-memory.json", "Shared Notebook.md", "worldbook-state.json"],
   planning: ["scheduled-tasks.json", "scheduled-tasks-history.jsonl", "current-todos.json", "current-todos.json.migrated", "todos", "token-usage.json", "call-usage.json", "expenses.json", "game-room-stats.json"],
-  personalization: ["user-profile.json", "avatar.png", "sticker-settings.json", "sticker-manifest.json", "stickers", "skills-enabled.json", "skills", "cyrene-opener-pack", "opener-state.json", "proactive-state.json", "emoji-usage.json", "x-notifications.json", "anilist-notifications.json", "discord"],
-  knowledge: ["rag-data"],
+  personalization: ["user-profile.json", "avatar.png", "sticker-settings.json", "sticker-manifest.json", "sticker-embedding-cache.json", "stickers", "skills-enabled.json", "skills", "cyrene-opener-pack", "opener-state.json", "proactive-state.json", "emoji-usage.json", "x-notifications.json", "anilist-notifications.json", "discord"],
+  knowledge: ["rag-data", "scene-embedding-cache.json"],
   settings: ["app-settings.json", "model-settings.json", "channels-settings.json", "game-bot-settings.json", "mcp-servers.json", "agent-permission.json"],
 };
 

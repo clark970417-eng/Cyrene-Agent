@@ -68,9 +68,21 @@ export interface ModelSettings {
   /** Action Gate 结构化输出重试总预算（秒）。5-40，默认 10。 */
   actionGateRepairBudgetSec: number;
   vision?: {
+    enabled: boolean;
+    autoAnalyze: boolean;
+    maxImages: number;
+    maxImageMb: number;
+    syncWithMain: boolean;
     baseUrl: string;
     apiKey: string;
     model: string;
+    screenCompanionEnabled: boolean;
+    observeIntervalSeconds: number;
+    talkativeness: "quiet" | "normal" | "active" | "chatty";
+    minTalkIntervalSeconds: number;
+    proactiveTarget: "desktop" | "discord" | "wechat";
+    discordSubTarget: "dm" | "channel";
+    discordChannelId: string;
   };
   /** Embedding 维度（可选，仅 cloud 模式）。留空 = 自动探测。 */
   embeddingDimensions?: number;

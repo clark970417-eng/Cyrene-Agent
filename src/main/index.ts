@@ -124,6 +124,7 @@ import { type RuntimeState } from "./runtime-state";
 import { getAppIconPath } from "./app-icon";
 import type { StartTtsRequest } from "../shared/tts-session";
 import { registerAgUiIpc, type AguiRunInput } from "./agui-bridge";
+import { getMobileServerHandle, startMobileServer, stopMobileServer } from "./mobile-server/mobile-server";
 import { codeRunWorker } from "./orchestrator/code/code-run-worker";
 import {
   setWeatherConfig,
@@ -451,6 +452,29 @@ if (isPrimaryAppInstance) app.whenReady().then(async () => {
     proactiveLifecycle.proactiveConversationLifecycle,
   );
 
+  // 沿用舊版手機 PWA：以相同的 Agent Runtime、記憶與會話資料提供區域網路聊天。
+  // 手機服務獨立於 Discord；即使 Google Cloud 暫時停止，Mac App 開著時仍可使用。
+  try {
+    const mobileHandle = await startMobileServer(
+      (input: AguiRunInput) => agentRuntime.buildOptions(input),
+      (result, latestUserText, conversationId) => agentRuntime.onRunFinished(
+        result,
+        latestUserText,
+        undefined,
+        conversationId,
+      ),
+    );
+    console.log(`[MobileServer] 手機版就緒: http://${mobileHandle.localIp}:${mobileHandle.port}  Token: ${mobileHandle.token}`);
+    ipcMain.handle("mobile:get-connection-info", () => {
+      const handle = getMobileServerHandle();
+      return handle
+        ? { ip: handle.localIp, port: handle.port, token: handle.token }
+        : null;
+    });
+  } catch (error) {
+    console.error("[MobileServer] 啟動失敗:", error);
+  }
+
   // 状态栏专用入口：打开/复用 reactChatWindow
   ipcMain.handle(IPC.TODOS_GET_CURRENT, () => getCurrentTodos());
 
@@ -523,6 +547,7 @@ app.on("before-quit", () => {
   codeRunWorker.cleanup();
   flushTokenUsage();
   void channelsSubsystem?.shutdown();
+  void stopMobileServer();
   void screenshotService?.shutdown();
 });
 

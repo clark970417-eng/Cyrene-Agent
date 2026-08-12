@@ -232,6 +232,36 @@
               </div>
               <p class="vision-hint">ⓘ 该模型需支持 OpenAI 兼容的 /chat/completions 接口及 image_url 多模态能力</p>
 
+              <div class="settings-list" aria-label="舊版視覺偏好">
+                <label class="setting-row">
+                  <div><strong>啟用視覺</strong><span>沿用舊版視覺開關；關閉時不主動讀取圖片。</span></div>
+                  <span class="switch"><input id="vision-enabled" type="checkbox" checked /><span class="switch__track"><span class="switch__thumb"></span></span></span>
+                </label>
+                <label class="setting-row">
+                  <div><strong>自動查看附圖</strong><span>收到圖片時自動分析，不需要另外要求昔漣看圖。</span></div>
+                  <span class="switch"><input id="vision-auto-analyze" type="checkbox" checked /><span class="switch__track"><span class="switch__thumb"></span></span></span>
+                </label>
+                <div class="form-grid">
+                  <label class="field"><span>每次最多辨識</span><select id="vision-max-images"><option value="1">1 張</option><option value="2">2 張</option><option value="3">3 張</option><option value="4">4 張</option></select></label>
+                  <label class="field"><span>單張大小上限</span><select id="vision-max-image-mb"><option value="1">1 MB</option><option value="5">5 MB</option><option value="10">10 MB</option></select></label>
+                </div>
+              </div>
+
+              <hr class="api-section-divider" />
+              <div class="vision-config-heading">
+                <span class="vision-config-icon">👁️</span>
+                <div><h2>螢幕陪伴與主動搭話</h2><p>沿用舊版設定；僅在這台 Mac 的桌面版執行。</p></div>
+                <label class="vision-multimodal-row"><span>啟用</span><span class="switch"><input id="screen-companion-enabled" type="checkbox" /><span class="switch__track"><span class="switch__thumb"></span></span></span></label>
+              </div>
+              <div class="form-grid">
+                <label class="field"><span>觀察間隔</span><select id="companion-observe-interval"><option value="300">5 分鐘</option><option value="600">10 分鐘</option><option value="1800">30 分鐘</option><option value="3600">1 小時</option><option value="10800">3 小時</option><option value="43200">12 小時</option></select></label>
+                <label class="field"><span>說話頻率</span><select id="companion-talkativeness"><option value="quiet">安靜</option><option value="normal">正常</option><option value="active">活潑</option><option value="chatty">健談</option></select></label>
+                <label class="field"><span>主動搭話冷卻</span><select id="companion-min-interval"><option value="30">30 秒</option><option value="60">1 分鐘</option><option value="120">2 分鐘</option><option value="300">5 分鐘</option><option value="600">10 分鐘</option><option value="1800">30 分鐘</option><option value="3600">1 小時</option></select></label>
+                <label class="field"><span>主動訊息位置</span><select id="companion-proactive-target"><option value="desktop">本機</option><option value="discord">Discord</option><option value="wechat">微信</option></select></label>
+                <label class="field"><span>Discord 發送對象</span><select id="companion-discord-subtarget"><option value="dm">私訊屋主</option><option value="channel">指定頻道</option></select></label>
+                <label class="field"><span>Discord 頻道 ID</span><input id="companion-discord-channel-id" type="text" inputmode="numeric" autocomplete="off" /></label>
+              </div>
+
               <button type="button" class="save-btn save-btn--ghost" id="test-vision-btn">测试视觉模型</button>
               <div class="save-status" id="vision-test-status"></div>
             </div>

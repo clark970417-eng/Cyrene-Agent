@@ -24,7 +24,14 @@ import { normalizeWindowVisibilitySettings } from "../window-visibility-settings
 import { normalizeCitaSettings } from "../cita/settings";
 import { getGeneralSettingsPath } from "../settings-store";
 import type { GeneralSettings } from "./general-settings";
-import { protectSecrets, revealSecrets } from "../security/secret-vault";
+import {
+  isSecretVaultAvailable,
+  isProtectedSecret,
+  preserveLockedSecrets,
+  protectSecrets,
+  revealSecret,
+  revealSecrets,
+} from "../security/secret-vault";
 
 const DEFAULT_GENERAL_SETTINGS: GeneralSettings = {
   citaEnabled: false,
@@ -330,8 +337,16 @@ function loadGeneralSettings0(): GeneralSettings {
   try {
     const filePath = getGeneralSettingsPath();
     if (!fs.existsSync(filePath)) return { ...DEFAULT_GENERAL_SETTINGS };
-    const parsed = revealSecrets(JSON.parse(fs.readFileSync(filePath, "utf8"))) as Partial<GeneralSettings>;
-    if (!parsed.legacySettingsMigrationVersion) {
+    const rawParsed = JSON.parse(fs.readFileSync(filePath, "utf8")) as Partial<GeneralSettings>;
+    // 舊版誤把 screenshotHotkey 當憑證加密。新規則不再加密它，但首次
+    // 載入仍要明確解開歷史值，否則 UI 會顯示 cyvault 密文字串。
+    if (isProtectedSecret(rawParsed.screenshotHotkey)) {
+      rawParsed.screenshotHotkey = isSecretVaultAvailable()
+        ? revealSecret(rawParsed.screenshotHotkey)
+        : undefined;
+    }
+    const parsed = revealSecrets(rawParsed) as Partial<GeneralSettings>;
+    if (!parsed.legacySettingsMigrationVersion && isSecretVaultAvailable()) {
       // 舊版的主動陪伴使用 openerMode；新版曾另外寫入預設 off，導致原本的
       // lively/normal/quiet 看似遺失。只遷移一次，之後尊重新版開關。
       if (parsed.openerMode && parsed.openerMode !== "off" && parsed.proactiveChatMode === "off") {
@@ -352,14 +367,25 @@ function loadGeneralSettings0(): GeneralSettings {
 
 export function loadGeneralSettings(): GeneralSettings {
   if (generalSettingsCache !== null) return generalSettingsCache;
-  return (generalSettingsCache = loadGeneralSettings0());
+  const loaded = loadGeneralSettings0();
+  // index.ts 會在 app.whenReady() 前讀 disableGpuElectron。此時 macOS
+  // Keychain 可能尚不可用；不要把暫時解不開密文的結果快取整個執行期。
+  if (isSecretVaultAvailable()) generalSettingsCache = loaded;
+  return loaded;
 }
 
 export function saveGeneralSettings(partial: Partial<GeneralSettings>): GeneralSettings {
   const before = loadGeneralSettings();
   const normalized = normalizeGeneralSettings({ ...before, ...partial });
   const filePath = getGeneralSettingsPath();
-  fs.writeFileSync(filePath, JSON.stringify(protectSecrets(normalized), null, 2), {
+  let currentRaw: unknown = {};
+  try {
+    if (fs.existsSync(filePath)) currentRaw = JSON.parse(fs.readFileSync(filePath, "utf8"));
+  } catch {
+    currentRaw = {};
+  }
+  const protectedSettings = preserveLockedSecrets(protectSecrets(normalized), currentRaw);
+  fs.writeFileSync(filePath, JSON.stringify(protectedSettings, null, 2), {
     encoding: "utf8",
     mode: 0o600,
   });

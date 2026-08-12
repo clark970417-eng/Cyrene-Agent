@@ -79,7 +79,13 @@ import { formatDateTime, escapeHtml } from "./shared/format";
 import { parsePositiveIntOrThrow, parseN1SecToMsOrThrow, parseCommandLine } from "./shared/parse";
 import { apiState } from "./api/state";
 import { apiForm, apiRuntimeForm, apiTimeoutForm, presetCards, presetWebsiteLink, displayNameInput, baseUrlInput, baseUrlResetBtn, modelInput, modelInputSuggestions, contextWindowInput, apiKeyInput, apiKeyLabel, apiKeyHint, testConnectionBtn, transportSelect, transportHint, endpointPreview, customEndpointControls, customEndpointOverrides, customEndpointSummary, customEndpointGuideBtn, workFlowAdaptBtn, apiNoteText, multimodalToggle, chatRequestTimeoutSecInput, maxIterationsInput, maxReplansInput, maxRefreshInput, perCallTimeoutSecInput, actionGateRepairBudgetSecInput, embeddingDimensionsInput, modelRequestTimeoutSecInput, modelRequestTimeoutSecReset, toggleEnableThinking, toggleDisableThinking, toggleDisableMaxToken } from "./api/dom";
-import { visionBaseUrlInput, visionApiKeyInput, visionModelInput, visionFieldsWrap, testVisionBtn, visionTestStatus } from "./vision/dom";
+import {
+  companionDiscordChannelIdInput, companionDiscordSubtargetInput, companionMinIntervalInput,
+  companionObserveIntervalInput, companionProactiveTargetInput, companionTalkativenessInput,
+  screenCompanionEnabledInput, testVisionBtn, visionApiKeyInput, visionAutoAnalyzeInput,
+  visionBaseUrlInput, visionEnabledInput, visionFieldsWrap, visionMaxImageMbInput,
+  visionMaxImagesInput, visionModelInput, visionTestStatus,
+} from "./vision/dom";
 import { appearanceForm, appearanceSaveStatus, uiThemeSelect, runtimeSyncSelect, runtimeSyncNote, windowCornerRadiusInput, windowCornerRadiusVal, petAlwaysOnTopInput, petVisibleInput, petChatInputEnabledInput, petZoomInput, petZoomVal, chatLineHeightInput, chatLineHeightVal, assistantBubbleEnabledInput, chatParaSpacingInput, chatParaSpacingVal, launchAtLoginInput, uiFontCurrent, uiFontImportButton, uiFontResetButton, uiIconSelect, screenshotHotkeyInput, openChromeGpu, disableGpuInput, sidebarVisibleInput, tasksVisibleInput } from "./appearance/dom";
 import { generalForm, generalSaveStatus, languageSelect, defaultChatModeSelect, segmentedOutputSelect, mobileMessageSegmentationSelect, proactiveChatSelect, proactiveDeliveryRow, proactiveDeliverySelect, chatSocialContextEnabledInput, citaEnabledInput, citaEngineSelect, clearChatHistoryBtn, customStyleSamplingBtn, customStylePromptBtn } from "./general/dom";
 import { minBtn, closeBtn, preferencesForm, sectionTitle, sectionHint, placeholderPanel, cyrenePanel, disclaimerPanel, pluginsPanel, placeholderIcon, placeholderTitle, placeholderCopy, saveStatus, runtimeSaveStatus, preferencesSaveStatus, cyreneSaveStatus, openStickerManagerBtn, addStickerBtn } from "./shared/shell";
@@ -928,6 +934,17 @@ async function loadConfig(): Promise<void> {
         : undefined,
       cfg.multimodal,
     );
+    visionEnabledInput.checked = vision?.enabled !== false;
+    visionAutoAnalyzeInput.checked = vision?.autoAnalyze !== false;
+    visionMaxImagesInput.value = String(vision?.maxImages ?? 2);
+    visionMaxImageMbInput.value = String(vision?.maxImageMb ?? 5);
+    screenCompanionEnabledInput.checked = vision?.screenCompanionEnabled === true;
+    companionObserveIntervalInput.value = String(vision?.observeIntervalSeconds ?? 1800);
+    companionTalkativenessInput.value = vision?.talkativeness ?? "normal";
+    companionMinIntervalInput.value = String(vision?.minTalkIntervalSeconds ?? 120);
+    companionProactiveTargetInput.value = vision?.proactiveTarget ?? "desktop";
+    companionDiscordSubtargetInput.value = vision?.discordSubTarget ?? "dm";
+    companionDiscordChannelIdInput.value = vision?.discordChannelId ?? "";
     applyRuntimeSyncSelection(cfg.runtimeSync);
     stickerEnabledInput.checked = cfg.stickerEnabled !== false;
     applyStickerSizeSelection(cfg.stickerSize);
@@ -1523,9 +1540,21 @@ apiForm.addEventListener("submit", async (e) => {
       multimodal: multimodalToggle.checked,
       // 视觉配置始终传三框值，不论开关状态（开关 ON 时保留但不使用）
       vision: {
+        enabled: visionEnabledInput.checked,
+        autoAnalyze: visionAutoAnalyzeInput.checked,
+        maxImages: Number(visionMaxImagesInput.value) || 2,
+        maxImageMb: Number(visionMaxImageMbInput.value) || 5,
+        syncWithMain: multimodalToggle.checked,
         baseUrl: visionBaseUrlInput.value.trim(),
         apiKey: visionApiKeyInput.value.trim(),
         model: visionModelInput.value.trim(),
+        screenCompanionEnabled: screenCompanionEnabledInput.checked,
+        observeIntervalSeconds: Number(companionObserveIntervalInput.value) || 1800,
+        talkativeness: companionTalkativenessInput.value as NonNullable<ModelSettings["vision"]>["talkativeness"],
+        minTalkIntervalSeconds: Number(companionMinIntervalInput.value) || 120,
+        proactiveTarget: companionProactiveTargetInput.value as NonNullable<ModelSettings["vision"]>["proactiveTarget"],
+        discordSubTarget: companionDiscordSubtargetInput.value as NonNullable<ModelSettings["vision"]>["discordSubTarget"],
+        discordChannelId: companionDiscordChannelIdInput.value.trim(),
       },
       thinkingOverride: toggleEnableThinking.checked ? 1 : toggleDisableThinking.checked ? -1 : 0,
       disableMaxToken: toggleDisableMaxToken.checked,

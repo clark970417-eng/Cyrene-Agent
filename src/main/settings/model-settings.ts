@@ -7,7 +7,12 @@ import { getSettingsPath } from "../settings-store";
 import type { VisionConfig } from "../orchestrator/vision-captioner";
 import { migrateLegacyMinimaxDefaults } from "../orchestrator/vendors/minimax-defaults";
 import { getCapabilityOrOpenAI } from "../orchestrator/vendors/capabilities";
-import { protectSecrets, revealSecrets } from "../security/secret-vault";
+import {
+  isSecretVaultAvailable,
+  preserveLockedSecrets,
+  protectSecrets,
+  revealSecrets,
+} from "../security/secret-vault";
 
 /**
  * 统一模型配置入口：所有模块（包括 Code 模式）必须通过此函数读取。
@@ -149,9 +154,23 @@ export interface ModelSettings {
 
 /** 视觉模型配置（独立视觉模型，非多模态直发场景）。全空 = 未启用。 */
 export interface VisionModelConfig {
+  /** 舊版視覺開關與自動分析偏好，保留並供相容 UI 使用。 */
+  enabled: boolean;
+  autoAnalyze: boolean;
+  maxImages: number;
+  maxImageMb: number;
+  syncWithMain: boolean;
   baseUrl: string;
   apiKey: string;
   model: string;
+  /** 舊版螢幕陪伴設定。執行模組恢復前也必須完整 round-trip。 */
+  screenCompanionEnabled: boolean;
+  observeIntervalSeconds: number;
+  talkativeness: "quiet" | "normal" | "active" | "chatty";
+  minTalkIntervalSeconds: number;
+  proactiveTarget: "desktop" | "discord" | "wechat";
+  discordSubTarget: "dm" | "channel";
+  discordChannelId: string;
 }
 
 const DEFAULT_MODEL_SETTINGS: ModelSettings = {
@@ -218,15 +237,43 @@ function normalizeProviderProfile(
   };
 }
 
-/** 清洗视觉模型配置。三字段全空 = 未启用，返回 undefined。 */
+/** 清洗視覺模型及舊版螢幕陪伴設定。 */
 function normalizeVisionConfig(input: Partial<VisionModelConfig> | undefined): VisionModelConfig | undefined {
   if (!input || typeof input !== "object") return undefined;
   const baseUrl = typeof input.baseUrl === "string" ? input.baseUrl.trim() : "";
   const apiKey = typeof input.apiKey === "string" ? input.apiKey.trim() : "";
   const model = typeof input.model === "string" ? input.model.trim() : "";
-  // 三项全空 = 未启用
-  if (!baseUrl && !apiKey && !model) return undefined;
-  return { baseUrl, apiKey, model };
+  const hasLegacyPolicy = [
+    "enabled", "autoAnalyze", "maxImages", "maxImageMb", "syncWithMain",
+    "screenCompanionEnabled", "observeIntervalSeconds", "talkativeness",
+    "minTalkIntervalSeconds", "proactiveTarget", "discordSubTarget", "discordChannelId",
+  ].some((key) => Object.prototype.hasOwnProperty.call(input, key));
+  if (!baseUrl && !apiKey && !model && !hasLegacyPolicy) return undefined;
+  const allowedObserve = [300, 600, 1800, 3600, 10800, 43200];
+  const observe = Number(input.observeIntervalSeconds);
+  const allowedTalk = [30, 60, 120, 300, 600, 1800, 3600];
+  const minTalk = Number(input.minTalkIntervalSeconds);
+  return {
+    enabled: input.enabled !== false,
+    autoAnalyze: input.autoAnalyze !== false,
+    maxImages: [1, 2, 3, 4].includes(Number(input.maxImages)) ? Number(input.maxImages) : 2,
+    maxImageMb: [1, 5, 10].includes(Number(input.maxImageMb)) ? Number(input.maxImageMb) : 5,
+    syncWithMain: input.syncWithMain === true,
+    baseUrl,
+    apiKey,
+    model,
+    screenCompanionEnabled: input.screenCompanionEnabled === true,
+    observeIntervalSeconds: allowedObserve.includes(observe) ? observe : 1800,
+    talkativeness: ["quiet", "normal", "active", "chatty"].includes(String(input.talkativeness))
+      ? input.talkativeness as VisionModelConfig["talkativeness"]
+      : "normal",
+    minTalkIntervalSeconds: allowedTalk.includes(minTalk) ? minTalk : 120,
+    proactiveTarget: ["desktop", "discord", "wechat"].includes(String(input.proactiveTarget))
+      ? input.proactiveTarget as VisionModelConfig["proactiveTarget"]
+      : "desktop",
+    discordSubTarget: input.discordSubTarget === "channel" ? "channel" : "dm",
+    discordChannelId: typeof input.discordChannelId === "string" ? input.discordChannelId.trim() : "",
+  };
 }
 
 export function normalizeModelSettings(input: Partial<ModelSettings> | null | undefined): ModelSettings {
@@ -276,6 +323,9 @@ export function normalizeModelSettings(input: Partial<ModelSettings> | null | un
   }
 
   return {
+    // 保留舊版／自訂 build 寫入而這個版本尚未認識的欄位，避免只改一項
+    // 設定就把其他歷史設定從 JSON 裁掉。
+    ...(input ?? {}),
     mode,
     provider,
     displayName: profile.displayName,
@@ -349,7 +399,9 @@ function loadModelSettings0(): ModelSettings {
 
 export function loadModelSettings(): ModelSettings {
   if (modelSettingsCache !== null) return modelSettingsCache;
-  return modelSettingsCache = loadModelSettings0();
+  const loaded = loadModelSettings0();
+  if (isSecretVaultAvailable()) modelSettingsCache = loaded;
+  return loaded;
 }
 
 /**
@@ -438,7 +490,14 @@ export function saveModelSettings(settings: Partial<ModelSettings>): ModelSettin
   const final = normalizeModelSettings(merged);
   const filePath = getSettingsPath();
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  fs.writeFileSync(filePath, JSON.stringify(protectSecrets(final), null, 2), {
+  let currentRaw: unknown = {};
+  try {
+    if (fs.existsSync(filePath)) currentRaw = JSON.parse(fs.readFileSync(filePath, "utf8"));
+  } catch {
+    currentRaw = {};
+  }
+  const protectedSettings = preserveLockedSecrets(protectSecrets(final), currentRaw);
+  fs.writeFileSync(filePath, JSON.stringify(protectedSettings, null, 2), {
     encoding: "utf8",
     mode: 0o600,
   });
