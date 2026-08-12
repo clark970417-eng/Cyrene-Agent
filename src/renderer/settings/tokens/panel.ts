@@ -22,6 +22,52 @@ declare global {
     tokenUsage?: {
       get: (days: number) => Promise<TokenDayData[]>;
     };
+    callUsage?: {
+      get: (days: number) => Promise<Array<{ date: string; weekday: string; totalMs: number; desktopMs: number; discordMs: number; active: boolean }>>;
+    };
+    agentActivity?: {
+      get: (days: number) => Promise<{
+        events: Array<{ at: string; kind: string; name: string; status: string; durationMs: number; error?: string }>;
+        summary: { total: number; success: number; failed: number; denied: number; avgDurationMs: number };
+        models: Array<{ model: string; input: number; output: number; requests: number }>;
+        resources: { rssBytes: number; heapUsedBytes: number; queue: { pending: number; running: number; limit: number } };
+      }>;
+      exportDiagnostic: () => Promise<{ filePath: string } | null>;
+    };
+  }
+}
+
+function formatDuration(ms: number): string {
+  const minutes = Math.floor(Math.max(0, ms) / 60_000);
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return hours ? `${hours} 小時${rest ? ` ${rest} 分鐘` : ""}` : `${minutes} 分鐘`;
+}
+
+async function refreshCallAndActivity(): Promise<void> {
+  const callData = await window.callUsage?.get(90) ?? [];
+  const total = callData.reduce((sum, day) => sum + day.totalMs, 0);
+  const desktop = callData.reduce((sum, day) => sum + day.desktopMs, 0);
+  const discord = callData.reduce((sum, day) => sum + day.discordMs, 0);
+  const totalEl = document.getElementById("call-usage-history-total");
+  const detailEl = document.getElementById("call-usage-history-detail");
+  const listEl = document.getElementById("call-usage-history-list");
+  if (totalEl) totalEl.textContent = formatDuration(total);
+  if (detailEl) detailEl.textContent = `最近 90 天 · 桌面 ${formatDuration(desktop)} · Discord ${formatDuration(discord)}`;
+  if (listEl) {
+    const activeDays = callData.filter((day) => day.totalMs > 0).slice(-14).reverse();
+    listEl.innerHTML = activeDays.map((day) => `<div class="channels-log__entry"><div class="channels-log__meta">${day.date} ${day.weekday}</div><div class="channels-log__text">${formatDuration(day.totalMs)} · 桌面 ${formatDuration(day.desktopMs)} · Discord ${formatDuration(day.discordMs)}</div></div>`).join("") || '<p class="empty-hint">目前沒有通話紀錄。</p>';
+  }
+
+  const activity = await window.agentActivity?.get(90);
+  if (!activity) return;
+  const summaryEl = document.getElementById("agent-activity-summary");
+  const resourceEl = document.getElementById("agent-activity-resources");
+  const activityListEl = document.getElementById("agent-activity-list");
+  if (summaryEl) summaryEl.textContent = `${activity.summary.total} 次 · 成功 ${activity.summary.success} · 失敗 ${activity.summary.failed} · 拒絕 ${activity.summary.denied}`;
+  if (resourceEl) resourceEl.textContent = `記憶體 ${Math.round(activity.resources.rssBytes / 1024 / 1024)} MB · Heap ${Math.round(activity.resources.heapUsedBytes / 1024 / 1024)} MB · 背景佇列 ${activity.resources.queue.running} 執行中 / ${activity.resources.queue.pending} 等待中`;
+  if (activityListEl) {
+    activityListEl.innerHTML = activity.events.slice(0, 50).map((event) => `<div class="channels-log__entry"><div class="channels-log__meta">${new Date(event.at).toLocaleString("zh-TW")} · ${event.status} · ${event.durationMs} ms</div><div class="channels-log__text">${event.name}${event.error ? ` · ${event.error}` : ""}</div></div>`).join("") || '<p class="empty-hint">尚無活動紀錄。</p>';
   }
 }
 
@@ -289,10 +335,21 @@ document.querySelectorAll<HTMLButtonElement>(".token-range__btn").forEach((btn) 
     });
     btn.classList.add("is-active");
     btn.setAttribute("aria-selected", "true");
-    const days = Number(btn.dataset.range) || 7;
+    const days = Number(btn.dataset.range) || 90;
     void refreshTokenPanel(days);
   });
 });
 
 // 初始渲染
-void refreshTokenPanel(7);
+// 用量檔目前保留最多 90 天；預設顯示完整保存範圍，避免舊資料仍在卻看似消失。
+void refreshTokenPanel(90);
+void refreshCallAndActivity();
+document.getElementById("agent-activity-refresh")?.addEventListener("click", () => void refreshCallAndActivity());
+document.getElementById("diagnostic-export-btn")?.addEventListener("click", () => void (async () => {
+  const feedback = document.getElementById("agent-activity-feedback");
+  const result = await window.agentActivity?.exportDiagnostic();
+  if (feedback) feedback.textContent = result?.filePath ? `已匯出：${result.filePath}` : "已取消匯出。";
+})().catch((error) => {
+  const feedback = document.getElementById("agent-activity-feedback");
+  if (feedback) feedback.textContent = error instanceof Error ? error.message : String(error);
+}));

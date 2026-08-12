@@ -107,4 +107,21 @@ describe("channels/settings-store", () => {
     expect(saved.legacyMobileBridge).toEqual({ enabled: true, deviceName: "iPhone" });
     expect(saved.wechat.legacySessionMode).toBe("linked");
   });
+
+  it("保留無法解密的 Spotify 密文並標示需要重新輸入", () => {
+    const p = path.join(os.tmpdir(), "channels-settings.json");
+    fs.writeFileSync(p, JSON.stringify({
+      ...loadChannelsSettings(),
+      spotify: { enabled: true, clientId: "client-1", clientSecret: "enc:broken" },
+    }));
+
+    const loaded = loadChannelsSettings();
+    expect(loaded.spotify.clientId).toBe("client-1");
+    expect(loaded.spotify.clientSecret).toBe("");
+    expect(loaded.spotify.clientSecretRecoveryRequired).toBe(true);
+
+    saveChannelsSettings({ spotify: { enabled: true, accountName: "保留帳號" } });
+    const raw = JSON.parse(fs.readFileSync(p, "utf8"));
+    expect(raw.spotify.clientSecret).toBe("enc:broken");
+  });
 });

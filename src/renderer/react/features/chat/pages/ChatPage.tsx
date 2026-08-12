@@ -731,7 +731,12 @@ export function ChatPage() {
       ...current,
       [targetMode]: session.workspaceBinding?.displayName,
     }));
-    if (targetMode === activeModeRef.current) void store.setActiveSession(sessionId);
+    if (targetMode === activeModeRef.current) {
+      void store.setActiveSession(sessionId);
+      if (window.self !== window.top) {
+        window.parent.postMessage({ type: "active-session-changed", sessionId }, "*");
+      }
+    }
   }
 
   /**
@@ -1460,6 +1465,26 @@ export function ChatPage() {
     await refreshSessions(targetMode, false);
     await selectSession(session.id, targetMode);
   }
+
+  // 舊工作台外框仍負責顯示主要對話清單。React 聊天嵌入 iframe 時，
+  // 接回外框送出的建立／切換事件，避免按鈕看得到卻沒有任何作用。
+  useEffect(() => {
+    if (window.self === window.top) return;
+
+    const handleWorkspaceMessage = (event: MessageEvent) => {
+      if (event.source !== window.parent || !event.data || typeof event.data !== "object") return;
+      if (event.data.type === "create-session") {
+        void createNewTask();
+        return;
+      }
+      if (event.data.type === "switch-session" && typeof event.data.sessionId === "string") {
+        void openSessionById(event.data.sessionId);
+      }
+    };
+
+    window.addEventListener("message", handleWorkspaceMessage);
+    return () => window.removeEventListener("message", handleWorkspaceMessage);
+  });
 
   async function handleRenameSession(sessionId: string, newTitle: string) {
     const store = chatStore();

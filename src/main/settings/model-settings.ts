@@ -7,6 +7,7 @@ import { getSettingsPath } from "../settings-store";
 import type { VisionConfig } from "../orchestrator/vision-captioner";
 import { migrateLegacyMinimaxDefaults } from "../orchestrator/vendors/minimax-defaults";
 import { getCapabilityOrOpenAI } from "../orchestrator/vendors/capabilities";
+import { protectSecrets, revealSecrets } from "../security/secret-vault";
 
 /**
  * 统一模型配置入口：所有模块（包括 Code 模式）必须通过此函数读取。
@@ -337,7 +338,9 @@ function loadModelSettings0(): ModelSettings {
     const filePath = getSettingsPath();
     if (!fs.existsSync(filePath)) return { ...DEFAULT_MODEL_SETTINGS };
     const raw = fs.readFileSync(filePath, "utf8");
-    return normalizeModelSettings(JSON.parse(raw) as Partial<ModelSettings>);
+    return normalizeModelSettings(
+      revealSecrets(JSON.parse(raw)) as Partial<ModelSettings>,
+    );
   } catch (err) {
     console.error("[Cyrene] load settings failed:", err);
     return { ...DEFAULT_MODEL_SETTINGS };
@@ -435,7 +438,10 @@ export function saveModelSettings(settings: Partial<ModelSettings>): ModelSettin
   const final = normalizeModelSettings(merged);
   const filePath = getSettingsPath();
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  fs.writeFileSync(filePath, JSON.stringify(final, null, 2), "utf8");
+  fs.writeFileSync(filePath, JSON.stringify(protectSecrets(final), null, 2), {
+    encoding: "utf8",
+    mode: 0o600,
+  });
   Object.assign(existing, final);
   return final;
 }
@@ -451,6 +457,7 @@ const PROVIDER_SHORT_NAMES: Record<string, string> = {
   "Qwen（通义千问）": "Qwen",
   "ChatGPT（OpenAI）": "ChatGPT",
   "Claude（Anthropic）": "Claude",
+  "Gemini（Google）": "Gemini",
 };
 
 export function getPublicModelConfig(settings = loadModelSettings()): PublicModelConfig {

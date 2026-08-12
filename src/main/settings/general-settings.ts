@@ -20,8 +20,14 @@ export interface GeneralSettings extends ChatAppearanceSettings {
   citaSemanticEngine: "remote";
   /** Chat 模式的轻量社交上下文；默认关闭，开启后每轮最多多一次异步抽取调用。 */
   chatSocialContextEnabled: boolean;
+  musicEnabled: boolean;
+  musicVolume: number;
+  soundEnabled: boolean;
+  soundVolume: number;
   petAlwaysOnTop: boolean;
   petVisible: boolean;
+  /** 桌寵離開主視窗後顯示可直接輸入文字的快速對話框。 */
+  petChatInputEnabled: boolean;
   /** 桌宠缩放因子：1.0=默认，0.5~2.0，窗口与模型同步等比缩放。 */
   petZoom: number;
   /** 桌宠窗口 X 坐标，未保存时为 undefined */
@@ -136,6 +142,25 @@ export interface GeneralSettings extends ChatAppearanceSettings {
   asrVadThreshold: number;
   /** 通话中显示文字转写 */
   asrShowTranscript: boolean;
+  asrFallbackToLocal: boolean;
+  asrPushToTalk: boolean;
+  openerMode: "off" | "quiet" | "normal" | "lively";
+  openerQuietStart: string;
+  openerQuietEnd: string;
+  openerDailyLimit: number;
+  openerRoutineEnabled: boolean;
+  openerBreaksEnabled: boolean;
+  openerWeatherEnabled: boolean;
+  dailyRitualEnabled: boolean;
+  dailyRitualVoice: boolean;
+  dailyRitualMorningEnabled: boolean;
+  dailyRitualMorningTime: string;
+  dailyRitualAfternoonEnabled: boolean;
+  dailyRitualAfternoonTime: string;
+  dailyRitualEveningEnabled: boolean;
+  dailyRitualEveningTime: string;
+  /** 已完成的舊版偏好遷移版本，避免每次啟動覆寫使用者的新選擇。 */
+  legacySettingsMigrationVersion?: number;
   /** 截图全局热键（Electron Accelerator 格式，如 "Alt+Shift+S"） */
   screenshotHotkey: string;
 }

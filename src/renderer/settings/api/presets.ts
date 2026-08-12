@@ -6,7 +6,7 @@ import type { ModelPreset } from "../shared/types";
 import { CUSTOM_ENDPOINT_PROVIDERS } from "../custom-endpoint-state";
 
 export const MODEL_PRESETS: ModelPreset[] = [
-  // 当前已适配 9 家：MiniMax / DeepSeek / 豆包 / 智谱 GLM / Kimi / Qwen / ChatGPT / Claude / MiMo
+  // 当前已适配 9 家：MiniMax / DeepSeek / 豆包 / 智谱 GLM / Kimi / Qwen / ChatGPT / Claude / Gemini
   // 顺序按使用频率 + 适配优先级；未在此清单内的厂商已硬删，需要时再补回。
   {
     providerName: "MiniMax（稀宇科技）",
@@ -99,20 +99,17 @@ export const MODEL_PRESETS: ModelPreset[] = [
     websiteUrl: "https://console.anthropic.com/",
   },
   {
-    providerName: "MiMo（小米）",
-    shortName: "MiMo",
-    baseUrl: "https://api.xiaomimimo.com/v1",
-    anthropicBaseUrl: "https://api.xiaomimimo.com/anthropic",
+    providerName: "Gemini（Google）",
+    shortName: "Gemini",
+    baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai/",
     transport: "openai",
-    mainModels: ["mimo-v2.5-pro"],
-    iconUrl: "../icons/providers/xiaomimimo.svg",
-    websiteUrl: "https://mimo.mi.com/",
-    visionBaseUrl: "https://api.xiaomimimo.com/v1",
+    mainModels: ["gemini-3.5-flash"],
+    iconUrl: "../icons/providers/gemini.svg",
+    websiteUrl: "https://aistudio.google.com/apikey",
+    visionBaseUrl: "https://generativelanguage.googleapis.com/v1beta/openai/",
     supportsVision: true,
-    // 主模型 mimo-v2.5-pro 不适合做视觉（视觉模型是 mimo-v2.5），强制独立配置
-    independentVision: true,
-    defaultVisionModel: "mimo-v2.5",
-    visionModels: ["mimo-v2.5"],
+    defaultVisionModel: "gemini-3.5-flash",
+    visionModels: ["gemini-3.5-flash"],
   },
   {
     providerName: CUSTOM_ENDPOINT_PROVIDERS.cloud,

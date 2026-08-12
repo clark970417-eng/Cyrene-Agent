@@ -1,6 +1,11 @@
 export interface ProactiveRuntimeSnapshot {
   now: number;
   localHour: number;
+  localMinute?: number;
+  openerMode?: "off" | "quiet" | "normal" | "lively";
+  quietStart?: string;
+  quietEnd?: string;
+  dailyLimit?: number;
   idleSec: number;
   enabled: boolean;
   conversationBusy: boolean;
@@ -32,6 +37,8 @@ export type ProactiveBlockReason =
   | "conversation_busy"
   | "generation_busy"
   | "night_inactive"
+  | "configured_quiet_hours"
+  | "daily_limit"
   | "normal_quiet_period"
   | "global_cooldown"
   | "scene_cooldown"

@@ -77,6 +77,12 @@ const transcriptEl = document.getElementById("transcript") as HTMLElement;
 const hangupBtn = document.getElementById("hangup-btn") as HTMLButtonElement;
 const closeBtn = document.getElementById("close-btn") as HTMLButtonElement;
 const durationEl = document.getElementById("call-duration") as HTMLElement | null;
+const pttBtn = document.getElementById("ptt-btn") as HTMLButtonElement | null;
+const shareBtn = document.getElementById("share-btn") as HTMLButtonElement | null;
+const shareLabel = document.getElementById("share-label") as HTMLElement | null;
+const sharePreview = document.getElementById("share-preview") as HTMLElement | null;
+const shareVideo = document.getElementById("share-video") as HTMLVideoElement | null;
+let displayStream: MediaStream | null = null;
 
 // ── 通话时长计时（首次进入活动状态时启动，END 时停止） ──
 let callStartAt: number | null = null;
@@ -297,6 +303,8 @@ let vadSilenceTimer: ReturnType<typeof setTimeout> | null = null;
 let vadSilenceMs = 1000;
 let vadThreshold = 0.01; // 音量阈值，默认调低照顾安静环境/小声麦克风
 let hasSpoken = false; // 用户是否已开始说话（VAD 只在说过话后检测静默）
+let pushToTalk = false;
+let pttActive = false;
 
 async function startMicrophone(): Promise<void> {
   try {
@@ -323,6 +331,7 @@ async function startMicrophone(): Promise<void> {
     // AudioWorkletNode 用于 PCM 采集
     workletNode = new AudioWorkletNode(audioContext, "pcm-processor");
     workletNode.port.onmessage = (e: MessageEvent) => {
+      if (pushToTalk && !pttActive) return;
       const frame = e.data as ArrayBuffer;
       window.call?.sendAudioFrame(frame);
     };
@@ -344,6 +353,7 @@ function startVAD(): void {
   const checkInterval = setInterval(() => {
     if (!analyser || !analyserData) return;
     if (currentState !== "LISTENING") return;
+    if (pushToTalk) return;
 
     analyser.getByteFrequencyData(analyserData);
     // 计算平均音量
@@ -370,6 +380,7 @@ function startVAD(): void {
         console.log("[Call VAD] 静默开始，准备结束本轮");
         vadSilenceTimer = setTimeout(() => {
           console.log("[Call] VAD 静默检测触发，结束本轮");
+          sendSharedScreenFrame();
           window.call?.turnEnd();
           vadSilenceTimer = null;
           hasSpoken = false;
@@ -385,6 +396,58 @@ function stopMicrophone(): void {
   if (analyser) { try { analyser.disconnect(); } catch { /* ignore */ } analyser = null; }
   if (audioContext) { try { audioContext.close(); } catch { /* ignore */ } audioContext = null; }
   if (micStream) { micStream.getTracks().forEach(t => t.stop()); micStream = null; }
+}
+
+function captureSharedScreenFrame(): string | null {
+  if (!displayStream || !shareVideo || shareVideo.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) return null;
+  if (!shareVideo.videoWidth || !shareVideo.videoHeight) return null;
+  const scale = Math.min(1, 1280 / shareVideo.videoWidth);
+  const frame = document.createElement("canvas");
+  frame.width = Math.max(1, Math.round(shareVideo.videoWidth * scale));
+  frame.height = Math.max(1, Math.round(shareVideo.videoHeight * scale));
+  frame.getContext("2d")?.drawImage(shareVideo, 0, 0, frame.width, frame.height);
+  return frame.toDataURL("image/jpeg", 0.72);
+}
+
+function sendSharedScreenFrame(): void {
+  const frame = captureSharedScreenFrame();
+  if (frame) window.call?.sendScreenFrame(frame);
+}
+
+function stopScreenShare(): void {
+  const stream = displayStream;
+  displayStream = null;
+  stream?.getTracks().forEach((track) => track.stop());
+  if (shareVideo) shareVideo.srcObject = null;
+  if (sharePreview) sharePreview.hidden = true;
+  shareBtn?.classList.remove("is-active");
+  shareBtn?.setAttribute("aria-pressed", "false");
+  if (shareLabel) shareLabel.textContent = "分享";
+  window.call?.sendScreenFrame(null);
+}
+
+async function toggleScreenShare(): Promise<void> {
+  if (displayStream) return stopScreenShare();
+  try {
+    const stream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: { ideal: 5, max: 10 } }, audio: false });
+    const track = stream.getVideoTracks()[0];
+    if (!track || !shareVideo) {
+      stream.getTracks().forEach((item) => item.stop());
+      return;
+    }
+    displayStream = stream;
+    shareVideo.srcObject = stream;
+    await shareVideo.play().catch(() => undefined);
+    if (sharePreview) sharePreview.hidden = false;
+    shareBtn?.classList.add("is-active");
+    shareBtn?.setAttribute("aria-pressed", "true");
+    if (shareLabel) shareLabel.textContent = "停止";
+    track.addEventListener("ended", stopScreenShare, { once: true });
+    sendSharedScreenFrame();
+  } catch (error) {
+    const cancelled = error instanceof DOMException && error.name === "NotAllowedError";
+    statusEl.textContent = cancelled ? "已取消畫面分享" : "無法分享畫面，請檢查 macOS 螢幕錄製權限";
+  }
 }
 
 // ── TTS 播放 + Live2D 嘴型联动 ──
@@ -516,6 +579,7 @@ window.call?.onError((data: { message: string }) => {
 // ── 挂断 ──
 function hangup(): void {
   window.call?.stop();
+  stopScreenShare();
   stopMicrophone();
   stopTts();
   stopCallTimer();
@@ -525,6 +589,25 @@ function hangup(): void {
 
 hangupBtn.addEventListener("click", hangup);
 closeBtn.addEventListener("click", hangup);
+pttBtn?.addEventListener("pointerdown", (event) => {
+  event.preventDefault();
+  if (!pushToTalk || currentState !== "LISTENING") return;
+  pttActive = true;
+  hasSpoken = true;
+  pttBtn.setAttribute("aria-pressed", "true");
+  statusEl.textContent = "正在收音…";
+});
+const finishPushToTalk = () => {
+  if (!pttActive) return;
+  pttActive = false;
+  pttBtn?.setAttribute("aria-pressed", "false");
+  sendSharedScreenFrame();
+  window.call?.turnEnd();
+};
+for (const eventName of ["pointerup", "pointercancel", "pointerleave"] as const) {
+  pttBtn?.addEventListener(eventName, finishPushToTalk);
+}
+shareBtn?.addEventListener("click", () => { void toggleScreenShare(); });
 
 // ── 初始化 ──
 async function init(): Promise<void> {
@@ -535,9 +618,11 @@ async function init(): Promise<void> {
       vadSilenceMs = typeof cfg.asrVadSilenceMs === "number" ? cfg.asrVadSilenceMs : 1000;
       vadThreshold = typeof cfg.asrVadThreshold === "number" ? cfg.asrVadThreshold : 0.01;
       showTranscript = Boolean(cfg.asrShowTranscript);
+      pushToTalk = Boolean(cfg.asrPushToTalk);
     }
     console.log("[Call] VAD config: threshold=", vadThreshold, "silenceMs=", vadSilenceMs);
   } catch { /* ignore */ }
+  if (pttBtn) pttBtn.hidden = !pushToTalk;
 
   // 粒子背景
   if (canvas && ctx) {
@@ -564,6 +649,7 @@ declare global {
     call?: {
       start: () => void;
       sendAudioFrame: (frame: ArrayBuffer) => void;
+      sendScreenFrame: (dataUrl: string | null) => void;
       turnEnd: () => void;
       ttsDone: () => void;
       stop: () => void;

@@ -102,8 +102,15 @@ export function bootstrapConfigGetters(ctx: BootstrapConfigContext): void {
   // 注入 ASR 配置获取器（通话功能用，实时读 GeneralSettings）
   setAsrConfig(() => {
     const s = loadGeneralSettings();
-    if (s.asrEngine !== "aliyun") return null;
-    return { appKey: s.asrAliyunAppKey, accessKeyId: s.asrAliyunAccessKeyId, accessKeySecret: s.asrAliyunAccessKeySecret, language: s.asrLanguage, engine: s.asrEngine };
+    if (s.asrEngine === "off") return null;
+    return {
+      appKey: s.asrAliyunAppKey,
+      accessKeyId: s.asrAliyunAccessKeyId,
+      accessKeySecret: s.asrAliyunAccessKeySecret,
+      language: s.asrLanguage,
+      engine: s.asrEngine,
+      fallbackToLocal: s.asrFallbackToLocal,
+    };
   });
 
   // 注入通话模型/TTS 配置获取器

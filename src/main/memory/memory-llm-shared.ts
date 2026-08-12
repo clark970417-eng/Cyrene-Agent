@@ -11,6 +11,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { app } from "electron";
+import { revealSecrets } from "../security/secret-vault";
 
 // ── 模型配置 ──
 
@@ -73,7 +74,7 @@ export function loadMemoryModelConfig(): MemoryModelConfig {
     if (!fs.existsSync(filePath)) {
       return { ...LEGACY_DEEPSEEK, source: "legacy-deepseek" };
     }
-    raw = JSON.parse(fs.readFileSync(filePath, "utf8")) as RawSettings;
+    raw = revealSecrets(JSON.parse(fs.readFileSync(filePath, "utf8"))) as RawSettings;
   } catch {
     return { ...LEGACY_DEEPSEEK, source: "legacy-deepseek" };
   }

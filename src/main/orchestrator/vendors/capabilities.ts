@@ -130,22 +130,20 @@ export const PROVIDER_CAPABILITIES = [
     supportsVision: true,
   },
   {
-    id: "mimo",
-    displayName: "MiMo（小米）",
-    // 默认使用 OpenAI 入口；Anthropic 入口由用户在设置中明确选择。
+    id: "gemini",
+    displayName: "Gemini（Google）",
+    // 使用 Google 官方 OpenAI 兼容入口，沿用统一的 Bearer 鉴权与工具调用链路。
     transport: "openai",
-    baseUrl: "https://api.xiaomimimo.com/v1",
-    // 官方文档：/v1 与 /anthropic 都支持 Authorization: Bearer
+    baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai/",
     authStyle: "bearer",
-    defaultModel: "mimo-v2.5-pro",
+    defaultModel: "gemini-3.5-flash",
     supportsTools: true,
-    supportsThinking: true,
-    thinkingField: "reasoning_content",
+    supportsThinking: false,
+    thinkingField: null,
     cacheStrategy: "auto",
     testStrategy: "text",
     supportsVision: true,
-    // 结构上独立：用户切主入口到 /anthropic 时视觉仍由 visionBaseUrl 决定
-    visionBaseUrl: "https://api.xiaomimimo.com/v1",
+    visionBaseUrl: "https://generativelanguage.googleapis.com/v1beta/openai/",
   },
 ] satisfies readonly ProviderCapability[];
 

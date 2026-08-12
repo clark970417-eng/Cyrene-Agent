@@ -9,6 +9,7 @@ import {
   asrLanguageSelect,
   asrVadSilenceInput, asrVadThresholdInput, asrVadThresholdValue,
   asrShowTranscriptCheckbox,
+  asrFallbackLocalCheckbox, asrPushToTalkCheckbox,
 } from "./dom";
 
 export function syncAsrVisibility(): void {
@@ -42,6 +43,8 @@ export async function loadAsrConfig(): Promise<void> {
         if (asrVadThresholdValue) asrVadThresholdValue.textContent = String(v);
       }
       if (asrShowTranscriptCheckbox) asrShowTranscriptCheckbox.checked = Boolean(cfg.asrShowTranscript);
+      if (asrFallbackLocalCheckbox) asrFallbackLocalCheckbox.checked = cfg.asrFallbackToLocal !== false;
+      if (asrPushToTalkCheckbox) asrPushToTalkCheckbox.checked = Boolean(cfg.asrPushToTalk);
     }
     syncAsrVisibility();
   } catch (err) {
@@ -68,6 +71,8 @@ asrVadThresholdInput?.addEventListener("input", () => {
   void saveAsrField("asrVadThreshold", v);
 });
 asrShowTranscriptCheckbox?.addEventListener("change", () => void saveAsrField("asrShowTranscript", asrShowTranscriptCheckbox.checked));
+asrFallbackLocalCheckbox?.addEventListener("change", () => void saveAsrField("asrFallbackToLocal", asrFallbackLocalCheckbox.checked));
+asrPushToTalkCheckbox?.addEventListener("change", () => void saveAsrField("asrPushToTalk", asrPushToTalkCheckbox.checked));
 
 // 模块加载时拉一次配置
 void loadAsrConfig();

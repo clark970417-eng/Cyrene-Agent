@@ -118,8 +118,13 @@ export interface GeneralSettings extends ChatAppearanceSettings {
   citaEnabled: boolean;
   citaSemanticEngine: "remote" | "local";
   chatSocialContextEnabled: boolean;
+  musicEnabled: boolean;
+  musicVolume: number;
+  soundEnabled: boolean;
+  soundVolume: number;
   petAlwaysOnTop: boolean;
   petVisible: boolean;
+  petChatInputEnabled: boolean;
   petZoom: number;
   disableGpuElectron?: boolean;
   sidebarVisible: boolean;
@@ -138,6 +143,21 @@ export interface GeneralSettings extends ChatAppearanceSettings {
   mobileMessageSegmentation: MobileMessageSegmentationMode;
   proactiveChatMode: ProactiveChatMode;
   proactiveDeliveryTarget: ProactiveDeliveryTarget;
+  openerMode: "off" | "quiet" | "normal" | "lively";
+  openerQuietStart: string;
+  openerQuietEnd: string;
+  openerDailyLimit: number;
+  openerRoutineEnabled: boolean;
+  openerBreaksEnabled: boolean;
+  openerWeatherEnabled: boolean;
+  dailyRitualEnabled: boolean;
+  dailyRitualVoice: boolean;
+  dailyRitualMorningEnabled: boolean;
+  dailyRitualMorningTime: string;
+  dailyRitualAfternoonEnabled: boolean;
+  dailyRitualAfternoonTime: string;
+  dailyRitualEveningEnabled: boolean;
+  dailyRitualEveningTime: string;
   screenshotHotkey?: string;
 }
 
@@ -169,6 +189,7 @@ export interface MemoryPanelPayload {
     status: "active" | "aging" | "archived";
     weight: number;
     createdAt: number;
+    isPinned: boolean;
   }>;
   importedDocs: Array<{
     importId: string | null;
@@ -195,6 +216,8 @@ export interface MemoryPanelApi {
   deleteImportedDoc: (importId: string, fileName?: string) => Promise<{ ok: boolean; deleted: number }>;
   saveL0: (patch: Record<string, unknown>) => Promise<{ ok: boolean }>;
   saveL1: (patch: Record<string, unknown>) => Promise<{ ok: boolean }>;
+  pinL2: (id: string, pinned: boolean) => Promise<{ ok: boolean; error?: string }>;
+  deleteL2: (id: string) => Promise<{ ok: boolean; error?: string }>;
   exportToObsidianVault: () => Promise<{
     ok: boolean;
     outputPath?: string;
@@ -262,7 +285,7 @@ export interface SettingsApi {
     wechat: { enabled: boolean };
     feishu: { enabled: boolean; appId?: string; appSecret?: string };
     discord?: { enabled: boolean; botToken?: string; allowedGuildIds?: string[]; allowedChannelIds?: string[]; allowedUserIds?: string[]; codexImageOwnerId?: string; requireMention?: boolean; voiceEnabled?: boolean };
-    spotify?: { enabled?: boolean; clientId?: string; clientSecret?: string };
+    spotify?: { enabled?: boolean; clientId?: string; clientSecret?: string; clientSecretRecoveryRequired?: boolean; refreshTokenRecoveryRequired?: boolean };
     rateLimitPerUser?: number; rateLimitPerChannel?: number; ttsEnabled?: boolean; stickerEnabled?: boolean; mirrorToDesktop?: boolean; toolSandbox?: "off" | "safe-only" | "all";
   }>;
   channelsSaveConfig: (patch: Record<string, unknown>) => Promise<unknown>;
@@ -274,6 +297,10 @@ export interface SettingsApi {
   channelsDiscordPickBanner: () => Promise<string | null>;
   channelsDiscordCloudStatus: () => Promise<{ mode?: "local" | "cloud" | "transition" } | undefined>;
   channelsDiscordCloudControl: (action: "local" | "cloud" | "restart-cloud") => Promise<unknown>;
+  channelsDiscordGetMusicState: () => Promise<{ active: boolean; paused: boolean; current?: { title?: string } | null; volume: number }>;
+  channelsDiscordGetMusicHistory: () => Promise<Array<{ title?: string; url?: string; playedAt?: string }>>;
+  channelsDiscordGetMusicFavorites: () => Promise<{ tracks?: Array<{ title?: string; url?: string }> } | Array<{ title?: string; url?: string }>>;
+  channelsDiscordControlMusic: (input: { command: string; value?: number }) => Promise<{ ok: boolean; message?: string }>;
   channelsSpotifyAuthorize: (input: { clientId?: string; clientSecret?: string }) => Promise<{ ok: boolean; message?: string; error?: string }>;
   channelsSpotifyGetStatus: () => Promise<{ configured: boolean; connected: boolean; accountName?: string; product?: string; error?: string; playback?: { active: boolean; paused: boolean } }>;
   channelsSpotifyControl: (input: { command: string; query?: string; value?: number; deviceId?: string }) => Promise<{ ok: boolean; message: string }>;
@@ -283,6 +310,15 @@ export interface SettingsApi {
   channelsBilibiliDisconnect: () => Promise<{ ok: boolean; message?: string }>;
   channelsLogGet: (limit?: number) => Promise<unknown[]>;
   channelsLogClear: () => Promise<unknown>;
+  xNotificationsGetConfig: () => Promise<{ enabled: boolean; checkIntervalMinutes: number; announcementCategoryName?: string; accounts: Array<{ id: string; username: string; displayName?: string; category: "news" | "anime" | "game" | "leak" | "general"; enabled: boolean; lastTweetId?: string; lastPubDate?: string }> }>;
+  xNotificationsSaveConfig: (config: unknown) => Promise<{ ok: boolean }>;
+  xNotificationsCheckNow: () => Promise<{ ok: boolean; postedCount?: number; error?: string }>;
+  xNotificationsTestAll: () => Promise<{ ok: boolean; message?: string; error?: string }>;
+  anilistNotificationsGetConfig: () => Promise<{ enabled: boolean; checkIntervalMinutes: number; username?: string; accessToken?: string; filterMode: "watchlist_only" | "all_airing"; targetCategory: "anime" | "news" | "general" }>;
+  anilistNotificationsSaveConfig: (config: unknown) => Promise<{ ok: boolean }>;
+  anilistNotificationsVerifyAccount: (username?: string, token?: string) => Promise<{ ok: boolean; error?: string; name?: string }>;
+  anilistNotificationsCheckNow: () => Promise<{ ok: boolean; postedCount?: number; error?: string }>;
+  anilistNotificationsTestPost: (category?: string) => Promise<{ ok: boolean; message?: string; error?: string }>;
   onChannelsInstallProgress: (callback: (progress: { channel: string; phase: string; pct: number }) => void) => (() => void) | void;
   onChannelsWechatQrcode: (callback: (dataUrl: string) => void) => (() => void) | void;
   onChannelsWechatLoginDone: (callback: (payload: { ok: boolean; botId?: string; error?: string }) => void) => (() => void) | void;
@@ -291,4 +327,20 @@ export interface SettingsApi {
   onChannelsStatusChanged: (callback: (status: unknown) => void) => (() => void) | void;
   beginScreenshotHotkeyCapture: () => Promise<boolean>;
   endScreenshotHotkeyCapture: () => Promise<boolean>;
+  securityGetStatus: () => Promise<{ available: boolean; backend: string; protectedCount: number; plaintextCount: number; lockedCount: number }>;
+  backupGetConfig: () => Promise<{ autoEnabled: boolean; retentionDays: 7 | 30; lastAutoBackupAt?: string }>;
+  backupSaveConfig: (patch: { autoEnabled?: boolean; retentionDays?: 7 | 30 }) => Promise<{ autoEnabled: boolean; retentionDays: 7 | 30; lastAutoBackupAt?: string }>;
+  backupCreate: (categories: string[]) => Promise<BackupSummary | null>;
+  backupPickInspect: () => Promise<BackupSummary | null>;
+  backupRestore: (payload: { filePath: string; categories: string[] }) => Promise<{ restoredFiles: number; safetyBackupPath: string }>;
+  securityRestartApp: () => void;
+}
+
+export interface BackupSummary {
+  filePath: string;
+  createdAt: string;
+  appVersion: string;
+  categories: Array<{ id: string; label: string; fileCount: number; sizeBytes: number }>;
+  fileCount: number;
+  sizeBytes: number;
 }

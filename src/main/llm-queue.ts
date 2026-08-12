@@ -11,6 +11,9 @@
 
 const LOG_PREFIX = "[LLMQueue]";
 const RETRY_DELAY_MS = 5_000;
+const MAX_PENDING_TASKS = 50;
+let pendingTasks = 0;
+let runningTasks = 0;
 
 /** 限流错误关键词。任一命中视为可重试。 */
 const RATE_LIMIT_KEYWORDS = [
@@ -47,19 +50,33 @@ export function enqueueLLMTask<T>(
   task: () => Promise<T>,
   options: { log?: boolean; retryRateLimit?: boolean } = {},
 ): Promise<T> {
+  if (pendingTasks >= MAX_PENDING_TASKS) {
+    return Promise.reject(new Error(`背景任務佇列已達上限（${MAX_PENDING_TASKS}）`));
+  }
+  pendingTasks += 1;
   const next = tail.then(async (): Promise<T> => {
-    return runWithRetry(
-      label,
-      task,
-      options.log !== false,
-      options.retryRateLimit !== false,
-    );
+    pendingTasks -= 1;
+    runningTasks += 1;
+    try {
+      return await runWithRetry(
+        label,
+        task,
+        options.log !== false,
+        options.retryRateLimit !== false,
+      );
+    } finally {
+      runningTasks -= 1;
+    }
   });
   // tail 必须包住错误，否则一个失败的任务会让整条链断（后续任务永远不执行）
   tail = next.catch(() => {
     // 吞错误，不让链断；调用方仍然能从 next 拿到 reject
   });
   return next;
+}
+
+export function getLLMQueueStatus(): { pending: number; running: number; limit: number } {
+  return { pending: pendingTasks, running: runningTasks, limit: MAX_PENDING_TASKS };
 }
 
 /** 执行任务，限流时退避 5s 重试 1 次。 */

@@ -20,11 +20,12 @@ describe("PROVIDER_CAPABILITIES — schema smoke", () => {
     expect(new Set(names).size).toBe(names.length);
   });
 
-  test("MiMo（小米）条目存在且关键字段齐全", () => {
-    const mimo = getCapability("MiMo（小米）");
-    expect(mimo).toBeDefined();
-    expect(mimo?.id).toBe("mimo");
-    expect(mimo?.displayName).toBe("MiMo（小米）");
+  test("Gemini（Google）条目存在且关键字段齐全", () => {
+    const gemini = getCapability("Gemini（Google）");
+    expect(gemini).toBeDefined();
+    expect(gemini?.id).toBe("gemini");
+    expect(gemini?.displayName).toBe("Gemini（Google）");
+    expect(gemini?.baseUrl).toBe("https://generativelanguage.googleapis.com/v1beta/openai/");
   });
 
   test("豆包替换火山 AgentPlan，使用官方方舟 Chat Completions 入口", () => {
@@ -94,7 +95,7 @@ describe("PROVIDER_CAPABILITIES — 已知条目存在性回归", () => {
       "Qwen（通义千问）",
       "ChatGPT（OpenAI）",
       "Claude（Anthropic）",
-      "MiMo（小米）",
+      "Gemini（Google）",
     ]) {
       expect(names.has(expected), `missing displayName: ${expected}`).toBe(true);
     }

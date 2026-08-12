@@ -1,6 +1,7 @@
 import "../ui/base.css";
 import "./settings.css";
 import "../ui/theme";
+import "./general/audio-panel";
 import neteaseLogoUrl from "./assets/netease-logo.svg?url";
 import {
   normalizeChatSocialContextEnabled,
@@ -79,7 +80,7 @@ import { parsePositiveIntOrThrow, parseN1SecToMsOrThrow, parseCommandLine } from
 import { apiState } from "./api/state";
 import { apiForm, apiRuntimeForm, apiTimeoutForm, presetCards, presetWebsiteLink, displayNameInput, baseUrlInput, baseUrlResetBtn, modelInput, modelInputSuggestions, contextWindowInput, apiKeyInput, apiKeyLabel, apiKeyHint, testConnectionBtn, transportSelect, transportHint, endpointPreview, customEndpointControls, customEndpointOverrides, customEndpointSummary, customEndpointGuideBtn, workFlowAdaptBtn, apiNoteText, multimodalToggle, chatRequestTimeoutSecInput, maxIterationsInput, maxReplansInput, maxRefreshInput, perCallTimeoutSecInput, actionGateRepairBudgetSecInput, embeddingDimensionsInput, modelRequestTimeoutSecInput, modelRequestTimeoutSecReset, toggleEnableThinking, toggleDisableThinking, toggleDisableMaxToken } from "./api/dom";
 import { visionBaseUrlInput, visionApiKeyInput, visionModelInput, visionFieldsWrap, testVisionBtn, visionTestStatus } from "./vision/dom";
-import { appearanceForm, appearanceSaveStatus, uiThemeSelect, runtimeSyncSelect, runtimeSyncNote, windowCornerRadiusInput, windowCornerRadiusVal, petAlwaysOnTopInput, petVisibleInput, petZoomInput, petZoomVal, chatLineHeightInput, chatLineHeightVal, assistantBubbleEnabledInput, chatParaSpacingInput, chatParaSpacingVal, launchAtLoginInput, uiFontCurrent, uiFontImportButton, uiFontResetButton, uiIconSelect, screenshotHotkeyInput, openChromeGpu, disableGpuInput, sidebarVisibleInput, tasksVisibleInput } from "./appearance/dom";
+import { appearanceForm, appearanceSaveStatus, uiThemeSelect, runtimeSyncSelect, runtimeSyncNote, windowCornerRadiusInput, windowCornerRadiusVal, petAlwaysOnTopInput, petVisibleInput, petChatInputEnabledInput, petZoomInput, petZoomVal, chatLineHeightInput, chatLineHeightVal, assistantBubbleEnabledInput, chatParaSpacingInput, chatParaSpacingVal, launchAtLoginInput, uiFontCurrent, uiFontImportButton, uiFontResetButton, uiIconSelect, screenshotHotkeyInput, openChromeGpu, disableGpuInput, sidebarVisibleInput, tasksVisibleInput } from "./appearance/dom";
 import { generalForm, generalSaveStatus, languageSelect, defaultChatModeSelect, segmentedOutputSelect, mobileMessageSegmentationSelect, proactiveChatSelect, proactiveDeliveryRow, proactiveDeliverySelect, chatSocialContextEnabledInput, citaEnabledInput, citaEngineSelect, clearChatHistoryBtn, customStyleSamplingBtn, customStylePromptBtn } from "./general/dom";
 import { minBtn, closeBtn, preferencesForm, sectionTitle, sectionHint, placeholderPanel, cyrenePanel, disclaimerPanel, pluginsPanel, placeholderIcon, placeholderTitle, placeholderCopy, saveStatus, runtimeSaveStatus, preferencesSaveStatus, cyreneSaveStatus, openStickerManagerBtn, addStickerBtn } from "./shared/shell";
 import { pluginAddBtn, neteaseDetailView, permissionBlocksWrap, permissionNote, lifeToggle, lifeCard, lifeBody } from "./plugins/dom";
@@ -97,6 +98,8 @@ import type {
   SettingsApi,
   UserApi,
 } from "./shared/types";
+import "./security/panel";
+import "./traditional-ui";
 import { MODEL_PRESETS } from "./api/presets";
 import { showModal, showHtmlModal, showInputModal } from "./shared/modal";
 import {
@@ -246,6 +249,13 @@ if (!window.settings) {
     onChannelsStatusChanged: () => () => {},
     beginScreenshotHotkeyCapture: () => Promise.resolve(true),
     endScreenshotHotkeyCapture: () => Promise.resolve(true),
+    securityGetStatus: async () => ({ available: false, backend: "不可用", protectedCount: 0, plaintextCount: 0, lockedCount: 0 }),
+    backupGetConfig: async () => ({ autoEnabled: false, retentionDays: 7 }),
+    backupSaveConfig: async (patch) => ({ autoEnabled: patch.autoEnabled ?? false, retentionDays: patch.retentionDays ?? 7 }),
+    backupCreate: async () => null,
+    backupPickInspect: async () => null,
+    backupRestore: async () => ({ restoredFiles: 0, safetyBackupPath: "" }),
+    securityRestartApp: () => {},
     openSidebar: () => {},
     closeSidebar: () => {},
     openTasks: () => {},
@@ -323,6 +333,7 @@ const NAV_LABELS: Record<string, { emoji: string; title: string; hint: string }>
   tts: { emoji: "🎙️", title: "TTS 设置", hint: "语音合成与朗读偏好" },
   asr: { emoji: "🎧", title: "ASR 设置", hint: "语音识别与通话配置" },
 	  tokens: { emoji: `<svg width="24" height="24" viewBox="0 0 48 48" fill="none" aria-hidden="true" style="vertical-align:-3px"><title>Token 用量</title><path d="M4 42H44" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><rect x="8" y="28" width="6" height="14" fill="none" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/><rect x="21" y="18" width="6" height="24" fill="none" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/><rect x="34" y="6" width="6" height="36" fill="none" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/></svg>`, title: "Token 用量", hint: "查看 API 调用统计与消耗" },
+	  security: { emoji: "🛡️", title: "資料安全與舊版同步", hint: "備份、還原並保留所有歷史設定" },
 	  disclaimer: { emoji: `<svg width="24" height="24" viewBox="0 0 48 48" fill="none" aria-hidden="true" style="vertical-align:-3px"><title>免责声明</title><rect x="13" y="10" width="28" height="34" fill="none" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/><path d="M35 10V4H8C7.44772 4 7 4.44772 7 5V38H13" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><path d="M21 22H33" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><path d="M21 30H33" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></svg>`, title: "免责声明", hint: "使用条款与隐私说明" },
 };
 
@@ -875,9 +886,33 @@ async function loadConfig(): Promise<void> {
         }
       }
     }
+    // 旧版曾把 Gemini 配置保存在 ChatGPT profile 下。若专属 Gemini profile
+    // 尚不存在，复制旧配置，让原本的 API Key 在新卡片中自动恢复。
+    const legacyGemini = providerProfileCache["ChatGPT（OpenAI）"];
+    if (
+      !providerProfileCache["Gemini（Google）"]
+      && legacyGemini?.baseUrl.includes("generativelanguage.googleapis.com")
+    ) {
+      providerProfileCache["Gemini（Google）"] = {
+        ...legacyGemini,
+        displayName: "Gemini 3.5 Flash",
+        explicitTransport: "openai",
+      };
+    }
+    const savedGemini = providerProfileCache["Gemini（Google）"];
+    if (savedGemini?.baseUrl.includes("generativelanguage.googleapis.com")) {
+      savedGemini.displayName = savedGemini.displayName?.includes("ChatGPT")
+        ? "Gemini 3.5 Flash"
+        : savedGemini.displayName;
+      savedGemini.explicitTransport = "openai";
+    }
+    const loadedProvider = cfg.provider === "ChatGPT（OpenAI）"
+      && cfg.baseUrl.includes("generativelanguage.googleapis.com")
+      ? "Gemini（Google）"
+      : cfg.provider;
     const vision = cfg.vision;
     applyPreset(
-      cfg.provider,
+      loadedProvider,
       cfg.model,
       cfg.apiKey,
       cfg.baseUrl,
@@ -942,6 +977,7 @@ async function loadGeneralSettings(): Promise<void> {
     applyWindowCornerRadius(windowCornerRadius);
     petAlwaysOnTopInput.checked = cfg.petAlwaysOnTop;
     petVisibleInput.checked = cfg.petVisible;
+    petChatInputEnabledInput.checked = cfg.petChatInputEnabled ?? false;
     petZoomInput.value = String(cfg.petZoom ?? 1);
     petZoomVal.textContent = Math.round((cfg.petZoom ?? 1) * 100) + "%";
     chatLineHeightInput.value = String(cfg.chatLineHeight ?? 1.75);
@@ -963,6 +999,10 @@ async function loadGeneralSettings(): Promise<void> {
     applySegmentedOutputSelection(normalizeSegmentedOutputMode(cfg.segmentedOutputMode));
     applyMobileMessageSegmentationSelection(normalizeMobileMessageSegmentationMode(cfg.mobileMessageSegmentation));
     applyProactiveChatSelection(normalizeProactiveChatMode(cfg.proactiveChatMode));
+    (document.getElementById("opener-mode") as HTMLSelectElement | null)!.value = cfg.openerMode === "off" ? "normal" : (cfg.openerMode ?? "normal");
+    (document.getElementById("opener-quiet-start") as HTMLInputElement | null)!.value = cfg.openerQuietStart ?? "23:00";
+    (document.getElementById("opener-quiet-end") as HTMLInputElement | null)!.value = cfg.openerQuietEnd ?? "07:00";
+    (document.getElementById("opener-daily-limit") as HTMLInputElement | null)!.value = String(cfg.openerDailyLimit ?? 4);
     applyProactiveDeliverySelection(normalizeProactiveDeliveryTarget(cfg.proactiveDeliveryTarget));
     renderProactiveDeliveryVisibility();
     if (screenshotHotkeyInput) {
@@ -1112,6 +1152,10 @@ uiIconSelect.querySelectorAll<HTMLButtonElement>(".appearance-icon-option").forE
 petVisibleInput.addEventListener("change", () => {
   window.settings?.setPetVisible(petVisibleInput.checked);
   setAppearanceSaveStatus("已应用", "is-ok");
+});
+petChatInputEnabledInput.addEventListener("change", () => {
+  void window.settings?.saveGeneral({ petChatInputEnabled: petChatInputEnabledInput.checked });
+  setAppearanceSaveStatus("已套用", "is-ok");
 });
 petZoomInput.addEventListener("input", () => {
   petZoomVal.textContent = Math.round(Number(petZoomInput.value) * 100) + "%";
@@ -1522,6 +1566,7 @@ function switchSection(section: string): void {
   const isSkills = section === "skills";
   const isTokens = section === "tokens";
   const isChannels = section === "channels";
+  const isSecurity = section === "security";
   const isTts = section === "tts";
   const isAsr = section === "asr";
   const isMusic = section === "music";
@@ -1548,6 +1593,8 @@ function switchSection(section: string): void {
   if (tokenPanel) tokenPanel.classList.toggle("is-hidden", !isTokens);
   const channelsPanel = document.getElementById("channels-panel");
   if (channelsPanel) channelsPanel.classList.toggle("is-hidden", !isChannels);
+  document.getElementById("security-panel")?.classList.toggle("is-hidden", !isSecurity);
+  if (isSecurity) window.dispatchEvent(new CustomEvent("cyrene:load-security-panel"));
   if (isChannels) void loadChannelsPanel();
   const ttsPanel = document.getElementById("tts-panel");
   if (ttsPanel) ttsPanel.classList.toggle("is-hidden", !isTts);
@@ -1559,7 +1606,7 @@ function switchSection(section: string): void {
   else disposeMusicPanel();
   placeholderPanel.classList.toggle(
     "is-hidden",
-    isApi || isApiAdvanced || isAppearance || isGeneral || isPreferences || isCyrene || isDisclaimer || isMemory || isUser || isTasks || isPlugins || isSkills || isTokens || isChannels || isTts || isAsr || isMusic,
+    isApi || isApiAdvanced || isAppearance || isGeneral || isPreferences || isCyrene || isDisclaimer || isMemory || isUser || isTasks || isPlugins || isSkills || isTokens || isChannels || isTts || isAsr || isMusic || isSecurity,
   );
 
   if (
@@ -1579,7 +1626,8 @@ function switchSection(section: string): void {
     !isChannels &&
     !isTts &&
     !isAsr &&
-    !isMusic
+    !isMusic &&
+    !isSecurity
   ) {
 	    placeholderIcon.innerHTML = label.emoji;
     placeholderTitle.textContent = label.title;
@@ -1892,6 +1940,12 @@ preferencesForm.addEventListener("submit", async (e) => {
       segmentedOutputMode: "off",
       mobileMessageSegmentation: getMobileMessageSegmentationValue(),
       proactiveChatMode: getProactiveChatValue(),
+      openerMode: getProactiveChatValue() === "off"
+        ? "off"
+        : ((document.getElementById("opener-mode") as HTMLSelectElement | null)?.value ?? "normal") as GeneralSettings["openerMode"],
+      openerQuietStart: (document.getElementById("opener-quiet-start") as HTMLInputElement | null)?.value ?? "23:00",
+      openerQuietEnd: (document.getElementById("opener-quiet-end") as HTMLInputElement | null)?.value ?? "07:00",
+      openerDailyLimit: Number((document.getElementById("opener-daily-limit") as HTMLInputElement | null)?.value) || 4,
       proactiveDeliveryTarget: getProactiveDeliveryValue(),
       screenshotHotkey: screenshotHotkeyInput?.value || "Alt+Shift+S",
     });

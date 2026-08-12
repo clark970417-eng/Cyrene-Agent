@@ -18,6 +18,8 @@ export interface ScheduledTask {
   lastFiredAt?: string;
   toolMode: SchedulerToolMode;
   allowedToolIds: string[];
+  managedBy?: "daily-ritual";
+  ritualId?: "morning" | "afternoon" | "evening";
   createdAt: string;
   updatedAt: string;
 }
@@ -29,11 +31,13 @@ export interface NewScheduledTaskInput {
   schedule: ScheduleConfig;
   toolMode?: SchedulerToolMode;
   allowedToolIds?: string[];
+  managedBy?: "daily-ritual";
+  ritualId?: "morning" | "afternoon" | "evening";
 }
 
 export type ScheduledTaskPatch = Partial<Pick<
   ScheduledTask,
-  "title" | "prompt" | "enabled" | "schedule" | "nextFireAt" | "lastFiredAt" | "toolMode" | "allowedToolIds"
+  "title" | "prompt" | "enabled" | "schedule" | "nextFireAt" | "lastFiredAt" | "toolMode" | "allowedToolIds" | "managedBy" | "ritualId"
 >>;
 
 export interface ScheduledTaskHistoryEntry {

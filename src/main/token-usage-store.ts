@@ -16,6 +16,7 @@ export interface TokenUsageDay {
   hit: number;   // 缓存命中（当前占位 0，接缓存后填）
   miss: number;  // 缓存未命中（当前占位 0）
   requests: number;
+  models?: Record<string, { input: number; output: number; requests: number }>;
 }
 
 interface TokenUsageStore {
@@ -86,15 +87,42 @@ function flushNow(): void {
 // ── public API ──
 
 /** 记录一次 API 调用的 token 用量（异步累加到当天）。 */
-export function recordUsage(input: number, output: number, requests = 1): void {
+export function recordUsage(input: number, output: number, requests = 1, model = "未標記模型"): void {
   const store = ensureLoaded();
   const key = todayKey();
   const day = store.days[key] ?? { input: 0, output: 0, hit: 0, miss: 0, requests: 0 };
   day.input += Math.max(0, Math.round(input || 0));
   day.output += Math.max(0, Math.round(output || 0));
   day.requests += Math.max(0, requests);
+  day.models ??= {};
+  const modelUsage = day.models[model] ?? { input: 0, output: 0, requests: 0 };
+  modelUsage.input += Math.max(0, Math.round(input || 0));
+  modelUsage.output += Math.max(0, Math.round(output || 0));
+  modelUsage.requests += Math.max(0, requests);
+  day.models[model] = modelUsage;
   store.days[key] = day;
   scheduleFlush();
+}
+
+export function getUsageByModel(days: number): Array<{ model: string; input: number; output: number; requests: number }> {
+  const store = ensureLoaded();
+  const totals = new Map<string, { input: number; output: number; requests: number }>();
+  const cutoff = new Date();
+  cutoff.setHours(0, 0, 0, 0);
+  cutoff.setDate(cutoff.getDate() - Math.max(1, days) + 1);
+  for (const [date, day] of Object.entries(store.days)) {
+    if (new Date(`${date}T00:00:00`).getTime() < cutoff.getTime()) continue;
+    for (const [model, usage] of Object.entries(day.models ?? {})) {
+      const total = totals.get(model) ?? { input: 0, output: 0, requests: 0 };
+      total.input += usage.input;
+      total.output += usage.output;
+      total.requests += usage.requests;
+      totals.set(model, total);
+    }
+  }
+  return [...totals.entries()]
+    .map(([model, usage]) => ({ model, ...usage }))
+    .sort((a, b) => b.input + b.output - (a.input + a.output));
 }
 
 /** 查询最近 N 天的用量数据，按日期升序返回（无数据的天填 0）。 */

@@ -14,6 +14,11 @@ import { runFunctionCallingLoop } from "../orchestrator";
 import { getAdapter, buildVendorUrlByProvider } from "../orchestrator/vendors";
 import { resolveTimeoutPolicy } from "../runtime-policy";
 import type { ChatMessage } from "../orchestrator/vendors/types";
+import { transcribeOfflineWhisper } from "../asr/offline-whisper-engine";
+import { startCallUsage, stopCallUsage } from "../call-usage-store";
+import { captionImage } from "../orchestrator/vision-captioner";
+import { toTraditionalTaiwan } from "../utils/opencc";
+import { parseSharedScreenFrame, shouldUseSharedScreen, type SharedScreenFrame } from "./screen-context";
 
 const LOG_PREFIX = "[CallManager]";
 
@@ -24,6 +29,9 @@ let asrStream: VolcanoAsrStream | null = null;
 let currentState: CallState = "IDLE";
 let finalText = "";
 let active = false;
+let localAudioBuffer = Buffer.alloc(0);
+let latestScreenFrame: SharedScreenFrame | null = null;
+const MAX_LOCAL_AUDIO_BYTES = 10 * 1024 * 1024;
 
 /** 通话上下文：保留最近 N 轮对话历史（每轮 = user + assistant 一对）。
  * 主聊天窗口（src/main/index.ts:1276 normalizeChatMessages）默认保留 24 条（12 轮）。
@@ -128,17 +136,31 @@ function sendTtsAudio(base64: string): void {
 export function startCall(): void {
   if (active) return;
   const cfg = getAsrConfig();
-  if (!cfg || cfg.engine !== "aliyun" || !cfg.appKey || !cfg.accessKeyId || !cfg.accessKeySecret) {
-    sendError("ASR 未配置：请在设置→ASR 中配置阿里云 AppKey 和 AccessKey");
+  if (!cfg) {
+    sendError("ASR 未配置：請在設定 → 語音辨識中選擇引擎");
+    sendState("ERROR");
+    return;
+  }
+  const hasAliyun = cfg.engine === "aliyun" && cfg.appKey && cfg.accessKeyId && cfg.accessKeySecret;
+  if (cfg.engine === "aliyun" && !hasAliyun && !cfg.fallbackToLocal) {
+    sendError("阿里雲 ASR 設定不完整，請補齊金鑰或開啟本機 Whisper 備援");
+    sendState("ERROR");
+    return;
+  }
+  if (cfg.engine !== "aliyun" && cfg.engine !== "local") {
+    sendError(`不支援的 ASR 引擎：${cfg.engine}`);
     sendState("ERROR");
     return;
   }
 
   active = true;
+  startCallUsage("desktop");
   finalText = "";
+  localAudioBuffer = Buffer.alloc(0);
   callHistory.length = 0;
+  latestScreenFrame = null;
   console.log(LOG_PREFIX, "startCall 重置: finalText 清空, history 清空");
-  startAsrStream(cfg);
+  if (hasAliyun) startAsrStream(cfg);
   sendState("LISTENING");
 }
 
@@ -156,7 +178,30 @@ export async function endTurn(): Promise<void> {
   console.log(LOG_PREFIX, "endTurn 入口: active=", active, "state=", currentState, "finalText.length=", finalText.length);
   if (!active || currentState !== "LISTENING") return;
 
-  if (asrStream) asrStream.stop();
+  const cfg = getAsrConfig();
+  if (!cfg) return;
+  if (asrStream) await asrStream.stopAndWaitFinal();
+
+  if (cfg.engine === "local" || (!finalText.trim() && cfg.fallbackToLocal)) {
+    if (!localAudioBuffer.length) {
+      restartAsr();
+      return;
+    }
+    sendState("THINKING");
+    try {
+      if (cfg.engine !== "local") sendAsrResult("雲端沒有回傳結果，已切換本機 Whisper", undefined);
+      finalText = await transcribeOfflineWhisper(
+        localAudioBuffer,
+        cfg.language === "en" ? "en" : "zh",
+      );
+      sendAsrResult(undefined, finalText);
+    } catch (error) {
+      sendError(`本機語音辨識失敗：${error instanceof Error ? error.message : String(error)}`);
+      sendState("LISTENING");
+      restartAsr();
+      return;
+    }
+  }
 
   const text = finalText.trim();
   finalText = "";
@@ -277,13 +322,19 @@ function restartAsr(): void {
   if (!cfg) return;
   if (asrStream) asrStream.stop();
   finalText = "";
-  startAsrStream(cfg);
+  localAudioBuffer = Buffer.alloc(0);
+  if (cfg.engine === "aliyun" && cfg.appKey && cfg.accessKeyId && cfg.accessKeySecret) {
+    startAsrStream(cfg);
+  }
 }
 
 /** 挂断：清理一切。 */
 export function stopCall(): void {
   active = false;
+  stopCallUsage("desktop");
   callHistory.length = 0;
+  latestScreenFrame = null;
+  localAudioBuffer = Buffer.alloc(0);
   if (asrStream) {
     asrStream.stop();
     asrStream = null;
@@ -293,9 +344,24 @@ export function stopCall(): void {
 
 /** 处理音频帧：转发给 ASR。 */
 export function handleAudioFrame(frame: Buffer): void {
+  const cfg = getAsrConfig();
+  if (currentState === "LISTENING" && cfg && (cfg.engine === "local" || cfg.fallbackToLocal)) {
+    const remaining = MAX_LOCAL_AUDIO_BYTES - localAudioBuffer.length;
+    if (remaining > 0) localAudioBuffer = Buffer.concat([localAudioBuffer, frame.subarray(0, remaining)]);
+  }
   if (asrStream && currentState === "LISTENING") {
     asrStream.sendAudio(frame);
   }
+}
+
+/** 保存 renderer 最近取樣的一幀；null 代表停止分享。 */
+export function handleScreenFrame(dataUrl: unknown): void {
+  if (dataUrl === null) {
+    latestScreenFrame = null;
+    return;
+  }
+  const parsed = parseSharedScreenFrame(dataUrl);
+  if (parsed) latestScreenFrame = parsed;
 }
 
 /** 天气关键词正则匹配 */
@@ -325,6 +391,22 @@ async function runAgentTurn(userText: string): Promise<string | null> {
     const ms = modelSettingsGetter?.();
     if (!ms || !ms.apiKey) {
       throw new Error("模型配置缺失或未填写 API Key");
+    }
+
+    if (latestScreenFrame && shouldUseSharedScreen(userText)) {
+      const visualReply = await captionImage(latestScreenFrame, userText, {
+        baseUrl: ms.baseUrl,
+        apiKey: ms.apiKey,
+        model: ms.model,
+      });
+      if (visualReply && !visualReply.startsWith("[錯誤·")) {
+        const reply = toTraditionalTaiwan(visualReply.trim());
+        callHistory.push({ role: "user", content: userText });
+        callHistory.push({ role: "assistant", content: reply });
+        trimCallHistory();
+        return reply;
+      }
+      console.warn(LOG_PREFIX, "分享畫面分析失敗，改以一般語音問題處理");
     }
 
     const adapter = getAdapter(ms.provider);
@@ -383,6 +465,7 @@ async function runAgentTurn(userText: string): Promise<string | null> {
 export function registerCallIpc(): void {
   ipcMain.on(IPC.CALL_START, () => startCall());
   ipcMain.on(IPC.CALL_AUDIO_FRAME, (_event, frame: ArrayBuffer) => handleAudioFrame(Buffer.from(frame)));
+  ipcMain.on(IPC.CALL_SCREEN_FRAME, (_event, dataUrl: string | null) => handleScreenFrame(dataUrl));
   ipcMain.on(IPC.CALL_TURN_END, () => void endTurn());
   ipcMain.on(IPC.CALL_TTS_DONE, () => onTtsDone());
   ipcMain.on(IPC.CALL_STOP, () => stopCall());

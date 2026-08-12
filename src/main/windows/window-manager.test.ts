@@ -57,7 +57,7 @@ describe("window manager pet docking", () => {
     const manager = createWindowManager({
       getCurrentAppIconPath: () => "icon.png",
       isDev: false,
-      loadMainWindowSettingsSlice: () => ({ petZoom: 1, petAlwaysOnTop: true }),
+      loadMainWindowSettingsSlice: () => ({ petZoom: 1, petAlwaysOnTop: true, petChatInputEnabled: true }),
       persistMainWindowPosition: vi.fn(),
     });
     manager.createMainWindow();
@@ -80,5 +80,29 @@ describe("window manager pet docking", () => {
     expect(mocks.pet.setSize).toHaveBeenCalledWith(400, 500);
     expect(mocks.pet.webContents.send).toHaveBeenCalledWith("pet-chat:input-visibility", true);
     expect(mocks.pet.setAlwaysOnTop).toHaveBeenLastCalledWith(true, "screen-saver");
+  });
+
+  it("套用外觀設定時保持小昔漣停靠，不會放大或浮出工作台", async () => {
+    const { createWindowManager } = await import("./window-manager");
+    const manager = createWindowManager({
+      getCurrentAppIconPath: () => "icon.png",
+      isDev: false,
+      loadMainWindowSettingsSlice: () => ({ petZoom: 1.8, petAlwaysOnTop: true, petChatInputEnabled: true }),
+      persistMainWindowPosition: vi.fn(),
+    });
+    manager.createMainWindow();
+    manager.updatePetDock({ x: 900, y: 120, width: 220, height: 180, isDocked: true });
+    mocks.pet.setSize.mockClear();
+    mocks.pet.setBounds.mockClear();
+
+    manager.setMainWindowAlwaysOnTop(true);
+    manager.showMainWindow();
+    manager.applyMainWindowZoom(1.8);
+
+    expect(mocks.pet.setSize).not.toHaveBeenCalled();
+    expect(mocks.pet.setBounds).toHaveBeenLastCalledWith(expect.objectContaining({ width: 180, height: 225 }));
+    expect(mocks.pet.setParentWindow).toHaveBeenLastCalledWith(mocks.host);
+    expect(mocks.pet.setAlwaysOnTop).toHaveBeenLastCalledWith(false);
+    expect(manager.isPetDocked()).toBe(true);
   });
 });

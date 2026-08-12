@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 const html = fs.readFileSync(fileURLToPath(new URL("./index.html", import.meta.url)), "utf8");
 const workspaceCss = fs.readFileSync(fileURLToPath(new URL("./workspace.css", import.meta.url)), "utf8");
 const reactCss = fs.readFileSync(fileURLToPath(new URL("../react/styles/react-root.css", import.meta.url)), "utf8");
+const chatPage = fs.readFileSync(fileURLToPath(new URL("../react/features/chat/pages/ChatPage.tsx", import.meta.url)), "utf8");
 const main = fs.readFileSync(fileURLToPath(new URL("./main.ts", import.meta.url)), "utf8");
 
 describe("unified conversation navigation", () => {
@@ -39,5 +40,14 @@ describe("unified conversation navigation", () => {
     expect(reactCss).toMatch(/\.cy-page\.is-embedded \.cy-page-conversations[\s\S]*?display:\s*none/);
     expect(reactCss).toContain(".cy-page-newtask {");
     expect(reactCss).toContain(".cy-page-conversations {");
+  });
+
+  it("bridges the workspace conversation controls into the embedded React chat", () => {
+    expect(main).toContain('type: "create-session"');
+    expect(main).toContain('type: "switch-session"');
+    expect(chatPage).toContain('event.data.type === "create-session"');
+    expect(chatPage).toContain('event.data.type === "switch-session"');
+    expect(chatPage).toContain('type: "active-session-changed"');
+    expect(main).toMatch(/type === "active-session-changed"[\s\S]*?renderSidebarSessionsList\(\)/);
   });
 });

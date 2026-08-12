@@ -63,7 +63,7 @@ describe("resolveVendorRuntimeSettings — 分流逻辑", () => {
       ["Qwen（通义千问）", -1, true],
       ["ChatGPT（OpenAI）", 1, true],
       ["Claude（Anthropic）", -1, true], // 关键保护场景
-      ["MiMo（小米）", 1, false],
+      ["Gemini（Google）", 1, false],
       ["Kimi（月之暗面）", 1, true],
     ])(
       "%s 即使 thinkingOverride=%i、disableMaxToken=%s 也被强制归零（保护 Claude / 避免花瓶）",

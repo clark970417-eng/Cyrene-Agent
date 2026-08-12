@@ -137,6 +137,7 @@ import { bootstrapGameBot } from "./game-bot/bootstrap";
 import { bootstrapTodos } from "./todos/bootstrap";
 import { bootstrapMusicService } from "./music/bootstrap";
 import { installShutdownLatch } from "./music/shutdown-latch";
+import { registerBackupIpc } from "./security/backup-ipc";
 import {
   buildConversationTimeContext,
   normalizeChatMessagesWithTime,
@@ -153,6 +154,7 @@ import {
 
 import { createWindowLifecycleTracker } from "./electron-window-lifecycle";
 import { createSchedulerSubsystem, type SchedulerSubsystem } from "./scheduler/bootstrap";
+import { syncDailyRitualTasks } from "./rituals/daily-rituals";
 import { createChannelsSubsystem, type ChannelsSubsystem } from "./channels/bootstrap";
 import { createAgentRuntime, type AgentRuntime } from "./orchestrator/agent-runtime";
 import { createRuntimeStateService } from "./orchestrator/runtime-state-service";
@@ -167,6 +169,11 @@ import { registerCustomFeaturesIpc } from "./custom-features-ipc";
 import { registerWavesUidIpc } from "./wavesuid-ipc";
 import { registerPaintIpc } from "./paint-ipc";
 
+// Electron 的 safeStorage 在 macOS 以應用名稱選擇 Keychain 金鑰。
+// 開發版由 `electron .` 啟動時若沒有先固定名稱，會以 "Electron" 嘗試解密，
+// 造成舊版已加密的 Discord／Spotify 憑證看似遺失。
+app.setName("live2d-cyrene");
+app.setPath("userData", path.join(app.getPath("appData"), "live2d-cyrene"));
 
 configureDocumentIndexQueue(runDocumentIndexJob);
 
@@ -309,6 +316,8 @@ if (loadGeneralSettings().disableGpuElectron) {
 }
 
 if (isPrimaryAppInstance) app.whenReady().then(async () => {
+  const backupManager = registerBackupIpc();
+  try { backupManager.runAutoBackupIfDue(); } catch (error) { console.warn("[Backup] 自動備份失敗:", error); }
   registerCustomFeaturesIpc();
   registerWavesUidIpc();
   registerPaintIpc();
@@ -317,15 +326,16 @@ if (isPrimaryAppInstance) app.whenReady().then(async () => {
   process.stdout.write("\n" + renderBanner() + "\n\n");
   logger.info(LogTag.Runtime, "starting Cyrene Agent");
 
-  onGeneralSettingsChanged((before, after) =>
+  onGeneralSettingsChanged((before, after) => {
     handleGeneralSettingsChanged(before, after, {
       get windowManager() { return windowManager; },
       get tray() { return tray; },
       get screenshotService() { return screenshotService; },
       get proactiveLifecycle() { return proactiveLifecycle; },
       broadcastToAuxWindows,
-    }),
-  );
+    });
+    if (schedulerSubsystem) syncDailyRitualTasks(after, schedulerSubsystem.store);
+  });
 
   // 注入应用图标路径 getter（窗口工厂统一从这里读取，避免与 index.ts 循环依赖）
   setGetCurrentAppIconPath(() => getAppIconPath(loadGeneralSettings().uiIcon));
@@ -353,10 +363,6 @@ if (isPrimaryAppInstance) app.whenReady().then(async () => {
   if (removed.length > 0) {
     console.log("[Cyrene] 已清理遗留的已下架内置 MCP:", removed.join(", "));
   }
-
-  void syncPlaywrightMcp(initialSettings).catch((e) =>
-    console.error("[Cyrene] playwright MCP sync failed:", e)
-  );
 
   // 截图：原生 helper IPC、全局热键和后台预热。预热失败不会阻止应用启动。
   screenshotService = initializeScreenshotService({
@@ -428,6 +434,7 @@ if (isPrimaryAppInstance) app.whenReady().then(async () => {
   });
 
   schedulerSubsystem = createSchedulerSubsystem(agentRuntime, () => reactChatWindow);
+  syncDailyRitualTasks(loadGeneralSettings(), schedulerSubsystem.store);
 
   // 多渠道（微信/飞书/...）：组装 dispatcher 依赖并启动 channels 模块。
   channelsSubsystem = createChannelsSubsystem({
@@ -484,6 +491,8 @@ if (isPrimaryAppInstance) app.whenReady().then(async () => {
     }
     // 初始化 MCP Manager；scheduler 启动前等待一次，避免近即时任务早于 MCP 工具恢复。
     await initMcpManager();
+    // 先載入既有設定再同步內建服務，避免已保存的 Playwright 被重複註冊。
+    await syncPlaywrightMcp(initialSettings);
     logger.info(LogTag.RAG, "RAG initialized OK");
 
     // 初始化 reranker：根据设置决定是否启用（默认 standard）

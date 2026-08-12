@@ -78,7 +78,7 @@ import {
 } from "./codex-image-queue";
 import { enqueueOnDemandCodexImageWorker } from "./codex-image-worker";
 import { loadDiscordMusicResumeData, saveDiscordMusicControllerReference } from "./music-resume-store";
-import { queryCloudStandby, signalCloudStandby, type CloudStandbyStatus } from "./cloud-standby";
+import { isCloudStandbyConfigured, queryCloudStandby, signalCloudStandby, type CloudStandbyStatus } from "./cloud-standby";
 import { DISCORD_OWNER_ID, shouldIgnoreDiscordMessageDuringGeminiFallback } from "./model-fallback";
 import { handleWavesUidInteraction, handleWavesUidMessage, isWavesUidCommand } from "./wavesuid";
 
@@ -902,8 +902,18 @@ export class DiscordAdapter implements ChannelAdapter {
 
   async getCloudControlStatus(): Promise<DiscordCloudControlStatus> {
     const config = loadChannelsSettings().discord;
-    const remote = await queryCloudStandby(config);
     const localConnected = Boolean(this.client?.isReady());
+    if (!isCloudStandbyConfigured(config)) {
+      return {
+        reachable: false,
+        cloudService: "unknown",
+        watchdog: "unknown",
+        heartbeatAge: null,
+        localConnected,
+        mode: localConnected ? "local" : "transition",
+      };
+    }
+    const remote = await queryCloudStandby(config);
     return {
       ...remote,
       localConnected,

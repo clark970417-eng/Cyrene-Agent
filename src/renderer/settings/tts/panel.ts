@@ -169,6 +169,14 @@ async function loadTtsConfig(): Promise<void> {
   ttsState.config.ttsMosslandTestText  = String(ttsEl("tts-mossland-text").value);
   ttsState.config.ttsMosslandFormat    = (ttsEl("tts-mossland-format") as HTMLSelectElement).value;
 
+  ttsEl("daily-ritual-enabled").checked = Boolean(ttsState.config.dailyRitualEnabled);
+  ttsEl("daily-ritual-morning-enabled").checked = ttsState.config.dailyRitualMorningEnabled !== false;
+  ttsEl("daily-ritual-morning-time").value = String(ttsState.config.dailyRitualMorningTime ?? "08:00");
+  ttsEl("daily-ritual-afternoon-enabled").checked = ttsState.config.dailyRitualAfternoonEnabled !== false;
+  ttsEl("daily-ritual-afternoon-time").value = String(ttsState.config.dailyRitualAfternoonTime ?? "15:00");
+  ttsEl("daily-ritual-evening-enabled").checked = ttsState.config.dailyRitualEveningEnabled !== false;
+  ttsEl("daily-ritual-evening-time").value = String(ttsState.config.dailyRitualEveningTime ?? "22:30");
+
   // 加载完成后清掉所有 Provider 的脏态（按钮隐藏，status 清空）
   for (const provider of Object.keys(TTS_PROVIDER_FIELDS)) {
     const ui = ttsProviderUi[provider];
@@ -237,6 +245,21 @@ document.querySelectorAll<HTMLButtonElement>("[data-engine]").forEach((btn) => {
 ttsEl("tts-auto-read").addEventListener("change", () => {
   void saveTtsField("ttsAutoRead", ttsEl("tts-auto-read").checked);
 });
+
+for (const [id, field] of [
+  ["daily-ritual-enabled", "dailyRitualEnabled"],
+  ["daily-ritual-morning-enabled", "dailyRitualMorningEnabled"],
+  ["daily-ritual-morning-time", "dailyRitualMorningTime"],
+  ["daily-ritual-afternoon-enabled", "dailyRitualAfternoonEnabled"],
+  ["daily-ritual-afternoon-time", "dailyRitualAfternoonTime"],
+  ["daily-ritual-evening-enabled", "dailyRitualEveningEnabled"],
+  ["daily-ritual-evening-time", "dailyRitualEveningTime"],
+] as const) {
+  ttsEl(id).addEventListener("change", () => {
+    const element = ttsEl(id);
+    void saveTtsField(field, element.type === "checkbox" ? element.checked : element.value);
+  });
+}
 
 // 语速/音量滑块（change 时保存，input 时实时显示）
 ttsEl("tts-speed").addEventListener("input", updateTtsSliderLabels);

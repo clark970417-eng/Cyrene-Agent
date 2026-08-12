@@ -88,13 +88,19 @@ export function createProactiveLifecycle(options: ProactiveLifecycleOptions): Pr
 
   function getProactiveRuntimeSnapshot(): ProactiveRuntimeSnapshot {
     const now = Date.now();
+    const settings = options.loadGeneralSettings();
     let idleSec = Number.POSITIVE_INFINITY;
     try { idleSec = powerMonitor.getSystemIdleTime(); } catch { /* app 尚未 ready */ }
     return {
       now,
       localHour: new Date(now).getHours(),
+      localMinute: new Date(now).getMinutes(),
       idleSec,
-      enabled: options.loadGeneralSettings().proactiveChatMode === "on",
+      enabled: settings.proactiveChatMode === "on",
+      openerMode: settings.openerMode === "off" ? "normal" : settings.openerMode,
+      quietStart: settings.openerQuietStart,
+      quietEnd: settings.openerQuietEnd,
+      dailyLimit: settings.openerDailyLimit,
       conversationBusy: normalConversationBusyCount > 0,
       generationBusy: false,
       screenLocked: proactiveScreenLocked,

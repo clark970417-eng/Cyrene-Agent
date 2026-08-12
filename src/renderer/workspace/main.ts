@@ -1068,7 +1068,9 @@ function updateActiveSessionHighlight() {
 window.addEventListener("message", (e) => {
   if (e.data && e.data.type === "active-session-changed") {
     currentActiveSessionId = e.data.sessionId || "";
-    updateActiveSessionHighlight();
+    // iframe 與工作台共用同一個 BrowserWindow，主進程會刻意略過發起方的
+    // chats:changed 廣播；因此由這個回報主動重讀清單，讓新建對話立即出現。
+    void renderSidebarSessionsList();
   }
   if (e.data && e.data.type === "mode-updated-by-text") {
     const value = e.data.value;

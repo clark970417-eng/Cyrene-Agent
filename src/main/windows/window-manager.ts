@@ -12,7 +12,11 @@ import { reactChatWindow } from "./window-state";
 export interface WindowManagerOptions {
   getCurrentAppIconPath: () => string;
   isDev: boolean;
-  loadMainWindowSettingsSlice: () => MainWindowSettingsSlice & { petZoom?: number; petAlwaysOnTop?: boolean };
+  loadMainWindowSettingsSlice: () => MainWindowSettingsSlice & {
+    petZoom?: number;
+    petAlwaysOnTop?: boolean;
+    petChatInputEnabled?: boolean;
+  };
   persistMainWindowPosition: (position: { x: number; y: number }) => void;
 }
 
@@ -113,7 +117,7 @@ export function createWindowManager(options: WindowManagerOptions): WindowManage
     pet.setSize(width, height);
     pet.setAlwaysOnTop(!petTextInputActive && settings.petAlwaysOnTop !== false, "screen-saver");
     pet.webContents.send(IPC.PET_ZOOM, zoom);
-    pet.webContents.send(IPC.PET_CHAT_INPUT_VISIBILITY, true);
+    pet.webContents.send(IPC.PET_CHAT_INPUT_VISIBILITY, settings.petChatInputEnabled === true);
   }
 
   function undockPetForDrag(): void {
@@ -191,6 +195,10 @@ export function createWindowManager(options: WindowManagerOptions): WindowManage
     },
 
     showMainWindow(): void {
+      if (petDockBounds?.isDocked) {
+        applyPetDock();
+        return;
+      }
       getUsableMainWindow()?.show();
     },
     hideMainWindow(): void {
@@ -207,6 +215,13 @@ export function createWindowManager(options: WindowManagerOptions): WindowManage
     setMainWindowAlwaysOnTop(alwaysOnTop: boolean): void {
       const win = getUsableMainWindow();
       if (!win) return;
+      // 停靠中的小昔漣必須維持為工作台子視窗。外觀設定儲存會重新套用
+      // GeneralSettings；若在這裡改成 screen-saver 層級，她會浮到工作台外面。
+      if (petDockBounds?.isDocked) {
+        win.setParentWindow(reactChatWindow && !reactChatWindow.isDestroyed() ? reactChatWindow : null);
+        win.setAlwaysOnTop(false);
+        return;
+      }
       win.setAlwaysOnTop(alwaysOnTop, alwaysOnTop ? "screen-saver" : "normal");
     },
     setMainWindowInteractive(interactive: boolean): void {
@@ -246,6 +261,12 @@ export function createWindowManager(options: WindowManagerOptions): WindowManage
     applyMainWindowZoom(zoom: number): void {
       const win = getUsableMainWindow();
       if (!win) return;
+      // 桌寵停靠時使用舊版的小尺寸（applyPetDock 的 45%）。使用者的縮放值
+      // 只套用到明確拖出工作台後的桌面桌寵，不能因調整主題／字型而放大停靠視窗。
+      if (petDockBounds?.isDocked) {
+        applyPetDock();
+        return;
+      }
       const width = Math.round(PET_WINDOW_BASE_WIDTH * zoom);
       const height = Math.round(PET_WINDOW_BASE_HEIGHT * zoom);
       win.setSize(width, height);

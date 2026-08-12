@@ -1,13 +1,20 @@
 import { describe, expect, it } from "vitest";
-import { cloudStandbySshArgs } from "./cloud-standby";
+import { cloudStandbySshArgs, isCloudStandbyConfigured } from "./cloud-standby";
 
 describe("Discord local-primary cloud standby", () => {
   const config = {
     enabled: true,
+    cloudStandbyEnabled: true,
     cloudStandbyHost: "35.202.130.71",
     cloudStandbyUser: "bluearchive6888",
     cloudStandbyKeyPath: "/Users/clark/.ssh/codex_cyrene_gcp",
   };
+
+  it("未啟用或 SSH 資料不完整時視為本機模式", () => {
+    expect(isCloudStandbyConfigured({ enabled: true, cloudStandbyEnabled: false })).toBe(false);
+    expect(isCloudStandbyConfigured({ enabled: true, cloudStandbyEnabled: true, cloudStandbyHost: "vm" })).toBe(false);
+    expect(isCloudStandbyConfigured(config)).toBe(true);
+  });
 
   it("builds a non-interactive authenticated heartbeat command", () => {
     expect(cloudStandbySshArgs(config, "online")).toEqual([

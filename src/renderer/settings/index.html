@@ -35,6 +35,7 @@
         <button type="button" class="nav-item" data-section="tts"><span><svg class="nav-item__icon" width="18" height="18" viewBox="0 0 48 48" fill="none" aria-hidden="true"><title>TTS</title><rect x="17" y="4" width="14" height="27" rx="7" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/><path d="M9 23C9 31.2843 15.7157 38 24 38C32.2843 38 39 31.2843 39 23" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><path d="M24 38V44" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></svg></span>TTS 设置</button>
         <button type="button" class="nav-item" data-section="asr"><span><svg class="nav-item__icon" width="18" height="18" viewBox="0 0 48 48" fill="none" aria-hidden="true"><title>ASR</title><path d="M36 32V32C40.4183 32 44 28.4183 44 24C44 19.5817 40.4183 16 36 16" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/><path d="M12 16C7.58172 16 4 19.5817 4 24C4 28.4183 7.58172 32 12 32V32" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/><path d="M12 32V31.5V29V24V16C12 9.37258 17.3726 4 24 4C30.6274 4 36 9.37258 36 16V32C36 38.6274 30.6274 44 24 44" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></svg></span>ASR 设置</button>
         <button type="button" class="nav-item" data-section="tokens"><span><svg class="nav-item__icon" width="18" height="18" viewBox="0 0 48 48" fill="none" aria-hidden="true"><title>Token 用量</title><path d="M4 42H44" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><rect x="8" y="28" width="6" height="14" fill="none" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/><rect x="21" y="18" width="6" height="24" fill="none" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/><rect x="34" y="6" width="6" height="36" fill="none" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/></svg></span>Token 用量</button>
+        <button type="button" class="nav-item" data-section="security"><span>🛡️</span>資料安全</button>
         <hr class="nav-divider" />
         <button type="button" class="nav-item" data-section="disclaimer"><span><svg class="nav-item__icon" width="18" height="18" viewBox="0 0 48 48" fill="none" aria-hidden="true"><title>免责声明</title><rect x="13" y="10" width="28" height="34" fill="none" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/><path d="M35 10V4H8C7.44772 4 7 4.44772 7 5V38H13" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><path d="M21 22H33" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><path d="M21 30H33" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></svg></span>免责声明</button>
       </nav>
@@ -504,6 +505,24 @@
               <h2>布局</h2>
               <p>所有功能都固定整合在同一個工作台，小昔漣會留在右側陪伴區。</p>
             </div>
+
+            <div class="setting-row">
+              <div>
+                <strong>主動陪伴頻率與安靜時段</strong>
+                <span>從舊版同步；安靜時段內不主動打擾，每日上限包含所有主動訊息。</span>
+              </div>
+              <div class="settings-actions-inline">
+                <select id="opener-mode" aria-label="主動陪伴頻率">
+                  <option value="quiet">安靜（低頻）</option>
+                  <option value="normal">普通</option>
+                  <option value="lively">活潑（較常出現）</option>
+                </select>
+                <input id="opener-quiet-start" type="time" aria-label="安靜時段開始" />
+                <span>至</span>
+                <input id="opener-quiet-end" type="time" aria-label="安靜時段結束" />
+                <input id="opener-daily-limit" type="number" min="1" max="12" aria-label="每日主動訊息上限" />
+              </div>
+            </div>
             <div class="appearance-options" aria-label="窗口布局">
               <button type="button" class="appearance-option is-active" aria-pressed="true">
                 <span class="appearance-option__icon">▦</span>
@@ -593,6 +612,10 @@
                 <span class="switch"><input id="pet-visible" type="checkbox" /><span class="switch__track"><span class="switch__thumb"></span></span></span>
               </label>
               <label class="setting-row">
+                <div><strong>桌寵快速對話框</strong><span>昔漣拖出主視窗後，顯示可直接打字對話的輸入框；停靠時自動隱藏。</span></div>
+                <span class="switch"><input id="pet-chat-input-enabled" type="checkbox" /><span class="switch__track"><span class="switch__thumb"></span></span></span>
+              </label>
+              <label class="setting-row">
                 <div><strong>桌宠缩放</strong><span>调整 Live2D 模型大小（0.5× ~ 2.0×），窗口与模型同步缩放。</span></div>
                 <div class="range-row">
                   <input id="pet-zoom" type="range" min="0.5" max="2" step="0.1" />
@@ -618,6 +641,16 @@
           </div>
 
           <div class="settings-list">
+            <label class="setting-row">
+              <div><strong>設定頁背景音樂</strong><span>沿用舊版的背景音樂與音量；關閉後不會自動播放。</span></div>
+              <span class="switch"><input id="music-enabled" type="checkbox" /><span class="switch__track"><span class="switch__thumb"></span></span></span>
+              <input id="music-volume" type="range" min="0" max="100" step="1" aria-label="背景音樂音量" />
+            </label>
+            <label class="setting-row">
+              <div><strong>操作音效</strong><span>設定頁按鈕音效與音量。</span></div>
+              <span class="switch"><input id="sound-enabled" type="checkbox" /><span class="switch__track"><span class="switch__thumb"></span></span></span>
+              <input id="sound-volume" type="range" min="0" max="100" step="1" aria-label="操作音效音量" />
+            </label>
             <div class="setting-row">
               <div>
                 <strong>状态栏窗口</strong>
@@ -1253,6 +1286,66 @@
             <div class="channels-card__body"><p class="channels-card__hint">保留你原本的本機／雲端 Gateway 交接；可在 Mac 關機前切到雲端，避免兩邊重複登入。</p><div class="channels-card__actions"><button type="button" class="btn-secondary" id="channels-cloud-local">這台 Mac 接管</button><button type="button" class="btn-secondary" id="channels-cloud-remote">Google Cloud 接管</button><button type="button" class="btn-secondary" id="channels-cloud-restart">重新啟動雲端 Bot</button><button type="button" class="btn-secondary" id="channels-cloud-refresh">重新整理</button></div><div class="channels-feedback" id="channels-cloud-feedback" aria-live="polite"></div></div>
           </div>
 
+          <div class="channels-card" id="channels-discord-music-card">
+            <div class="channels-card__header">
+              <h2>🎵 Discord 音樂控制</h2>
+              <strong id="channels-discord-music-status">尚未播放</strong>
+            </div>
+            <div class="channels-card__body">
+              <p class="channels-card__hint">沿用舊版 Discord 播放佇列、音量、循環、隨機、最愛與播放紀錄；這裡只補回桌面控制入口，不改動 Bot 核心。</p>
+              <div class="channels-card__actions">
+                <button type="button" class="btn-secondary" data-discord-music-command="previous">上一首</button>
+                <button type="button" class="btn-secondary" id="channels-discord-music-toggle">播放／暫停</button>
+                <button type="button" class="btn-secondary" data-discord-music-command="skip">下一首</button>
+                <button type="button" class="btn-secondary" data-discord-music-command="shuffle">隨機</button>
+                <button type="button" class="btn-secondary" data-discord-music-command="repeat-queue">清單循環</button>
+                <button type="button" class="btn-secondary" data-discord-music-command="stop">停止</button>
+              </div>
+              <div class="form-row">
+                <label class="form-label" for="channels-discord-music-volume">音量 <span id="channels-discord-music-volume-value">100%</span></label>
+                <input id="channels-discord-music-volume" type="range" min="0" max="200" step="5" value="100" />
+              </div>
+              <div class="channels-feedback" id="channels-discord-music-feedback" aria-live="polite"></div>
+              <details class="settings-details">
+                <summary>播放紀錄與最愛</summary>
+                <div id="channels-discord-music-library" class="channels-log"><p class="empty-hint">讀取中…</p></div>
+              </details>
+            </div>
+          </div>
+
+          <div class="channels-card" id="x-notifications-card">
+            <div class="channels-card__header">
+              <h2>𝕏 X 動態通知</h2>
+              <span class="switch"><input id="x-notifications-enabled" type="checkbox" /><span class="switch__track"><span class="switch__thumb"></span></span></span>
+            </div>
+            <div class="channels-card__body">
+              <p class="channels-card__hint">沿用舊版追蹤帳號與最後通知位置，將新動態發到既有 Discord 公告頻道。</p>
+              <div class="form-row"><label class="form-label" for="x-notifications-interval">檢查頻率（分鐘）</label><input id="x-notifications-interval" class="form-input" type="number" min="1" max="60" value="5" /></div>
+              <div class="form-row"><label class="form-label" for="x-notifications-category-name">Discord 公告分類名稱</label><input id="x-notifications-category-name" class="form-input form-input--wide" type="text" value="announcements" /></div>
+              <div class="form-row"><label class="form-label" for="x-notifications-accounts">追蹤帳號（每行：帳號 | 類別 | 顯示名稱）</label><textarea id="x-notifications-accounts" class="form-input form-input--wide" rows="5" placeholder="Wuthering_Waves | game | 鳴潮官方"></textarea></div>
+              <div class="channels-card__actions"><button type="button" class="btn-secondary" id="x-notifications-save">儲存</button><button type="button" class="btn-secondary" id="x-notifications-check-now">立即檢查</button><button type="button" class="btn-secondary" id="x-notifications-test-all">測試全部</button></div>
+              <div class="channels-feedback" id="x-notifications-feedback" aria-live="polite"></div>
+            </div>
+          </div>
+
+          <div class="channels-card" id="anilist-notifications-card">
+            <div class="channels-card__header">
+              <h2>📺 AniList 開播通知</h2>
+              <span class="switch"><input id="anilist-notifications-enabled" type="checkbox" /><span class="switch__track"><span class="switch__thumb"></span></span></span>
+            </div>
+            <div class="channels-card__body">
+              <p class="channels-card__hint">沿用舊版追番帳號、已通知集數與 Discord 目標分類。</p>
+              <div class="form-row"><label class="form-label" for="anilist-notifications-username">AniList 使用者名稱</label><input id="anilist-notifications-username" class="form-input" type="text" /></div>
+              <div class="form-row"><label class="form-label" for="anilist-notifications-token">Access Token（選填）</label><input id="anilist-notifications-token" class="form-input form-input--wide" type="password" placeholder="留空會保留原設定" /></div>
+              <div class="form-grid form-grid--two">
+                <div class="form-row"><label class="form-label" for="anilist-notifications-filter-mode">過濾模式</label><select id="anilist-notifications-filter-mode" class="form-input"><option value="watchlist_only">只看追番清單</option><option value="all_airing">全部開播作品</option></select></div>
+                <div class="form-row"><label class="form-label" for="anilist-notifications-interval">檢查頻率（分鐘）</label><input id="anilist-notifications-interval" class="form-input" type="number" min="1" max="60" value="10" /></div>
+              </div>
+              <div class="channels-card__actions"><button type="button" class="btn-secondary" id="anilist-notifications-save">儲存並驗證</button><button type="button" class="btn-secondary" id="anilist-notifications-check-now">立即檢查</button><button type="button" class="btn-secondary" id="anilist-notifications-test-post">發送測試</button></div>
+              <div class="channels-feedback" id="anilist-notifications-feedback" aria-live="polite"></div>
+            </div>
+          </div>
+
           <div class="channels-card channels-card--global">
             <div class="channels-card__header">
               <h2>全局</h2>
@@ -1634,6 +1727,39 @@
           </div>
         </section>
 
+        <section class="settings-panel security-panel is-hidden" id="security-panel" data-panel="security">
+          <div class="panel-heading">
+            <div class="panel-heading__icon">🛡️</div>
+            <div><h1>資料安全與舊版同步</h1><p>完整保存聊天、記憶、日記、手機連線、Token 使用量、通話時數與個人設定。</p></div>
+          </div>
+          <div class="security-hero">
+            <div><span class="security-kicker">SYSTEM VAULT</span><h2 id="vault-title">正在檢查 macOS Keychain…</h2><p id="vault-detail">密鑰不會被寫入可攜式備份。</p></div>
+          </div>
+          <div class="security-grid">
+            <article class="security-card">
+              <div class="security-card__heading"><div><span class="security-kicker">TIME CAPSULE</span><h2>建立完整備份</h2></div><span>01</span></div>
+              <p>新版與舊版共用的重要資料都會納入；API Key、Token 與密碼會自動排除。</p>
+              <div class="backup-category-grid" id="backup-create-categories">
+                <label><input type="checkbox" value="conversations" checked />聊天與跨裝置</label>
+                <label><input type="checkbox" value="memories" checked />記憶與日記</label>
+                <label><input type="checkbox" value="planning" checked />任務與使用量</label>
+                <label><input type="checkbox" value="personalization" checked />個人化與 Discord</label>
+                <label><input type="checkbox" value="knowledge" checked />知識庫</label>
+                <label><input type="checkbox" value="settings" checked />全部設定</label>
+              </div>
+              <div class="security-actions"><button type="button" class="save-btn" id="backup-create-btn">封存此刻</button><span class="security-status" id="backup-create-status">尚未建立手動備份</span></div>
+              <div class="auto-backup-row"><label><input type="checkbox" id="backup-auto-enabled" /> 每日自動備份</label><label>保留 <select id="backup-retention"><option value="7">7 天</option><option value="30">30 天</option></select></label><span id="backup-last-auto">尚未執行</span></div>
+            </article>
+            <article class="security-card">
+              <div class="security-card__heading"><div><span class="security-kicker">RESTORE POINT</span><h2>預覽與選擇性還原</h2></div><span>02</span></div>
+              <p>還原前會自動建立安全快照，並保留這台 Mac 目前可用的密鑰。</p>
+              <button type="button" class="save-btn save-btn--ghost" id="backup-pick-btn">選擇時間膠囊</button>
+              <div class="backup-preview is-hidden" id="backup-preview"><div class="backup-preview__meta"><strong id="backup-preview-date"></strong><span id="backup-preview-summary"></span></div><div class="backup-category-grid" id="backup-restore-categories"></div><div class="security-actions"><button type="button" class="save-btn" id="backup-restore-btn">開始安全還原</button><span class="security-status" id="backup-restore-status"></span></div></div>
+              <div class="restart-callout is-hidden" id="backup-restart-callout"><span>還原完成，重新啟動後套用全部資料。</span><button type="button" class="save-btn" id="security-restart-btn">重新啟動</button></div>
+            </article>
+          </div>
+        </section>
+
         <section class="settings-panel is-hidden" id="disclaimer-panel" data-panel="disclaimer">
           <div class="panel-heading">
             <div class="panel-heading__icon"><svg width="24" height="24" viewBox="0 0 48 48" fill="none" aria-hidden="true"><title>免责声明</title><rect x="13" y="10" width="28" height="34" fill="none" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/><path d="M35 10V4H8C7.44772 4 7 4.44772 7 5V38H13" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><path d="M21 22H33" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><path d="M21 30H33" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
@@ -1712,9 +1838,9 @@
           <div class="panel-body">
             <!-- 时间范围切换 -->
             <div class="token-range" role="tablist" aria-label="时间范围">
-              <button type="button" class="token-range__btn is-active" data-range="7" role="tab" aria-selected="true">7d</button>
-              <button type="button" class="token-range__btn" data-range="14" role="tab" aria-selected="false">14d</button>
-              <button type="button" class="token-range__btn" data-range="30" role="tab" aria-selected="false">30d</button>
+              <button type="button" class="token-range__btn" data-range="7" role="tab" aria-selected="false">7 天</button>
+              <button type="button" class="token-range__btn" data-range="30" role="tab" aria-selected="false">30 天</button>
+              <button type="button" class="token-range__btn is-active" data-range="90" role="tab" aria-selected="true">全部歷史</button>
             </div>
 
             <!-- Hero 指标区：总消耗(大字)+请求数(右上小字)，下面三小框 -->
@@ -1773,6 +1899,25 @@
             <div class="token-tooltip" id="token-tooltip" hidden></div>
 
             <p class="token-panel__hint">💡 命中/未命中为缓存统计占位，接入缓存功能后显示真实值。</p>
+
+            <div class="channels-card" id="call-usage-history-card">
+              <div class="channels-card__header"><h2>📞 通話時數歷史</h2><strong id="call-usage-history-total">0 分鐘</strong></div>
+              <div class="channels-card__body">
+                <p class="channels-card__hint" id="call-usage-history-detail">最近 90 天 · 桌面 0 分鐘 · Discord 0 分鐘</p>
+                <div id="call-usage-history-list" class="channels-log"></div>
+              </div>
+            </div>
+
+            <div class="channels-card" id="agent-activity-card">
+              <div class="channels-card__header"><h2>🧭 Agent 活動與診斷</h2><strong id="agent-activity-summary">尚無紀錄</strong></div>
+              <div class="channels-card__body">
+                <p class="channels-card__hint">顯示工具執行、權限拒絕、背景佇列與資源狀態；診斷包會自動移除 API Key、Token 與密碼。</p>
+                <div class="channels-card__actions"><button type="button" class="btn-secondary" id="agent-activity-refresh">重新整理</button><button type="button" class="btn-secondary" id="diagnostic-export-btn">匯出診斷包</button></div>
+                <div id="agent-activity-resources" class="channels-feedback"></div>
+                <div id="agent-activity-list" class="channels-log"><p class="empty-hint">尚無活動紀錄。</p></div>
+                <div id="agent-activity-feedback" class="channels-feedback" aria-live="polite"></div>
+              </div>
+            </div>
           </div>
         </section>
 
@@ -2105,6 +2250,14 @@
               </div>
             </div>
 
+            <div class="tts-section">
+              <h2 class="tts-section__title">每日陪伴儀式</h2>
+              <label class="setting-row"><div><strong>啟用每日陪伴</strong><span>自動建立並維護早安、午後與晚安三個排程，不會重複新增。</span></div><input id="daily-ritual-enabled" type="checkbox" /></label>
+              <label class="setting-row"><div><strong>早安</strong></div><input id="daily-ritual-morning-enabled" type="checkbox" /><input id="daily-ritual-morning-time" type="time" /></label>
+              <label class="setting-row"><div><strong>午後關心</strong></div><input id="daily-ritual-afternoon-enabled" type="checkbox" /><input id="daily-ritual-afternoon-time" type="time" /></label>
+              <label class="setting-row"><div><strong>晚安</strong></div><input id="daily-ritual-evening-enabled" type="checkbox" /><input id="daily-ritual-evening-time" type="time" /></label>
+            </div>
+
             <p class="tts-hint">💡 MiniMax 需在控制台训练音色并填写音色 ID。GPT-SoVITS 需自行启动本地服务并提供参考音频。自定义云端会 POST 固定 JSON 到你的 Endpoint。小米 MiMo 当前使用昔涟参考音频走 voiceclone 非流式 wav 合成。Mossland 通过 multipart 上传克隆音频到 POST /v1/audio/voices，立即返回 voice_id，音色永久有效。</p>
 
         </section>
@@ -2175,6 +2328,20 @@
                   <p class="tts-hint">开启后通话窗口显示实时识别文字和昔涟回复文字</p>
                 </div>
                 <input type="checkbox" id="asr-show-transcript" />
+              </label>
+              <label class="setting-row">
+                <div>
+                  <strong>雲端失敗時改用本機辨識</strong>
+                  <p class="tts-hint">保留舊版偏好；支援本機語音辨識的 macOS／Chromium 版本會自動使用。</p>
+                </div>
+                <input type="checkbox" id="asr-fallback-local" />
+              </label>
+              <label class="setting-row">
+                <div>
+                  <strong>按住說話</strong>
+                  <p class="tts-hint">開啟後只有按住通話視窗的說話鍵時才送出麥克風音訊。</p>
+                </div>
+                <input type="checkbox" id="asr-push-to-talk" />
               </label>
             </div>
           </div>

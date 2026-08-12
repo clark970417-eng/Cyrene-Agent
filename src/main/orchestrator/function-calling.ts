@@ -17,6 +17,7 @@ import type { AgentLoopSettings } from "./two-phase-fc-loop";
 import { resetReadRefs } from "../skills/skill-tools";
 import { truncateToolResult, compressConversation } from "./context-manager";
 import { resolveTimeoutPolicy } from "../runtime-policy";
+import { recordAgentActivity } from "../agent-activity-store";
 
 const LOG_PREFIX = "[FunctionCalling]";
 const MAX_TOOL_ROUNDS = 20; // 多步任务（写 Excel 多 sheet、生成图片等）可能耗多轮；到顶强制无工具总结兜底
@@ -206,6 +207,7 @@ export async function runFunctionCallingLoop(
 
       const execResults: ToolExecutionResult[] = [];
       for (const tc of chat.toolCalls) {
+        const toolStartedAt = Date.now();
         const tool = toolRegistry.getById(tc.name);
 
         let args: Record<string, unknown> = {};
@@ -256,6 +258,22 @@ export async function runFunctionCallingLoop(
             }
           }
         }
+
+        recordAgentActivity({
+          kind: output.startsWith("[已拒绝]") ? "permission" : "tool",
+          name: tc.name,
+          status: output.startsWith("[已拒绝]")
+            ? "denied"
+            : output.startsWith("[错误]") || output.startsWith("[工具执行失败]")
+              ? "failed"
+              : "success",
+          durationMs: Date.now() - toolStartedAt,
+          args,
+          result: output,
+          ...(output.startsWith("[错误]") || output.startsWith("[工具执行失败]")
+            ? { error: output }
+            : {}),
+        });
 
         allToolResults.push({ toolId: tc.name, args, output, status, ...(errorCode ? { errorCode } : {}) });
         // execResults 进 conversation，截断防单条大结果爆窗

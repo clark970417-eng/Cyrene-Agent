@@ -12,6 +12,15 @@ export type CloudStandbyStatus = {
   heartbeatAge: number | null;
 };
 
+export function isCloudStandbyConfigured(config: DiscordChannelConfig): boolean {
+  return Boolean(
+    config.cloudStandbyEnabled
+    && config.cloudStandbyHost?.trim()
+    && config.cloudStandbyUser?.trim()
+    && config.cloudStandbyKeyPath?.trim(),
+  );
+}
+
 export function cloudStandbySshArgs(config: DiscordChannelConfig, action: CloudStandbyAction): string[] {
   const host = config.cloudStandbyHost?.trim();
   const user = config.cloudStandbyUser?.trim();

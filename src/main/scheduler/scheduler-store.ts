@@ -88,6 +88,10 @@ function normalizeLoadedTask(raw: unknown): ScheduledTask | null {
     lastFiredAt: typeof task.lastFiredAt === "string" ? task.lastFiredAt : undefined,
     toolMode: normalizeToolMode(task.toolMode),
     allowedToolIds: uniq(Array.isArray(task.allowedToolIds) ? task.allowedToolIds : []),
+    managedBy: task.managedBy === "daily-ritual" ? "daily-ritual" : undefined,
+    ritualId: ["morning", "afternoon", "evening"].includes(String(task.ritualId))
+      ? task.ritualId
+      : undefined,
     createdAt: typeof task.createdAt === "string" ? task.createdAt : new Date(0).toISOString(),
     updatedAt: typeof task.updatedAt === "string" ? task.updatedAt : new Date(0).toISOString(),
   };
@@ -153,6 +157,8 @@ export function createSchedulerStore(deps: StoreDeps) {
       nextFireAt: next ? next.toISOString() : null,
       toolMode: normalizeToolMode(input.toolMode),
       allowedToolIds: uniq(input.allowedToolIds ?? []),
+      managedBy: input.managedBy,
+      ritualId: input.ritualId,
       createdAt: now.toISOString(),
       updatedAt: now.toISOString(),
     };

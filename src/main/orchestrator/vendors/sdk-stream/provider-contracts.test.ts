@@ -92,18 +92,13 @@ describe("built-in provider SDK stream contracts", () => {
     expect(deltas).toContainEqual({ type: "finish", reason: "tool_use" });
   });
 
-  it("honors explicit Anthropic transport for MiniMax and MiMo without changing their default", () => {
+  it("honors explicit Anthropic transport for MiniMax without changing its default", () => {
     const miniMax = PROVIDER_CAPABILITIES.find((capability) => capability.id === "minimax")!;
-    const mimo = PROVIDER_CAPABILITIES.find((capability) => capability.id === "mimo")!;
     const miniMaxConfig = { ...configFor(miniMax, "anthropic"), baseUrl: "https://api.minimaxi.com/anthropic" };
-    const mimoConfig = { ...configFor(mimo, "anthropic"), baseUrl: "https://api.xiaomimimo.com/anthropic" };
 
     expect(getAdapterForConfig(miniMaxConfig).transport).toBe("anthropic");
-    expect(getAdapterForConfig(mimoConfig).transport).toBe("anthropic");
     expect(deriveAnthropicClientConfig("https://api.minimaxi.com/anthropic/v1/messages", "key", "x-api-key"))
       .toMatchObject({ apiKey: "key", maxRetries: 0 });
-    expect(deriveAnthropicClientConfig("https://api.xiaomimimo.com/anthropic/v1/messages", "key", "bearer"))
-      .toMatchObject({ authToken: "key", maxRetries: 0 });
     expect(deriveOpenAIClientConfig("https://api.minimaxi.com/v1/chat/completions", "key"))
       .toMatchObject({ baseURL: "https://api.minimaxi.com/v1", maxRetries: 0 });
   });

@@ -24,13 +24,19 @@ import { normalizeWindowVisibilitySettings } from "../window-visibility-settings
 import { normalizeCitaSettings } from "../cita/settings";
 import { getGeneralSettingsPath } from "../settings-store";
 import type { GeneralSettings } from "./general-settings";
+import { protectSecrets, revealSecrets } from "../security/secret-vault";
 
 const DEFAULT_GENERAL_SETTINGS: GeneralSettings = {
   citaEnabled: false,
   citaSemanticEngine: "remote",
   chatSocialContextEnabled: false,
+  musicEnabled: false,
+  musicVolume: 60,
+  soundEnabled: true,
+  soundVolume: 70,
   petAlwaysOnTop: true,
   petVisible: true,
+  petChatInputEnabled: false,
   petZoom: 1,
   sidebarVisible: true,
   tasksVisible: true,
@@ -100,6 +106,23 @@ const DEFAULT_GENERAL_SETTINGS: GeneralSettings = {
   asrVadSilenceMs: 1000,
   asrVadThreshold: 0.01,
   asrShowTranscript: false,
+  asrFallbackToLocal: true,
+  asrPushToTalk: false,
+  openerMode: "off",
+  openerQuietStart: "23:00",
+  openerQuietEnd: "07:00",
+  openerDailyLimit: 4,
+  openerRoutineEnabled: true,
+  openerBreaksEnabled: true,
+  openerWeatherEnabled: true,
+  dailyRitualEnabled: false,
+  dailyRitualVoice: true,
+  dailyRitualMorningEnabled: true,
+  dailyRitualMorningTime: "08:00",
+  dailyRitualAfternoonEnabled: true,
+  dailyRitualAfternoonTime: "15:00",
+  dailyRitualEveningEnabled: true,
+  dailyRitualEveningTime: "22:30",
   screenshotHotkey: "Alt+Shift+S",
   chatLineHeight: 1.75,
   assistantBubbleEnabled: true,
@@ -142,6 +165,8 @@ export function normalizeGeneralSettings(
     const num = typeof value === "number" ? value : Number(value);
     return Number.isFinite(num) ? Math.max(1000, Math.min(120000, Math.round(num))) : fallback;
   };
+  const normalizeTime = (value: unknown, fallback: string) =>
+    typeof value === "string" && /^([01]\d|2[0-3]):[0-5]\d$/.test(value) ? value : fallback;
   // Keep fields written by older/custom builds even when this version does not
   // expose them yet.  Without this compatibility layer, opening Settings and
   // saving a single value would silently erase user-added configuration.
@@ -150,12 +175,19 @@ export function normalizeGeneralSettings(
     citaEnabled: cita.enabled,
     citaSemanticEngine: cita.semanticEngine,
     chatSocialContextEnabled: normalizeChatSocialContextEnabled(input?.chatSocialContextEnabled),
+    musicEnabled: Boolean(input?.musicEnabled),
+    musicVolume: clamp(input?.musicVolume, DEFAULT_GENERAL_SETTINGS.musicVolume),
+    soundEnabled: input?.soundEnabled === undefined ? true : Boolean(input.soundEnabled),
+    soundVolume: clamp(input?.soundVolume, DEFAULT_GENERAL_SETTINGS.soundVolume),
     petAlwaysOnTop: input?.petAlwaysOnTop === undefined
       ? DEFAULT_GENERAL_SETTINGS.petAlwaysOnTop
       : Boolean(input.petAlwaysOnTop),
     petVisible: input?.petVisible === undefined
       ? DEFAULT_GENERAL_SETTINGS.petVisible
       : Boolean(input.petVisible),
+    petChatInputEnabled: input?.petChatInputEnabled === undefined
+      ? DEFAULT_GENERAL_SETTINGS.petChatInputEnabled
+      : Boolean(input.petChatInputEnabled),
     petZoom: typeof input?.petZoom === "number"
       ? Math.max(0.5, Math.min(2, input.petZoom))
       : DEFAULT_GENERAL_SETTINGS.petZoom,
@@ -240,6 +272,27 @@ export function normalizeGeneralSettings(
       ? Math.max(0.001, Math.min(0.5, Number(input.asrVadThreshold)))
       : DEFAULT_GENERAL_SETTINGS.asrVadThreshold,
     asrShowTranscript: Boolean(input?.asrShowTranscript),
+    asrFallbackToLocal: input?.asrFallbackToLocal === undefined ? true : Boolean(input.asrFallbackToLocal),
+    asrPushToTalk: Boolean(input?.asrPushToTalk),
+    openerMode: ["off", "quiet", "normal", "lively"].includes(String(input?.openerMode))
+      ? input!.openerMode as GeneralSettings["openerMode"]
+      : DEFAULT_GENERAL_SETTINGS.openerMode,
+    openerQuietStart: normalizeTime(input?.openerQuietStart, DEFAULT_GENERAL_SETTINGS.openerQuietStart),
+    openerQuietEnd: normalizeTime(input?.openerQuietEnd, DEFAULT_GENERAL_SETTINGS.openerQuietEnd),
+    openerDailyLimit: typeof input?.openerDailyLimit === "number"
+      ? Math.max(1, Math.min(12, Math.round(input.openerDailyLimit)))
+      : DEFAULT_GENERAL_SETTINGS.openerDailyLimit,
+    openerRoutineEnabled: input?.openerRoutineEnabled === undefined ? true : Boolean(input.openerRoutineEnabled),
+    openerBreaksEnabled: input?.openerBreaksEnabled === undefined ? true : Boolean(input.openerBreaksEnabled),
+    openerWeatherEnabled: input?.openerWeatherEnabled === undefined ? true : Boolean(input.openerWeatherEnabled),
+    dailyRitualEnabled: Boolean(input?.dailyRitualEnabled),
+    dailyRitualVoice: input?.dailyRitualVoice === undefined ? true : Boolean(input.dailyRitualVoice),
+    dailyRitualMorningEnabled: input?.dailyRitualMorningEnabled === undefined ? true : Boolean(input.dailyRitualMorningEnabled),
+    dailyRitualMorningTime: normalizeTime(input?.dailyRitualMorningTime, DEFAULT_GENERAL_SETTINGS.dailyRitualMorningTime),
+    dailyRitualAfternoonEnabled: input?.dailyRitualAfternoonEnabled === undefined ? true : Boolean(input.dailyRitualAfternoonEnabled),
+    dailyRitualAfternoonTime: normalizeTime(input?.dailyRitualAfternoonTime, DEFAULT_GENERAL_SETTINGS.dailyRitualAfternoonTime),
+    dailyRitualEveningEnabled: input?.dailyRitualEveningEnabled === undefined ? true : Boolean(input.dailyRitualEveningEnabled),
+    dailyRitualEveningTime: normalizeTime(input?.dailyRitualEveningTime, DEFAULT_GENERAL_SETTINGS.dailyRitualEveningTime),
     screenshotHotkey: typeof input?.screenshotHotkey === "string" && input.screenshotHotkey.trim()
       ? input.screenshotHotkey.trim()
       : DEFAULT_GENERAL_SETTINGS.screenshotHotkey,
@@ -277,9 +330,20 @@ function loadGeneralSettings0(): GeneralSettings {
   try {
     const filePath = getGeneralSettingsPath();
     if (!fs.existsSync(filePath)) return { ...DEFAULT_GENERAL_SETTINGS };
-    return normalizeGeneralSettings(
-      JSON.parse(fs.readFileSync(filePath, "utf8")) as Partial<GeneralSettings>,
-    );
+    const parsed = revealSecrets(JSON.parse(fs.readFileSync(filePath, "utf8"))) as Partial<GeneralSettings>;
+    if (!parsed.legacySettingsMigrationVersion) {
+      // 舊版的主動陪伴使用 openerMode；新版曾另外寫入預設 off，導致原本的
+      // lively/normal/quiet 看似遺失。只遷移一次，之後尊重新版開關。
+      if (parsed.openerMode && parsed.openerMode !== "off" && parsed.proactiveChatMode === "off") {
+        parsed.proactiveChatMode = "on";
+      }
+      parsed.legacySettingsMigrationVersion = 1;
+      fs.writeFileSync(filePath, JSON.stringify(protectSecrets(parsed), null, 2), {
+        encoding: "utf8",
+        mode: 0o600,
+      });
+    }
+    return normalizeGeneralSettings(parsed);
   } catch (err) {
     console.error("[Cyrene] load general settings failed:", err);
     return { ...DEFAULT_GENERAL_SETTINGS };
@@ -295,7 +359,10 @@ export function saveGeneralSettings(partial: Partial<GeneralSettings>): GeneralS
   const before = loadGeneralSettings();
   const normalized = normalizeGeneralSettings({ ...before, ...partial });
   const filePath = getGeneralSettingsPath();
-  fs.writeFileSync(filePath, JSON.stringify(normalized, null, 2));
+  fs.writeFileSync(filePath, JSON.stringify(protectSecrets(normalized), null, 2), {
+    encoding: "utf8",
+    mode: 0o600,
+  });
   generalSettingsCache = normalized;
   notifyGeneralSettingsChanged(before, normalized);
   return normalized;

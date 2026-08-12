@@ -11,3 +11,5 @@ export const asrVadSilenceInput = document.getElementById("asr-vad-silence") as 
 export const asrVadThresholdInput = document.getElementById("asr-vad-threshold") as HTMLInputElement | null;
 export const asrVadThresholdValue = document.getElementById("asr-vad-threshold-value");
 export const asrShowTranscriptCheckbox = document.getElementById("asr-show-transcript") as HTMLInputElement | null;
+export const asrFallbackLocalCheckbox = document.getElementById("asr-fallback-local") as HTMLInputElement | null;
+export const asrPushToTalkCheckbox = document.getElementById("asr-push-to-talk") as HTMLInputElement | null;

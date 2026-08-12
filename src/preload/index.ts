@@ -247,6 +247,7 @@ contextBridge.exposeInMainWorld("workspace", workspaceApi);
 const callApi = {
   start: () => ipcRenderer.send(IPC.CALL_START),
   sendAudioFrame: (frame: ArrayBuffer) => ipcRenderer.send(IPC.CALL_AUDIO_FRAME, frame),
+  sendScreenFrame: (dataUrl: string | null) => ipcRenderer.send(IPC.CALL_SCREEN_FRAME, dataUrl),
   turnEnd: () => ipcRenderer.send(IPC.CALL_TURN_END),
   ttsDone: () => ipcRenderer.send(IPC.CALL_TTS_DONE),
   stop: () => ipcRenderer.send(IPC.CALL_STOP),
@@ -362,6 +363,13 @@ const settingsApi = {
   previewRuntimeSync: (value: "off" | "local" | "llm") => ipcRenderer.send(IPC.SETTINGS_PREVIEW_RUNTIME_SYNC, value),
   openStickerManager: () => ipcRenderer.invoke(IPC.SETTINGS_OPEN_STICKER_MANAGER),
   openCustomStylePrompt: () => ipcRenderer.invoke(IPC.SETTINGS_OPEN_CUSTOM_STYLE_PROMPT),
+  securityGetStatus: () => ipcRenderer.invoke(IPC.SECURITY_GET_STATUS),
+  backupGetConfig: () => ipcRenderer.invoke(IPC.BACKUP_GET_CONFIG),
+  backupSaveConfig: (patch: { autoEnabled?: boolean; retentionDays?: 7 | 30 }) => ipcRenderer.invoke(IPC.BACKUP_SAVE_CONFIG, patch),
+  backupCreate: (categories: string[]) => ipcRenderer.invoke(IPC.BACKUP_CREATE, categories),
+  backupPickInspect: () => ipcRenderer.invoke(IPC.BACKUP_PICK_INSPECT),
+  backupRestore: (payload: { filePath: string; categories: string[] }) => ipcRenderer.invoke(IPC.BACKUP_RESTORE, payload),
+  securityRestartApp: () => ipcRenderer.send(IPC.SECURITY_RESTART_APP),
   stickerPickFile: () => ipcRenderer.invoke(IPC.STICKERS_PICK_FILE),
   stickerAdd: (payload: { sourcePath: string; id: string; description: string; phrases: string[] }) => ipcRenderer.invoke(IPC.STICKERS_ADD, payload),
   getEmbeddingStatus: () => ipcRenderer.invoke(IPC.EMBEDDING_GET_STATUS),
@@ -415,6 +423,16 @@ const settingsApi = {
   // Phase 3.4：消息日志
   channelsLogGet: (limit?: number) => ipcRenderer.invoke(IPC.CHANNELS_LOG_GET, limit ?? 100),
   channelsLogClear: () => ipcRenderer.invoke(IPC.CHANNELS_LOG_CLEAR),
+  xNotificationsGetConfig: () => ipcRenderer.invoke(IPC.X_NOTIFICATIONS_GET_CONFIG),
+  xNotificationsSaveConfig: (config: unknown) => ipcRenderer.invoke(IPC.X_NOTIFICATIONS_SAVE_CONFIG, config),
+  xNotificationsCheckNow: () => ipcRenderer.invoke(IPC.X_NOTIFICATIONS_CHECK_NOW),
+  xNotificationsTestPost: (username: string, category: string) => ipcRenderer.invoke(IPC.X_NOTIFICATIONS_TEST_POST, { username, category }),
+  xNotificationsTestAll: () => ipcRenderer.invoke(IPC.X_NOTIFICATIONS_TEST_ALL),
+  anilistNotificationsGetConfig: () => ipcRenderer.invoke(IPC.ANILIST_NOTIFICATIONS_GET_CONFIG),
+  anilistNotificationsSaveConfig: (config: unknown) => ipcRenderer.invoke(IPC.ANILIST_NOTIFICATIONS_SAVE_CONFIG, config),
+  anilistNotificationsVerifyAccount: (username?: string, token?: string) => ipcRenderer.invoke(IPC.ANILIST_NOTIFICATIONS_VERIFY_ACCOUNT, { username, token }),
+  anilistNotificationsCheckNow: () => ipcRenderer.invoke(IPC.ANILIST_NOTIFICATIONS_CHECK_NOW),
+  anilistNotificationsTestPost: (category?: string) => ipcRenderer.invoke(IPC.ANILIST_NOTIFICATIONS_TEST_POST, { category }),
   onChannelsInstallProgress: (callback: (p: { channel: string; phase: string; pct: number }) => void) => {
     const listener = (_e: unknown, progress: { channel: string; phase: string; pct: number }) => callback(progress);
     ipcRenderer.on(IPC.CHANNELS_INSTALL_PROGRESS, listener);
@@ -526,6 +544,8 @@ const memoryPanelApi = {
   deleteImportedDoc: (importId: string, fileName?: string) => ipcRenderer.invoke(IPC.MEMORY_PANEL_DELETE_IMPORTED_DOC, { importId, fileName }),
   saveL0: (patch: Record<string, unknown>) => ipcRenderer.invoke(IPC.MEMORY_PANEL_SAVE_L0, patch),
   saveL1: (patch: Record<string, unknown>) => ipcRenderer.invoke(IPC.MEMORY_PANEL_SAVE_L1, patch),
+  pinL2: (id: string, pinned: boolean) => ipcRenderer.invoke(IPC.MEMORY_PANEL_PIN_L2, { id, pinned }),
+  deleteL2: (id: string) => ipcRenderer.invoke(IPC.MEMORY_PANEL_DELETE_L2, id),
   exportToObsidianVault: () => ipcRenderer.invoke(IPC.MEMORY_EXPORT_OBSIDIAN_VAULT),
   bindVault: () => ipcRenderer.invoke(IPC.OBSIDIAN_VAULT_BIND),
   unbindVault: () => ipcRenderer.invoke(IPC.OBSIDIAN_VAULT_UNBIND),
@@ -689,6 +709,13 @@ const callUsageApi = {
   get: (days: number) => ipcRenderer.invoke(IPC.CALL_USAGE_GET, days),
 };
 contextBridge.exposeInMainWorld("callUsage", callUsageApi);
+
+const agentActivityApi = {
+  get: (days: number) => ipcRenderer.invoke(IPC.AGENT_ACTIVITY_GET, days),
+  exportDiagnostic: () => ipcRenderer.invoke(IPC.AGENT_DIAGNOSTIC_EXPORT),
+  testLocalAsr: (payload: { pcmBase64: string; language: string }) => ipcRenderer.invoke(IPC.ASR_TEST_LOCAL, payload),
+};
+contextBridge.exposeInMainWorld("agentActivity", agentActivityApi);
 
 // TTS 语音合成（设置中心 TTS 面板 + 聊天窗口朗读用）
 const ttsApi = {

@@ -26,17 +26,46 @@ function renderL2List(query = ""): void {
       })
     : list;
 
-  renderInfoList(
-    memoryL2List,
-    filtered.map((item) => ({
-      title: item.content,
-      body: item.triggerText ? `触发片段：${item.triggerText}` : "无触发片段",
-      meta: `状态：${item.status} · 权重：${item.weight.toFixed(1)} · 创建于：${formatDateTime(item.createdAt)}`,
-    })),
-    normalized ? "没有匹配的事件片段" : "暂无事件片段",
-    normalized ? "换个关键词试试" : "聊天后昔涟会自动提炼重要信息",
-  );
+  if (!memoryL2List) return;
+  if (!filtered.length) {
+    renderEmptyState(
+      memoryL2List,
+      normalized ? "沒有符合的事件片段" : "暫無事件片段",
+      normalized ? "換個關鍵詞試試" : "聊天後昔漣會自動提煉重要資訊",
+    );
+    return;
+  }
+  memoryL2List.innerHTML = filtered.map((item) => [
+    '<article class="memory-record memory-record--doc">',
+    '  <div class="memory-record__main">',
+    `    <h3 class="memory-record__title">${item.isPinned ? "📌 " : ""}${escapeHtml(item.content)}</h3>`,
+    `    <p class="memory-record__body">${escapeHtml(item.triggerText ? `觸發片段：${item.triggerText}` : "無觸發片段")}</p>`,
+    `    <p class="memory-record__meta">狀態：${escapeHtml(item.status)} · 權重：${item.weight.toFixed(1)} · 建立於：${escapeHtml(formatDateTime(item.createdAt))}</p>`,
+    "  </div>",
+    `  <button type="button" class="memory-record__delete" data-l2-pin="${escapeHtml(item.id)}" data-pinned="${item.isPinned}" title="${item.isPinned ? "取消釘選" : "釘選記憶"}">${item.isPinned ? "↩" : "📌"}</button>`,
+    `  <button type="button" class="memory-record__delete" data-l2-delete="${escapeHtml(item.id)}" title="刪除此記憶">🗑</button>`,
+    "</article>",
+  ].join("\n")).join("\n");
 }
+
+memoryL2List?.addEventListener("click", (event) => {
+  const target = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-l2-pin], [data-l2-delete]");
+  if (!target) return;
+  const pinId = target.dataset.l2Pin;
+  const deleteId = target.dataset.l2Delete;
+  void (async () => {
+    if (pinId) {
+      await window.memoryPanel?.pinL2(pinId, target.dataset.pinned !== "true");
+    } else if (deleteId) {
+      if (!window.confirm("確定要刪除這段記憶嗎？這個動作無法復原。")) return;
+      await window.memoryPanel?.deleteL2(deleteId);
+    }
+    await loadMemoryPanel();
+  })().catch((error) => {
+    console.error("[settings] update L2 failed", error);
+    window.alert("記憶更新失敗，請查看終端紀錄。");
+  });
+});
 
 export async function loadMemoryPanel(): Promise<void> {
   try {

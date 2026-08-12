@@ -94,20 +94,28 @@ function encryptField(plain: string): string {
 }
 
 /** 解密一個字符串。識別 enc:/obf:/plain: 前綴。空字符串返回空。 */
-function decryptField(stored: string): string {
+const reportedDecryptionFailures = new Set<string>();
+
+function reportDecryptionFailureOnce(fieldName: string, reason: string): void {
+  if (reportedDecryptionFailures.has(fieldName)) return;
+  reportedDecryptionFailures.add(fieldName);
+  console.warn(`[ChannelsSettings] ${fieldName} 無法解密：${reason}。已保留原始密文，等待使用者重新輸入。`);
+}
+
+function decryptField(stored: string, fieldName = "私密設定"): string {
   if (!stored) return "";
   if (stored.startsWith(ENC_PREFIX)) {
     if (!isSafeStorageAvailable()) {
       // safeStorage 不可用時 enc: 解不開 —— 這種情況通常意味著首次加密時也沒用 safeStorage
       // 兜底：直接 base64 解碼（會拿到亂碼但不會讓用戶丟失 secret）
-      console.warn("[ChannelsSettings] safeStorage 不可用, 無法解密 enc: 字段");
+      reportDecryptionFailureOnce(fieldName, "macOS Keychain 暫時不可用");
       return "";
     }
     try {
       const buf = Buffer.from(stored.slice(ENC_PREFIX.length), "base64");
       return safeStorage.decryptString(buf);
-    } catch (err) {
-      console.warn("[ChannelsSettings] safeStorage.decryptString 失敗:", err);
+    } catch {
+      reportDecryptionFailureOnce(fieldName, "密鑰與目前的應用程式身分不相容");
       return "";
     }
   }
@@ -187,6 +195,10 @@ export interface SpotifyConfig {
   clientSecret?: string;
   refreshToken?: string;
   accountName?: string;
+  /** 僅供設定介面顯示；原密文仍保留在磁碟，不會因自動儲存而被清空。 */
+  clientSecretRecoveryRequired?: boolean;
+  /** 僅供設定介面顯示；重新連結 Spotify 後會產生新的 Refresh Token。 */
+  refreshTokenRecoveryRequired?: boolean;
 }
 
 /** Bilibili 使用本機瀏覽器工作階段；不保存帳號、密碼或 Cookie。 */
@@ -321,6 +333,8 @@ function normalize(input: Partial<ChannelsSettings> | null | undefined): Channel
       clientSecret: typeof s?.clientSecret === "string" ? s.clientSecret : undefined,
       refreshToken: typeof s?.refreshToken === "string" ? s.refreshToken : undefined,
       accountName: typeof s?.accountName === "string" ? s.accountName.slice(0, 160) : undefined,
+      clientSecretRecoveryRequired: false,
+      refreshTokenRecoveryRequired: false,
     },
     bilibili: {
       ...(b ?? {}),
@@ -348,14 +362,36 @@ export function loadChannelsSettings(): ChannelsSettings {
     const p = filePath();
     if (!fs.existsSync(p)) return { ...DEFAULT_SETTINGS };
     const raw = JSON.parse(fs.readFileSync(p, "utf8")) as Partial<ChannelsSettings>;
+    let migrated = false;
+    const protectLegacySecret = (value: unknown): string | undefined => {
+      if (typeof value !== "string" || !value) return undefined;
+      if (value.startsWith(ENC_PREFIX) || value.startsWith(OBF_PREFIX) || value.startsWith(PLAIN_PREFIX)) return value;
+      migrated = true;
+      return encryptField(value);
+    };
+    if (raw.feishu?.appSecret) raw.feishu.appSecret = protectLegacySecret(raw.feishu.appSecret);
+    if (raw.discord?.botToken) raw.discord.botToken = protectLegacySecret(raw.discord.botToken);
+    if (raw.spotify?.clientSecret) raw.spotify.clientSecret = protectLegacySecret(raw.spotify.clientSecret);
+    if (raw.spotify?.refreshToken) raw.spotify.refreshToken = protectLegacySecret(raw.spotify.refreshToken);
+    if (migrated) {
+      fs.writeFileSync(p, JSON.stringify(raw, null, 2), { encoding: "utf8", mode: 0o600 });
+    }
     const loaded = normalize(raw);
     // 私密字段解密邊界：磁盤上是 enc: 前綴密文，運行時 API 暴露明文
     if (loaded.feishu.appSecret) {
-      loaded.feishu.appSecret = decryptField(loaded.feishu.appSecret);
+      loaded.feishu.appSecret = decryptField(loaded.feishu.appSecret, "飛書 App Secret");
     }
-    if (loaded.discord.botToken) loaded.discord.botToken = decryptField(loaded.discord.botToken);
-    if (loaded.spotify.clientSecret) loaded.spotify.clientSecret = decryptField(loaded.spotify.clientSecret);
-    if (loaded.spotify.refreshToken) loaded.spotify.refreshToken = decryptField(loaded.spotify.refreshToken);
+    if (loaded.discord.botToken) loaded.discord.botToken = decryptField(loaded.discord.botToken, "Discord Bot Token");
+    if (loaded.spotify.clientSecret) {
+      const decrypted = decryptField(loaded.spotify.clientSecret, "Spotify Client Secret");
+      loaded.spotify.clientSecretRecoveryRequired = !decrypted && Boolean(raw.spotify?.clientSecret);
+      loaded.spotify.clientSecret = decrypted;
+    }
+    if (loaded.spotify.refreshToken) {
+      const decrypted = decryptField(loaded.spotify.refreshToken, "Spotify Refresh Token");
+      loaded.spotify.refreshTokenRecoveryRequired = !decrypted && Boolean(raw.spotify?.refreshToken);
+      loaded.spotify.refreshToken = decrypted;
+    }
     return loaded;
   } catch {
     return { ...DEFAULT_SETTINGS };
@@ -424,7 +460,7 @@ export function saveChannelsSettings(patch: Partial<ChannelsSettings>): Channels
   // 寫盤時 final.appSecret / final.encryptKey 已經是密文形態（帶 enc: 前綴）
   // load 時解密，運行時給上層看到明文。
   fs.mkdirSync(path.dirname(filePath()), { recursive: true });
-  fs.writeFileSync(filePath(), JSON.stringify(final, null, 2), "utf8");
+  fs.writeFileSync(filePath(), JSON.stringify(final, null, 2), { encoding: "utf8", mode: 0o600 });
 
   // 返回給上層時再解密一次，讓 API 用戶拿到明文
   const out: ChannelsSettings = {
@@ -439,8 +475,8 @@ export function saveChannelsSettings(patch: Partial<ChannelsSettings>): Channels
     },
     spotify: {
       ...final.spotify,
-      clientSecret: decryptField(final.spotify.clientSecret ?? ""),
-      refreshToken: decryptField(final.spotify.refreshToken ?? ""),
+      clientSecret: decryptField(final.spotify.clientSecret ?? "", "Spotify Client Secret"),
+      refreshToken: decryptField(final.spotify.refreshToken ?? "", "Spotify Refresh Token"),
     },
   };
   return out;

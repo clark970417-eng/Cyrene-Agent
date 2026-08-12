@@ -11,6 +11,31 @@ export const FOLLOWUP_INTERVAL_MS = 6 * 60 * 60 * 1000;
 export const NIGHT_ACTIVE_IDLE_LIMIT_SEC = 60;
 export const FOLLOWUP_MIN_SCORE = 85;
 
+function minutesOfDay(value: string | undefined, fallback: number): number {
+  const match = /^(\d{2}):(\d{2})$/.exec(value ?? "");
+  if (!match) return fallback;
+  return Number(match[1]) * 60 + Number(match[2]);
+}
+
+function isInConfiguredQuietHours(snapshot: ProactiveRuntimeSnapshot): boolean {
+  const current = snapshot.localHour * 60 + (snapshot.localMinute ?? 0);
+  const start = minutesOfDay(snapshot.quietStart, 23 * 60);
+  const end = minutesOfDay(snapshot.quietEnd, 7 * 60);
+  return start <= end ? current >= start && current < end : current >= start || current < end;
+}
+
+function proactiveIntervalMs(mode: ProactiveRuntimeSnapshot["openerMode"]): number {
+  if (mode === "lively") return 60 * 60 * 1000;
+  if (mode === "quiet") return 4 * 60 * 60 * 1000;
+  return GLOBAL_PROACTIVE_INTERVAL_MS;
+}
+
+function isSameLocalDay(left: number, right: number): boolean {
+  const a = new Date(left);
+  const b = new Date(right);
+  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+}
+
 const allow = (): ProactiveCommitDecision => ({ allowed: true, reason: "allowed" });
 const block = (reason: ProactiveCommitDecision["reason"]): ProactiveCommitDecision => ({ allowed: false, reason });
 
@@ -41,6 +66,9 @@ export function canStartProactiveGeneration(
   if (snapshot.conversationBusy) return block("conversation_busy");
   if (snapshot.generationBusy) return block("generation_busy");
   if (isNight(snapshot.localHour) && snapshot.idleSec >= NIGHT_ACTIVE_IDLE_LIMIT_SEC) return block("night_inactive");
+  if (isInConfiguredQuietHours(snapshot)) return block("configured_quiet_hours");
+  const firedToday = Object.values(state.lastFiredAt).filter((stamp) => typeof stamp === "number" && isSameLocalDay(stamp, snapshot.now)).length;
+  if (firedToday >= Math.max(1, snapshot.dailyLimit ?? 4)) return block("daily_limit");
   if (state.unansweredCount >= 2) return block("unanswered_limit");
 
   if (
@@ -50,7 +78,7 @@ export function canStartProactiveGeneration(
 
   if (
     state.lastProactiveAt !== null &&
-    snapshot.now - state.lastProactiveAt < GLOBAL_PROACTIVE_INTERVAL_MS
+    snapshot.now - state.lastProactiveAt < proactiveIntervalMs(snapshot.openerMode)
   ) return block("global_cooldown");
 
   const sceneLastFiredAt = state.lastFiredAt[candidate.sceneId];

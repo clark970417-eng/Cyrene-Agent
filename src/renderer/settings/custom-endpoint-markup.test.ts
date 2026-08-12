@@ -48,7 +48,6 @@ describe("custom endpoint API settings UI", () => {
     expect(presetsSource).toContain('anthropicBaseUrl: "https://api.minimaxi.com/anthropic"');
     expect(presetsSource).toContain('anthropicBaseUrl: "https://api.deepseek.com/anthropic"');
     expect(presetsSource).toContain('anthropicBaseUrl: "https://open.bigmodel.cn/api/anthropic"');
-    expect(presetsSource).toContain('anthropicBaseUrl: "https://api.xiaomimimo.com/anthropic"');
     expect(source).toContain("该厂商的 A口地址未内置");
   });
 

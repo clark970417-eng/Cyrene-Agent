@@ -65,7 +65,9 @@ The agent supports five focused modes:
 - Text-to-speech through MiniMax, MiMo, GPT-SoVITS, Mossland, or a custom cloud endpoint
 - Streaming playback and automatic reading
 - Natural vocal enhancement for pauses, breathing, laughter, and conversational cadence
-- Real-time speech recognition, voice calls, and VAD silence detection
+- Real-time speech recognition, voice calls, VAD silence detection, and push-to-talk
+- Offline Whisper transcription with automatic fallback when cloud ASR does not return a final result
+- Optional bounded screen sharing during calls; Cyrene invokes vision only when the user refers to visible content
 - Local reference-audio selection for supported voice engines
 
 ### Built-in workspaces
@@ -85,6 +87,17 @@ The agent supports five focused modes:
 - Optional cloud-bot runtime and failover tooling
 - MCP servers over stdio, SSE, and HTTP
 - User-defined Skills and reusable tool instructions
+- X account and AniList airing notifications with per-account routing controls
+
+### Continuity, diagnostics, and recovery
+
+- A stable macOS application identity and `userData` path preserve existing memory, diaries, chats, mobile/channel links, Discord state, model settings, token history, and call duration history across upgrades
+- Startup migration is non-destructive and keeps recovery copies before taking over legacy local data
+- L0/L1/L2 memory inspection includes search, pinning, and user-controlled deletion
+- Agent activity records show tool status, duration, and bounded redacted arguments without exposing credentials
+- Exportable `.cydiag` diagnostic bundles redact API keys, tokens, passwords, and secrets
+- Portable backups preserve current-device credentials instead of replacing them with empty backup values
+- AniList access tokens and supported integration credentials use the operating system credential vault where available
 
 ## Screenshots
 
@@ -194,6 +207,8 @@ Open **Settings** in the application and configure:
 
 Most settings are stored under Electron's platform-specific `userData` directory and are applied without restarting the app.
 
+On macOS, source and Dock launches intentionally use `~/Library/Application Support/live2d-cyrene`. Do not rename or manually split this directory: it is the compatibility anchor for earlier memory, chat, Discord, token-usage, call-usage, diary, and mobile-integration data.
+
 ## Development
 
 Common commands:
@@ -209,10 +224,11 @@ npm run dev                 # Start Vite and Electron in development mode
 
 The current unified macOS integration was verified with:
 
-- 282 passing test files
-- 2,580 passing tests
+- 295 passing test files (plus one intentionally skipped file)
+- 2,623 passing tests (plus ten intentionally skipped tests)
 - Successful main, preload, and renderer builds
-- Browser checks for dark/light switching and embedded workspace synchronization
+- A source-built macOS Electron launch using the stable legacy-compatible data directory
+- Runtime confirmation that the existing Discord gateway identity and saved playlist library reconnect
 
 > [!TIP]
 > The active unified macOS implementation is published on the `codex/unified-upstream-integration` branch. The existing `main` history is retained to protect earlier cloud, Discord, WavesUID, and documentation work while the two histories are consolidated safely.
@@ -222,8 +238,7 @@ The current unified macOS integration was verified with:
 Cyrene Agent is local-first, but external model providers and optional integrations receive the data required to perform their configured tasks.
 
 - Never commit or share the Electron `userData` directory, local settings, tokens, cookies, logs, or private memory files.
-- API keys for some services may be stored as local configuration files.
-- Supported credentials use Electron `safeStorage` where implemented: DPAPI on Windows, Keychain on macOS, and libsecret on Linux.
+- Supported credentials use Electron `safeStorage` where implemented: DPAPI on Windows, Keychain on macOS, and libsecret on Linux. Legacy plaintext values remain readable so users can migrate without losing access.
 - Review the selected tool permission level before enabling command execution or external services.
 - Use only trusted MCP servers, Skills, model endpoints, and code directories.
 
@@ -231,7 +246,7 @@ This is experimental companion and agent software. Keep backups of important not
 
 ## Project Status
 
-Core desktop conversation, memory, agent execution, voice configuration, themes, notebook, exam mode, games, and primary tools are implemented. RAG, third-party MCP compatibility, proactive delivery, cloud failover, and some messaging integrations remain experimental and may require additional setup.
+Core desktop conversation, memory, agent execution, voice configuration and fallback, themes, notebook, exam mode, games, notifications, activity diagnostics, backups, and primary tools are implemented. RAG, third-party MCP compatibility, proactive delivery, cloud failover, and some messaging integrations remain experimental and may require additional setup.
 
 Contributions, reproducible bug reports, and platform-specific verification are welcome.
 

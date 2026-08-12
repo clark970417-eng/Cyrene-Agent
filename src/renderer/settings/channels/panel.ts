@@ -163,7 +163,17 @@ export async function loadChannelsPanel(): Promise<void> {
     if (channelsDiscordRequireMentionEl) channelsDiscordRequireMentionEl.checked = cfg.discord?.requireMention !== false;
     if (channelsDiscordVoiceEnabledEl) channelsDiscordVoiceEnabledEl.checked = cfg.discord?.voiceEnabled !== false;
     if (channelsSpotifyClientIdEl) channelsSpotifyClientIdEl.value = cfg.spotify?.clientId ?? "";
-    if (channelsSpotifyClientSecretEl) channelsSpotifyClientSecretEl.placeholder = cfg.spotify?.clientSecret ? "已加密儲存（輸入新值會覆蓋）" : "Spotify Developer Dashboard Client Secret";
+    if (channelsSpotifyClientSecretEl) {
+      channelsSpotifyClientSecretEl.placeholder = cfg.spotify?.clientSecretRecoveryRequired
+        ? "舊密鑰需重新輸入一次"
+        : cfg.spotify?.clientSecret
+          ? "已加密儲存（輸入新值會覆蓋）"
+          : "Spotify Developer Dashboard Client Secret";
+    }
+    if (cfg.spotify?.clientSecretRecoveryRequired && channelsSpotifyFeedbackEl) {
+      channelsSpotifyFeedbackEl.textContent = "舊版 Spotify Client Secret 無法由目前的 macOS Keychain 解密。原始設定已保留，請重新輸入密鑰並連結一次；Discord 與其他設定不受影響。";
+      channelsSpotifyFeedbackEl.classList.add("is-error");
+    }
 
     // 拉一次渠道状态
     const status = (await window.settings.channelsGetStatus()) as Record<string, { phase: string; message?: string }>;
@@ -175,6 +185,8 @@ export async function loadChannelsPanel(): Promise<void> {
     void refreshSpotify();
     void refreshBilibili();
     void refreshCloudStatus();
+    void refreshDiscordMusic();
+    void loadLegacyNotifications();
     // Phase 3.4：拉一次消息日志
     void refreshChannelsLog();
   } catch (err) {
@@ -388,6 +400,113 @@ export async function loadChannelsPanel(): Promise<void> {
   channelsCloudRemoteBtn?.addEventListener("click", () => cloudControl("cloud"));
   channelsCloudRestartBtn?.addEventListener("click", () => cloudControl("restart-cloud"));
   channelsCloudRefreshBtn?.addEventListener("click", () => void refreshCloudStatus());
+
+  // ===== 舊版 Discord 音樂桌面控制 =====
+  const discordMusicStatusEl = document.getElementById("channels-discord-music-status");
+  const discordMusicToggleBtn = document.getElementById("channels-discord-music-toggle");
+  const discordMusicVolumeEl = document.getElementById("channels-discord-music-volume") as HTMLInputElement | null;
+  const discordMusicVolumeValueEl = document.getElementById("channels-discord-music-volume-value");
+  const discordMusicFeedbackEl = document.getElementById("channels-discord-music-feedback");
+  const discordMusicLibraryEl = document.getElementById("channels-discord-music-library");
+  async function refreshDiscordMusic(): Promise<void> {
+    const [state, history, favoritesRaw] = await Promise.all([
+      window.settings.channelsDiscordGetMusicState(),
+      window.settings.channelsDiscordGetMusicHistory(),
+      window.settings.channelsDiscordGetMusicFavorites(),
+    ]);
+    if (discordMusicStatusEl) discordMusicStatusEl.textContent = state.current?.title ?? (state.active ? "播放中" : "尚未播放");
+    if (discordMusicToggleBtn) discordMusicToggleBtn.textContent = state.active && !state.paused ? "暫停" : "播放";
+    if (discordMusicVolumeEl && document.activeElement !== discordMusicVolumeEl) discordMusicVolumeEl.value = String(state.volume ?? 100);
+    if (discordMusicVolumeValueEl) discordMusicVolumeValueEl.textContent = `${state.volume ?? 100}%`;
+    const favorites = Array.isArray(favoritesRaw) ? favoritesRaw : favoritesRaw.tracks ?? [];
+    if (discordMusicLibraryEl) {
+      const rows = [
+        ...favorites.slice(-8).reverse().map((item) => `<div class="channels-log__entry"><div class="channels-log__meta">最愛</div><div class="channels-log__text">${escapeText(item.title ?? item.url ?? "未命名曲目")}</div></div>`),
+        ...history.slice(-8).reverse().map((item) => `<div class="channels-log__entry"><div class="channels-log__meta">播放紀錄</div><div class="channels-log__text">${escapeText(item.title ?? item.url ?? "未命名曲目")}</div></div>`),
+      ];
+      discordMusicLibraryEl.innerHTML = rows.join("") || '<p class="empty-hint">目前沒有播放紀錄或最愛。</p>';
+    }
+  }
+  function escapeText(value: string): string {
+    return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  }
+  const controlDiscordMusic = async (command: string, value?: number): Promise<void> => {
+    const result = await window.settings.channelsDiscordControlMusic({ command, value });
+    setFeedback(discordMusicFeedbackEl, result.ok ? "ok" : "err", result.message ?? (result.ok ? "已更新播放狀態。" : "控制失敗"));
+    await refreshDiscordMusic();
+  };
+  document.querySelectorAll<HTMLElement>("[data-discord-music-command]").forEach((button) => {
+    button.addEventListener("click", () => void controlDiscordMusic(button.dataset.discordMusicCommand ?? ""));
+  });
+  discordMusicToggleBtn?.addEventListener("click", () => void (async () => {
+    const state = await window.settings.channelsDiscordGetMusicState();
+    await controlDiscordMusic(state.active && !state.paused ? "pause" : "resume");
+  })());
+  discordMusicVolumeEl?.addEventListener("input", () => {
+    if (discordMusicVolumeValueEl) discordMusicVolumeValueEl.textContent = `${discordMusicVolumeEl.value}%`;
+  });
+  discordMusicVolumeEl?.addEventListener("change", () => void controlDiscordMusic("volume", Number(discordMusicVolumeEl.value)));
+
+  // ===== 舊版 X／AniList 通知設定 =====
+  const xEnabledEl = document.getElementById("x-notifications-enabled") as HTMLInputElement | null;
+  const xIntervalEl = document.getElementById("x-notifications-interval") as HTMLInputElement | null;
+  const xCategoryEl = document.getElementById("x-notifications-category-name") as HTMLInputElement | null;
+  const xAccountsEl = document.getElementById("x-notifications-accounts") as HTMLTextAreaElement | null;
+  const xFeedbackEl = document.getElementById("x-notifications-feedback");
+  const aniEnabledEl = document.getElementById("anilist-notifications-enabled") as HTMLInputElement | null;
+  const aniUsernameEl = document.getElementById("anilist-notifications-username") as HTMLInputElement | null;
+  const aniTokenEl = document.getElementById("anilist-notifications-token") as HTMLInputElement | null;
+  const aniFilterEl = document.getElementById("anilist-notifications-filter-mode") as HTMLSelectElement | null;
+  const aniIntervalEl = document.getElementById("anilist-notifications-interval") as HTMLInputElement | null;
+  const aniFeedbackEl = document.getElementById("anilist-notifications-feedback");
+  let loadedXAccounts: Awaited<ReturnType<typeof window.settings.xNotificationsGetConfig>>["accounts"] = [];
+  let loadedAniToken = "";
+  async function loadLegacyNotifications(): Promise<void> {
+    const [xConfig, aniConfig] = await Promise.all([
+      window.settings.xNotificationsGetConfig(),
+      window.settings.anilistNotificationsGetConfig(),
+    ]);
+    loadedXAccounts = xConfig.accounts;
+    if (xEnabledEl) xEnabledEl.checked = xConfig.enabled;
+    if (xIntervalEl) xIntervalEl.value = String(xConfig.checkIntervalMinutes);
+    if (xCategoryEl) xCategoryEl.value = xConfig.announcementCategoryName ?? "announcements";
+    if (xAccountsEl) xAccountsEl.value = xConfig.accounts.map((account) => `${account.username} | ${account.category} | ${account.displayName ?? ""}`).join("\n");
+    loadedAniToken = aniConfig.accessToken ?? "";
+    if (aniEnabledEl) aniEnabledEl.checked = aniConfig.enabled;
+    if (aniUsernameEl) aniUsernameEl.value = aniConfig.username ?? "";
+    if (aniFilterEl) aniFilterEl.value = aniConfig.filterMode;
+    if (aniIntervalEl) aniIntervalEl.value = String(aniConfig.checkIntervalMinutes);
+    if (aniTokenEl) aniTokenEl.placeholder = loadedAniToken ? "已保存（輸入新值會覆蓋）" : "留空會保留原設定";
+  }
+  document.getElementById("x-notifications-save")?.addEventListener("click", () => void (async () => {
+    const previous = new Map(loadedXAccounts.map((account) => [account.username.toLowerCase(), account]));
+    const categories = new Set(["news", "anime", "game", "leak", "general"]);
+    const accounts = (xAccountsEl?.value ?? "").split("\n").map((line, index) => {
+      const [rawUsername, rawCategory, rawDisplayName] = line.split("|").map((part) => part.trim());
+      if (!rawUsername) return null;
+      const username = rawUsername.replace(/^@/, "");
+      const old = previous.get(username.toLowerCase());
+      const category = categories.has(rawCategory) ? rawCategory as "news" | "anime" | "game" | "leak" | "general" : "general";
+      return { ...old, id: old?.id ?? `custom-${index}-${username.toLowerCase()}`, username, category, displayName: rawDisplayName || old?.displayName, enabled: old?.enabled ?? true };
+    }).filter((item): item is NonNullable<typeof item> => item !== null);
+    await window.settings.xNotificationsSaveConfig({ enabled: xEnabledEl?.checked ?? false, checkIntervalMinutes: Number(xIntervalEl?.value) || 5, announcementCategoryName: xCategoryEl?.value.trim() || "announcements", accounts });
+    setFeedback(xFeedbackEl, "ok", "X 通知設定與舊紀錄已儲存。");
+    await loadLegacyNotifications();
+  })().catch((error) => setFeedback(xFeedbackEl, "err", error instanceof Error ? error.message : String(error))));
+  document.getElementById("x-notifications-check-now")?.addEventListener("click", () => void window.settings.xNotificationsCheckNow().then((result) => setFeedback(xFeedbackEl, result.ok ? "ok" : "err", result.ok ? `檢查完成，發送 ${result.postedCount ?? 0} 則。` : result.error ?? "檢查失敗")));
+  document.getElementById("x-notifications-test-all")?.addEventListener("click", () => void window.settings.xNotificationsTestAll().then((result) => setFeedback(xFeedbackEl, result.ok ? "ok" : "err", result.message ?? result.error ?? "測試完成")));
+  document.getElementById("anilist-notifications-save")?.addEventListener("click", () => void (async () => {
+    const username = aniUsernameEl?.value.trim() || undefined;
+    const token = aniTokenEl?.value.trim() || loadedAniToken || undefined;
+    const verify = await window.settings.anilistNotificationsVerifyAccount(username, token);
+    if (!verify.ok) throw new Error(verify.error ?? "AniList 帳號驗證失敗");
+    await window.settings.anilistNotificationsSaveConfig({ enabled: aniEnabledEl?.checked ?? false, username, accessToken: token, filterMode: aniFilterEl?.value ?? "watchlist_only", checkIntervalMinutes: Number(aniIntervalEl?.value) || 10 });
+    if (aniTokenEl) aniTokenEl.value = "";
+    setFeedback(aniFeedbackEl, "ok", `AniList 已儲存並驗證${verify.name ? `：${verify.name}` : ""}。`);
+    await loadLegacyNotifications();
+  })().catch((error) => setFeedback(aniFeedbackEl, "err", error instanceof Error ? error.message : String(error))));
+  document.getElementById("anilist-notifications-check-now")?.addEventListener("click", () => void window.settings.anilistNotificationsCheckNow().then((result) => setFeedback(aniFeedbackEl, result.ok ? "ok" : "err", result.ok ? `檢查完成，發送 ${result.postedCount ?? 0} 則。` : result.error ?? "檢查失敗")));
+  document.getElementById("anilist-notifications-test-post")?.addEventListener("click", () => void window.settings.anilistNotificationsTestPost("anime").then((result) => setFeedback(aniFeedbackEl, result.ok ? "ok" : "err", result.message ?? result.error ?? "測試完成")));
 
   // ===== 微信交互（扫码登录走 iLink HTTP API，详见 src/main/channels/adapters/wechat/） =====
 

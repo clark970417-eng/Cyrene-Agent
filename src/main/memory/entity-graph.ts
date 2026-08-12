@@ -32,7 +32,7 @@ export interface EntityRelation {
   strength: number;          // 提及次数累积
 }
 
-interface EntityGraphData {
+export interface EntityGraphData {
   entities: EntityNode[];
   relations: EntityRelation[];
 }

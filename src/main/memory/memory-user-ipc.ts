@@ -5,7 +5,7 @@ import { IPC } from "../../shared/ipc-channels";
 import { getStickerManagerConfig, setStickerEnabled } from "../orchestrator/sticker-settings";
 import { addUserSticker, deleteUserSticker } from "../sticker-storage";
 import { loadMemoryPanelData } from "../memory/panel";
-import { deleteImportedDoc } from "../rag";
+import { deleteImportedDoc, deleteUserMemoryVectors } from "../rag";
 import { loadUserProfile, saveUserProfile, getAvatarPath } from "../settings-store";
 import { addMcpServer, removeMcpServer, listMcpServers } from "../orchestrator/mcp-manager";
 import { toolRegistry } from "../orchestrator/tool-registry";
@@ -163,6 +163,20 @@ export function registerMemoryUserToolIpc(deps: MemoryUserToolIpcDependencies): 
       }
     }
     await memoryStore.updateL1(patch);
+    return { ok: true };
+  });
+
+  ipcMain.handle(IPC.MEMORY_PANEL_PIN_L2, async (_event, payload: { id: string; pinned: boolean }) => {
+    if (!payload?.id) return { ok: false, error: "缺少記憶 id" };
+    await memoryStore.pinL2(payload.id, Boolean(payload.pinned));
+    return { ok: true };
+  });
+
+  ipcMain.handle(IPC.MEMORY_PANEL_DELETE_L2, async (_event, id: string) => {
+    if (!id) return { ok: false, error: "缺少記憶 id" };
+    const memory = (await memoryStore.getAllL2()).find((item) => item.id === id);
+    if (memory?.ragId) deleteUserMemoryVectors([memory.ragId]);
+    await memoryStore.deleteL2(id);
     return { ok: true };
   });
 

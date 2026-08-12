@@ -1,6 +1,9 @@
-import { BrowserWindow, ipcMain } from "electron";
+import { app, BrowserWindow, dialog, ipcMain } from "electron";
+import * as fs from "node:fs";
+import * as path from "node:path";
+import * as zlib from "node:zlib";
 import { IPC } from "../../shared/ipc-channels";
-import { getUsage } from "../token-usage-store";
+import { getUsage, getUsageByModel } from "../token-usage-store";
 import { getCallUsage } from "../call-usage-store";
 import {
   sidebarWindow,
@@ -8,6 +11,12 @@ import {
   settingsWindow,
 } from "./window-state";
 import type { WindowManager } from "./window-manager";
+import { loadGeneralSettings } from "../settings/settings-facade";
+import { loadModelSettings } from "../settings/model-settings";
+import { getAgentActivities, getAgentActivitySummary } from "../agent-activity-store";
+import { getLLMQueueStatus } from "../llm-queue";
+import { redactSecrets } from "../security/secret-vault";
+import { transcribeOfflineWhisper } from "../asr/offline-whisper-engine";
 
 export interface WindowSystemIpcDependencies {
   get windowManager(): WindowManager | null;
@@ -28,7 +37,10 @@ export function registerWindowSystemIpc(deps: WindowSystemIpcDependencies): void
     deps.windowManager?.setMainWindowTextInputActive(Boolean(active));
   });
 
-  ipcMain.handle(IPC.PET_CHAT_INPUT_VISIBILITY, () => !(deps.windowManager?.isPetDocked() ?? true));
+  ipcMain.handle(IPC.PET_CHAT_INPUT_VISIBILITY, () => {
+    return loadGeneralSettings().petChatInputEnabled === true
+      && !(deps.windowManager?.isPetDocked() ?? true);
+  });
 
   ipcMain.on(IPC.WINDOW_MOVE, (_event, dx: number, dy: number) => {
     deps.windowManager?.moveMainWindowRelative(dx, dy);
@@ -108,6 +120,72 @@ export function registerWindowSystemIpc(deps: WindowSystemIpcDependencies): void
   });
   ipcMain.handle(IPC.CALL_USAGE_GET, (_event, days: number) => {
     return getCallUsage(Math.max(1, Math.min(90, Number(days) || 7)));
+  });
+  ipcMain.handle(IPC.AGENT_ACTIVITY_GET, (_event, days: number) => {
+    const safeDays = Math.max(1, Math.min(90, Number(days) || 7));
+    const memory = process.memoryUsage();
+    return {
+      events: getAgentActivities(200),
+      summary: getAgentActivitySummary(),
+      models: getUsageByModel(safeDays),
+      resources: {
+        rssBytes: memory.rss,
+        heapUsedBytes: memory.heapUsed,
+        heapTotalBytes: memory.heapTotal,
+        queue: getLLMQueueStatus(),
+        activityLimit: 1000,
+        callContextTurnLimit: 24,
+      },
+    };
+  });
+  ipcMain.handle(IPC.AGENT_DIAGNOSTIC_EXPORT, async () => {
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const options: Electron.SaveDialogOptions = {
+      title: "匯出昔漣診斷包",
+      defaultPath: path.join(app.getPath("documents"), `昔漣診斷-${stamp}.cydiag`),
+      filters: [{ name: "昔漣診斷包", extensions: ["cydiag"] }],
+    };
+    const picked = settingsWindow
+      ? await dialog.showSaveDialog(settingsWindow, options)
+      : await dialog.showSaveDialog(options);
+    if (picked.canceled || !picked.filePath) return null;
+    const output = picked.filePath.endsWith(".cydiag") ? picked.filePath : `${picked.filePath}.cydiag`;
+    const payload = {
+      format: "cyrene-diagnostic",
+      version: 1,
+      createdAt: new Date().toISOString(),
+      appVersion: app.getVersion(),
+      platform: {
+        os: process.platform,
+        arch: process.arch,
+        node: process.versions.node,
+        electron: process.versions.electron,
+      },
+      settings: {
+        general: redactSecrets(loadGeneralSettings()),
+        model: redactSecrets(loadModelSettings()),
+      },
+      activities: getAgentActivities(500),
+      activitySummary: getAgentActivitySummary(),
+      tokenUsage: getUsage(30),
+      tokenUsageByModel: getUsageByModel(30),
+      resources: { memory: process.memoryUsage(), queue: getLLMQueueStatus() },
+    };
+    fs.writeFileSync(
+      output,
+      zlib.gzipSync(Buffer.from(JSON.stringify(payload, null, 2))),
+      { mode: 0o600 },
+    );
+    return { filePath: output };
+  });
+  ipcMain.handle(IPC.ASR_TEST_LOCAL, async (_event, payload: { pcmBase64?: string; language?: string }) => {
+    const pcm = Buffer.from(payload?.pcmBase64 ?? "", "base64");
+    if (!pcm.length || pcm.length > 10 * 1024 * 1024) {
+      throw new Error("測試音訊為空或超過 10 MB");
+    }
+    const startedAt = Date.now();
+    const text = await transcribeOfflineWhisper(pcm, payload?.language === "en" ? "en" : "zh");
+    return { text, latencyMs: Date.now() - startedAt };
   });
 
   ipcMain.on(IPC.LIVE2D_SPEECH_PREPARE, () => {

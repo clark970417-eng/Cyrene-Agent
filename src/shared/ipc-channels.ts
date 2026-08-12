@@ -108,6 +108,13 @@ export const IPC = {
   SETTINGS_PREVIEW_RUNTIME_SYNC: "settings:preview-runtime-sync",
   SETTINGS_OPEN_STICKER_MANAGER: "settings:open-sticker-manager",
   SETTINGS_OPEN_CUSTOM_STYLE_PROMPT: "settings:open-custom-style-prompt",
+  SECURITY_GET_STATUS: "security:get-status",
+  BACKUP_GET_CONFIG: "backup:get-config",
+  BACKUP_SAVE_CONFIG: "backup:save-config",
+  BACKUP_CREATE: "backup:create",
+  BACKUP_PICK_INSPECT: "backup:pick-inspect",
+  BACKUP_RESTORE: "backup:restore",
+  SECURITY_RESTART_APP: "security:restart-app",
 
   // chat sessions (multi-conversation history, persisted to userData/cyrene-chats/)
   CHATS_LIST: "chats:list",
@@ -220,6 +227,8 @@ export const IPC = {
   MEMORY_PANEL_DELETE_IMPORTED_DOC: "memory-panel:delete-imported-doc",
   MEMORY_PANEL_SAVE_L0: "memory-panel:save-l0",
   MEMORY_PANEL_SAVE_L1: "memory-panel:save-l1",
+  MEMORY_PANEL_PIN_L2: "memory-panel:pin-l2",
+  MEMORY_PANEL_DELETE_L2: "memory-panel:delete-l2",
   MEMORY_EXPORT_OBSIDIAN_VAULT: "memory:export-obsidian-vault",
   OBSIDIAN_VAULT_BIND: "obsidian-vault:bind",
   OBSIDIAN_VAULT_UNBIND: "obsidian-vault:unbind",
@@ -268,6 +277,9 @@ export const IPC = {
   // token usage statistics
   TOKEN_USAGE_GET: "token-usage:get",
   CALL_USAGE_GET: "call-usage:get",
+  AGENT_ACTIVITY_GET: "agent-activity:get",
+  AGENT_DIAGNOSTIC_EXPORT: "agent-diagnostic:export",
+  ASR_TEST_LOCAL: "asr:test-local",
 
   // TTS 语音合成
   TTS_UPLOAD: "tts:upload",          // 上传音频文件 → file_id
@@ -313,6 +325,7 @@ export const IPC = {
   CALL_OPEN: "call:open",                 // sidebar → main：打开通话窗口
   CALL_START: "call:start",               // renderer → main：开始通话（初始化 ASR）
   CALL_AUDIO_FRAME: "call:audio-frame",    // renderer → main：PCM 音频帧
+  CALL_SCREEN_FRAME: "call:screen-frame",  // renderer → main：分享畫面的最新壓縮影格
   CALL_ASR_RESULT: "call:asr-result",     // main → renderer：ASR 识别结果
   CALL_TURN_END: "call:turn-end",         // renderer → main：VAD 静默，结束本轮
   CALL_TTS_AUDIO: "call:tts-audio",       // main → renderer：TTS 音频
@@ -366,6 +379,18 @@ export const IPC = {
   // Phase 3.4：消息日志
   CHANNELS_LOG_GET: "channels:log:get",
   CHANNELS_LOG_CLEAR: "channels:log:clear",
+
+  // 舊版通知中心：沿用既有設定與已發送紀錄。
+  X_NOTIFICATIONS_GET_CONFIG: "x-notifications:get-config",
+  X_NOTIFICATIONS_SAVE_CONFIG: "x-notifications:save-config",
+  X_NOTIFICATIONS_CHECK_NOW: "x-notifications:check-now",
+  X_NOTIFICATIONS_TEST_POST: "x-notifications:test-post",
+  X_NOTIFICATIONS_TEST_ALL: "x-notifications:test-all",
+  ANILIST_NOTIFICATIONS_GET_CONFIG: "anilist-notifications:get-config",
+  ANILIST_NOTIFICATIONS_SAVE_CONFIG: "anilist-notifications:save-config",
+  ANILIST_NOTIFICATIONS_VERIFY_ACCOUNT: "anilist-notifications:verify-account",
+  ANILIST_NOTIFICATIONS_CHECK_NOW: "anilist-notifications:check-now",
+  ANILIST_NOTIFICATIONS_TEST_POST: "anilist-notifications:test-post",
 
   // Music
   MUSIC_GET_STATUS: "music:get-status",
