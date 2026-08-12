@@ -108,6 +108,10 @@ const config: CloudBotConfig = {
   geminiApiKey: "gemini-key",
   geminiBaseUrl: "https://generativelanguage.googleapis.com/v1beta/openai",
   geminiModel: "gemini-3.5-flash-lite",
+  ttsEnabled: true,
+  ttsModel: "gemini-3.1-flash-tts-preview",
+  ttsVoiceName: "Leda",
+  ttsMaxChars: 900,
   allowedUserIds: new Set(["owner"]),
   allowedGuildIds: new Set(),
   allowedChannelIds: new Set(),
@@ -172,4 +176,3 @@ test("Gemini 設定模型不可用時改用已驗證的 Flash-Lite", async (cont
   assert.equal(reply, "Flash-Lite 正常");
   assert.deepEqual(calls.map((call) => call.model), ["openrouter/free", "gemini-3.5-flash", "gemini-2.5-flash"]);
 });
-

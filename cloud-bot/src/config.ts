@@ -9,6 +9,11 @@ export type CloudBotConfig = {
   geminiApiKey?: string;
   geminiBaseUrl: string;
   geminiModel: string;
+  /** Discord 文字頻道的語音附件備援；沿用既有 Gemini 金鑰。 */
+  ttsEnabled: boolean;
+  ttsModel: string;
+  ttsVoiceName: string;
+  ttsMaxChars: number;
   spotifyClientId?: string;
   spotifyClientSecret?: string;
   spotifyRefreshToken?: string;
@@ -48,6 +53,14 @@ function parseIntInRange(value: string | undefined, fallback: number, min: numbe
   return Number.isFinite(parsed) ? Math.max(min, Math.min(max, parsed)) : fallback;
 }
 
+function parseBoolean(value: string | undefined, fallback: boolean): boolean {
+  const normalized = value?.trim().toLowerCase();
+  if (!normalized) return fallback;
+  if (["1", "true", "yes", "on"].includes(normalized)) return true;
+  if (["0", "false", "no", "off"].includes(normalized)) return false;
+  return fallback;
+}
+
 export function formatCloudActivity(activity: string): string {
   const trimmed = activity.trim();
   if (trimmed.includes("陪") && !trimmed.includes("在家")) {
@@ -69,6 +82,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): CloudBotConfig
     geminiApiKey: env.GEMINI_API_KEY?.trim() || undefined,
     geminiBaseUrl: (env.GEMINI_BASE_URL?.trim() || "https://generativelanguage.googleapis.com/v1beta/openai").replace(/\/+$/, ""),
     geminiModel: env.GEMINI_MODEL?.trim() || "gemini-2.5-flash",
+    ttsEnabled: parseBoolean(env.CLOUD_TTS_ENABLED, true),
+    ttsModel: env.CLOUD_TTS_MODEL?.trim() || "gemini-3.1-flash-tts-preview",
+    ttsVoiceName: env.CLOUD_TTS_VOICE?.trim() || "Leda",
+    ttsMaxChars: parseIntInRange(env.CLOUD_TTS_MAX_CHARS, 900, 80, 1_500),
     spotifyClientId: env.SPOTIFY_CLIENT_ID?.trim() || undefined,
     spotifyClientSecret: env.SPOTIFY_CLIENT_SECRET?.trim() || undefined,
     spotifyRefreshToken: env.SPOTIFY_REFRESH_TOKEN?.trim() || undefined,

@@ -1,5 +1,6 @@
 import {
   ActivityType,
+  AttachmentBuilder,
   Client,
   EmbedBuilder,
   GatewayIntentBits,
@@ -11,7 +12,7 @@ import {
   type Message,
 } from "discord.js";
 import { loadConfig } from "./config.js";
-import { mentionsBot, normalizeInvocation, sessionIdFor, shouldHandleMessage, splitDiscordText } from "./core.js";
+import { mentionsBot, normalizeCompanionAddress, normalizeInvocation, sessionIdFor, shouldHandleMessage, splitDiscordText } from "./core.js";
 import { startHealthServer } from "./health.js";
 import { describeImagesForMemory, generateReply } from "./llm.js";
 import { MemoryStore } from "./memory.js";
@@ -23,6 +24,8 @@ import { MusicUsageStore } from "./music-usage.js";
 import { playOnSpotify } from "./spotify-connect.js";
 import { CloudCheckinStore, isCloudCheckinGreeting } from "./checkin.js";
 import { handleWavesUidInteraction, handleWavesUidMessage, isWavesUidCommand } from "./wavesuid.js";
+import { synthesizeGeminiSpeech } from "./gemini-tts.js";
+import { extractDiscordExactVoiceText, extractDiscordVoiceRequestTopic } from "./text-voice-request.js";
 
 const config = loadConfig();
 const memory = new MemoryStore(config.dataDir, config.historyMessages);
@@ -53,7 +56,29 @@ function enqueue(sessionId: string, task: () => Promise<void>): void {
 }
 
 async function replyToMessage(message: Message, text: string): Promise<void> {
-  for (const chunk of splitDiscordText(text)) await message.reply({ content: chunk, allowedMentions: { repliedUser: false } });
+  for (const chunk of splitDiscordText(normalizeCompanionAddress(text))) {
+    await message.reply({ content: chunk, allowedMentions: { repliedUser: false } });
+  }
+}
+
+async function replyToMessageWithVoice(message: Message, text: string, speechText = text): Promise<void> {
+  const normalized = normalizeCompanionAddress(text);
+  try {
+    const speech = await synthesizeGeminiSpeech(config, speechText);
+    const chunks = splitDiscordText(normalized);
+    await message.reply({
+      content: chunks[0],
+      files: [new AttachmentBuilder(speech.audio, { name: speech.fileName, description: "昔漣的繁體中文語音回覆" })],
+      allowedMentions: { repliedUser: false },
+    });
+    for (const chunk of chunks.slice(1)) {
+      await message.reply({ content: chunk, allowedMentions: { repliedUser: false } });
+    }
+    console.log(`[CloudTTS] 已送出 Discord 語音附件：bytes=${speech.audio.length} model=${config.ttsModel} voice=${config.ttsVoiceName}`);
+  } catch (error) {
+    console.error("[CloudTTS] 語音附件產生失敗，已降級為繁體文字回覆", error);
+    await replyToMessage(message, `${normalized}\n\n（語音暫時沒有成功產生，我先用文字陪你。）`);
+  }
 }
 
 type DiscordImageInput = { url: string; mime?: string; name?: string };
@@ -107,7 +132,7 @@ async function runConversation(
   }
   // 附帶新圖片時避免混入舊照片歷史召回，讓模型專注辨識當前的圖片
   const proactiveMemory = images.length ? "" : memory.buildRecallContext(input, sessionId, 8);
-  const reply = await generateReply(config, systemPrompt, memory.get(sessionId), images, proactiveMemory);
+  const reply = normalizeCompanionAddress(await generateReply(config, systemPrompt, memory.get(sessionId), images, proactiveMemory));
   // 專用描述請求若暫時失敗，至少以成功的當輪視覺回覆建立降級照片記憶。
   if (images.length && !savedImageMemory) {
     const names = images.map((image, index) => image.name?.trim() || `圖片 ${index + 1}`).join("、");
@@ -245,7 +270,14 @@ client.on("messageCreate", (message) => {
         return;
       }
       await message.channel.sendTyping().catch(() => undefined);
-      await replyToMessage(message, await runConversation(sessionId, input, images, `discord-message:${message.id}`));
+      const voiceTopic = extractDiscordVoiceRequestTopic(input);
+      const reply = await runConversation(sessionId, input, images, `discord-message:${message.id}`);
+      if (voiceTopic !== null) {
+        const exactSpeech = extractDiscordExactVoiceText(input);
+        await replyToMessageWithVoice(message, reply, exactSpeech ?? reply);
+      } else {
+        await replyToMessage(message, reply);
+      }
     } catch (error) {
       console.error("[Discord] 回覆失敗", error);
     }
