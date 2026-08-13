@@ -20,6 +20,7 @@ dist/skills/
 release/
 *.js.map
 *.tsbuildinfo
+.tsbuildinfo.*
 
 # Native screenshot helper is built locally and staged for electron-builder.
 resources/bin/*.exe
