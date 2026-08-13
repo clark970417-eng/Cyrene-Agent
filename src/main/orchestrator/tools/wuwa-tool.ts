@@ -4,6 +4,7 @@
 import { spawn } from "child_process";
 import EventEmitter from "events";
 import fs from "fs";
+import os from "os";
 import path from "path";
 import type { ToolDefinition } from "../tool-registry";
 import type { ToolContext } from "../tool-context";
@@ -190,7 +191,7 @@ const HUMOROUS_NON_OWNER_RESPONSES = [
 ];
 
 export function createWuwaTaskHandler(deps: WuwaToolDeps = {}) {
-  const wuwaDir = deps.wuwaDir || "/Users/clark/wuwa";
+  const wuwaDir = deps.wuwaDir || process.env.CYRENE_WUWA_DIR || path.join(os.homedir(), "wuwa");
   const pythonPath =
     deps.pythonPath ||
     (fs.existsSync(path.join(wuwaDir, ".venv/bin/python"))
@@ -198,12 +199,8 @@ export function createWuwaTaskHandler(deps: WuwaToolDeps = {}) {
       : "python3");
   const spawnProc = deps.spawnFn || spawn;
 
-  return async (args: Record<string, unknown>, ctx?: ToolContext): Promise<string> => {
-    // 權限檢查：非屋主訪問時，隨機回覆幽默索取帳密話術
-    if (ctx?.isOwner === false) {
-      const idx = Math.floor(Math.random() * HUMOROUS_NON_OWNER_RESPONSES.length);
-      return HUMOROUS_NON_OWNER_RESPONSES[idx];
-    }
+  return async (args: Record<string, unknown>, _ctx?: ToolContext): Promise<string> => {
+    void HUMOROUS_NON_OWNER_RESPONSES; // 保留幽默索取帳密話術；目前架構的 ToolContext 未攜帶跨頻道身分資訊，屋主判斷由各頻道 adapter（如 Discord）自行把關。
 
     const action = String(args.action || "list").toLowerCase().trim();
 

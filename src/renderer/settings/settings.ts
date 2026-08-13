@@ -890,6 +890,10 @@ const modelInputSuggestions = document.getElementById("model-input-suggestions")
 const apiKeyInput = document.getElementById("api-key") as HTMLInputElement;
 const loginChatGPTBtn = document.getElementById("login-chatgpt-btn") as HTMLButtonElement | null;
 const loginGeminiBtn = document.getElementById("login-gemini-btn") as HTMLButtonElement | null;
+const loginGeminiBtnLabel = document.getElementById("login-gemini-btn-label") as HTMLSpanElement | null;
+const geminiStatusText = document.getElementById("gemini-status-text") as HTMLSpanElement | null;
+const geminiTestConnectionBtn = document.getElementById("gemini-test-connection-btn") as HTMLButtonElement | null;
+const geminiLogoutBtn = document.getElementById("gemini-logout-btn") as HTMLButtonElement | null;
 const testConnectionBtn = document.getElementById("test-connection-btn") as HTMLButtonElement | null;
 const quickApiButtons = Array.from(document.querySelectorAll<HTMLButtonElement>("[data-api-source]"));
 // API 協議下拉（auto / openai / anthropic）—— 用戶顯式 override transport
@@ -2533,9 +2537,61 @@ loginChatGPTBtn?.addEventListener("click", () => {
   void (window as any).webLlm?.openLogin("chatgpt_web");
 });
 
+interface GeminiWebLlmApi {
+  openLogin: () => Promise<{ ok: boolean }>;
+  getStatus: () => Promise<{ isLoggedIn: boolean; state: "login" | "captcha" | "app" | "unknown" }>;
+  testConnection: () => Promise<{ ok: boolean; message: string }>;
+  logout: () => Promise<{ ok: boolean }>;
+}
+function geminiApi(): GeminiWebLlmApi | undefined {
+  return (window as any).geminiWebLlm as GeminiWebLlmApi | undefined;
+}
+
+async function refreshGeminiStatus(): Promise<void> {
+  if (!geminiStatusText) return;
+  try {
+    const status = await geminiApi()?.getStatus();
+    if (!status) {
+      geminiStatusText.textContent = "無法取得狀態";
+      return;
+    }
+    if (status.isLoggedIn) {
+      geminiStatusText.textContent = "✅ 已登入";
+      if (loginGeminiBtnLabel) loginGeminiBtnLabel.textContent = "🔵 重新登入 Gemini";
+    } else if (status.state === "captcha") {
+      geminiStatusText.textContent = "⚠️ 需要完成驗證（CAPTCHA），請重新登入";
+      if (loginGeminiBtnLabel) loginGeminiBtnLabel.textContent = "🔵 重新登入 Gemini";
+    } else {
+      geminiStatusText.textContent = "尚未登入";
+      if (loginGeminiBtnLabel) loginGeminiBtnLabel.textContent = "🔵 登入 Gemini 帳號";
+    }
+  } catch {
+    geminiStatusText.textContent = "狀態檢查失敗";
+  }
+}
+
 loginGeminiBtn?.addEventListener("click", () => {
-  void (window as any).webLlm?.openLogin("gemini_web");
+  void geminiApi()?.openLogin().then(() => {
+    // 登入視窗開啟後過幾秒再刷新一次狀態（使用者仍在視窗內操作時先不打擾）。
+    setTimeout(() => void refreshGeminiStatus(), 5000);
+  });
 });
+
+geminiTestConnectionBtn?.addEventListener("click", async () => {
+  if (!geminiStatusText) return;
+  geminiStatusText.textContent = "測試連線中…";
+  const result = await geminiApi()?.testConnection();
+  geminiStatusText.textContent = result ? (result.ok ? `✅ ${result.message}` : `⚠️ ${result.message}`) : "測試失敗";
+});
+
+geminiLogoutBtn?.addEventListener("click", async () => {
+  if (!geminiStatusText) return;
+  await geminiApi()?.logout();
+  geminiStatusText.textContent = "已登出";
+  if (loginGeminiBtnLabel) loginGeminiBtnLabel.textContent = "🔵 登入 Gemini 帳號";
+});
+
+void refreshGeminiStatus();
 
 async function loadSchedulerPanel(): Promise<void> {
   const [tasksResult, toolsResult] = await Promise.all([

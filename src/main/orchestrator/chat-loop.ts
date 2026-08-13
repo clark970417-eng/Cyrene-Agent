@@ -200,11 +200,59 @@ export async function runChatLoop(options: ChatLoopOptions): Promise<TwoPhaseFcR
     options.onEvent?.({ type: "text_message_end", messageId });
   };
 
+  /**
+   * 網頁自動化型 adapter（gemini_web／chatgpt_web）：不打 HTTP，而是直接操作背景網頁視窗。
+   * 沿用跟一般 API provider 完全相同的 signal／逾時／串流呈現機制，
+   * 讓「取消」「逾時」「終態」對所有 provider 行為一致，不需要另外特殊處理。
+   */
+  const invokeWebPrompt = async (messages: ChatMessage[]): Promise<{
+    text: string;
+    usage?: { input: number; output: number };
+  }> => {
+    const request = buildRequest(messages, true);
+    const effectiveRequest = options.adapter.applyCacheHints?.(request, vendorConfig) ?? request;
+    const promptText = options.adapter.buildPromptText!(effectiveRequest);
+
+    const controller = new AbortController();
+    const abort = () => controller.abort();
+    options.signal?.addEventListener("abort", abort, { once: true });
+    const timer = setTimeout(abort, remainingBudget());
+
+    let text = "";
+    const timePrefixFilter = new ChatTimeStreamPrefixFilter();
+    try {
+      const full = await options.adapter.executeWebPrompt!(
+        promptText,
+        (delta) => {
+          const filtered = timePrefixFilter.push(delta);
+          if (!filtered) return;
+          text += filtered;
+          emittedStreamContent = true;
+          startText();
+          options.onEvent?.({ type: "text_message_content", messageId, delta: filtered });
+        },
+        { signal: controller.signal }
+      );
+      // onChunk 是 best-effort（DOM 輪詢可能漏抓中間增量），以完整回覆做最終保底。
+      const finalText = full && full.length > text.length ? full : text;
+      if (!finalText.trim()) {
+        throw new AgentRuntimeError("E_MODEL_RESPONSE_PARSE_FAILED", "Gemini 網頁沒有返回可見文本");
+      }
+      return { text: finalText };
+    } finally {
+      clearTimeout(timer);
+      options.signal?.removeEventListener("abort", abort);
+    }
+  };
+
   const invokeStreaming = async (messages: ChatMessage[]): Promise<{
     text: string;
     usage?: { input: number; output: number };
     nonStreamingResponse?: ChatResponse;
   }> => {
+    if (options.adapter.executeWebPrompt) {
+      return invokeWebPrompt(messages);
+    }
     const request = buildRequest(messages, true);
     const effectiveRequest = options.adapter.applyCacheHints?.(request, vendorConfig) ?? request;
     const http = options.adapter.buildStreamRequest(effectiveRequest, vendorConfig);

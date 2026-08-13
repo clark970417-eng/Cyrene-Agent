@@ -235,8 +235,17 @@ contextBridge.exposeInMainWorld("paint", {
 });
 
 contextBridge.exposeInMainWorld("webLlm", {
+  openLogin: (provider: string) => ipcRenderer.invoke(IPC.WEB_LLM_OPEN_LOGIN, provider),
   openLoginWindow: (provider: string) => ipcRenderer.invoke(IPC.WEB_LLM_OPEN_LOGIN, provider),
   checkStatus: (provider: string) => ipcRenderer.invoke(IPC.WEB_LLM_CHECK_STATUS, provider),
+});
+
+// Gemini 網頁背景模型專用：登入狀態／重新登入／測試連線／登出（設定頁「模型」面板使用）
+contextBridge.exposeInMainWorld("geminiWebLlm", {
+  openLogin: () => ipcRenderer.invoke(IPC.GEMINI_OPEN_LOGIN),
+  getStatus: () => ipcRenderer.invoke(IPC.GEMINI_GET_STATUS),
+  testConnection: () => ipcRenderer.invoke(IPC.GEMINI_TEST_CONNECTION),
+  logout: () => ipcRenderer.invoke(IPC.GEMINI_LOGOUT),
 });
 
 const workspaceApi = {

@@ -251,4 +251,15 @@ export interface ChatVendorAdapter {
    */
   parseStreamEvent(event: StreamEvent): StreamChunk | null;
   testConnection(cfg: VendorConfig): Promise<TestConnectionResult>;
+  /**
+   * 網頁自動化型 adapter 專用（如 gemini_web／chatgpt_web）：不走 HTTP fetch，
+   * 而是直接操作背景網頁視窗取得回覆。chat-loop 偵測到這個方法存在時會走這條路徑。
+   */
+  executeWebPrompt?(
+    promptText: string,
+    onChunk?: (delta: string) => void,
+    options?: { signal?: AbortSignal }
+  ): Promise<string>;
+  /** 搭配 executeWebPrompt：把結構化訊息壓平成單一段落 prompt。 */
+  buildPromptText?(req: ChatRequest): string;
 }

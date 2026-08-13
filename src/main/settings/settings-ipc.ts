@@ -306,18 +306,34 @@ export function registerSettingsIpc(deps: SettingsIpcDependencies): void {
   });
 
   ipcMain.handle(IPC.WEB_LLM_OPEN_LOGIN, async (_event, provider: string) => {
+    if (provider === "gemini_web") {
+      const { openGeminiLoginWindow, focusLoginWindowIfOpen } = require("../web-llm/gemini/gemini-window");
+      if (!focusLoginWindowIfOpen()) openGeminiLoginWindow();
+      return { ok: true };
+    }
     const { openWebLlmLoginWindow } = require("../web-llm/web-llm-manager");
     await openWebLlmLoginWindow(provider);
     return { ok: true };
   });
 
   ipcMain.handle(IPC.WEB_LLM_CHECK_STATUS, async (_event, provider: string) => {
+    if (provider === "gemini_web") {
+      const { getGeminiLoginState } = require("../web-llm/gemini/gemini-bridge");
+      const { isLoggedIn } = await getGeminiLoginState();
+      return { isLoggedIn };
+    }
     const { getWebLlmSession } = require("../web-llm/web-llm-manager");
     const session = getWebLlmSession();
     const cookies = await session.cookies.get({});
     const hasLoginCookie = cookies.some((c: { name: string }) => c.name.includes("session") || c.name.includes("auth") || c.name.includes("token"));
     return { isLoggedIn: hasLoginCookie };
   });
+
+  // Gemini 專用的細粒度 IPC（登入狀態／重新登入／測試連線／登出）
+  {
+    const { registerGeminiIpc } = require("../web-llm/gemini/gemini-ipc");
+    registerGeminiIpc();
+  }
 
   ipcMain.on(IPC.SETTINGS_PREVIEW_RUNTIME_SYNC, (_event, value: "off" | "local" | "llm") => {
     const current = getModelSettings();

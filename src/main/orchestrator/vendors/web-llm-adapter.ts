@@ -13,7 +13,7 @@ import type {
   Transport,
 } from "./types";
 import { runChatGPTWebPrompt } from "../../web-llm/chatgpt-web-driver";
-import { runGeminiWebPrompt } from "../../web-llm/gemini-web-driver";
+import { runGeminiPrompt } from "../../web-llm/gemini/gemini-bridge";
 
 export class WebLlmAdapter implements ChatVendorAdapter {
   readonly id: string;
@@ -64,16 +64,17 @@ export class WebLlmAdapter implements ChatVendorAdapter {
 
   async executeWebPrompt(
     promptText: string,
-    onChunk?: (text: string) => void
+    onChunk?: (text: string) => void,
+    options?: { signal?: AbortSignal }
   ): Promise<string> {
     if (this.providerType === "chatgpt_web") {
       return await runChatGPTWebPrompt(promptText, onChunk);
     } else {
-      return await runGeminiWebPrompt(promptText, onChunk);
+      return await runGeminiPrompt(promptText, onChunk, options);
     }
   }
 
-  async chat(req: ChatRequest): Promise<ChatResponse> {
+  buildPromptText(req: ChatRequest): string {
     const systemMsg = req.messages.find((m) => m.role === "system")?.content || "";
     const conversation = req.messages
       .filter((m) => m.role !== "system" && m.content)
@@ -81,8 +82,11 @@ export class WebLlmAdapter implements ChatVendorAdapter {
       .slice(-6)
       .join("\n");
 
-    const fullPrompt = `${systemMsg ? `[系統背景指示]\n${systemMsg}\n\n` : ""}${conversation}`;
+    return `${systemMsg ? `[系統背景指示]\n${systemMsg}\n\n` : ""}${conversation}`;
+  }
 
+  async chat(req: ChatRequest): Promise<ChatResponse> {
+    const fullPrompt = this.buildPromptText(req);
     const text = await this.executeWebPrompt(fullPrompt);
 
     const assistantMessage: ChatMessage = {

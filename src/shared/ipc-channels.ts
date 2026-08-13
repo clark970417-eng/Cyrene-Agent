@@ -28,6 +28,12 @@ export const IPC = {
   WEB_LLM_OPEN_LOGIN: "web-llm:open-login",
   WEB_LLM_CHECK_STATUS: "web-llm:check-status",
 
+  // Gemini 網頁背景模型：登入／狀態／重新登入／測試連線／登出
+  GEMINI_OPEN_LOGIN: "gemini:open-login",
+  GEMINI_GET_STATUS: "gemini:get-status",
+  GEMINI_TEST_CONNECTION: "gemini:test-connection",
+  GEMINI_LOGOUT: "gemini:logout",
+
   // chat window
   CHAT_MINIMIZE: "chat:minimize",
   CHAT_CLOSE: "chat:close",
