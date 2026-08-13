@@ -126,38 +126,5 @@
     "esbuild@0.21.5": true,
     "sharp@0.32.6": true,
     "tree-sitter@0.22.4": true
-  },
-  "build": {
-    "appId": "com.cyrene.desktop",
-    "productName": "昔漣桌寵",
-    "directories": {
-      "output": "release"
-    },
-    "files": [
-      "dist/**/*",
-      "assets/**/*",
-      "prompts/**/*",
-      "mobile/**/*",
-      "skills/**/*",
-      "game-recipes/**/*",
-      "vendor/**/*",
-      "models/**/*",
-      "package.json"
-    ],
-    "extraResources": [
-      {
-        "from": "resources/bin/cyrene-screenshot.exe",
-        "to": "bin/cyrene-screenshot.exe"
-      }
-    ],
-    "icon": "assets/icon.png",
-    "mac": {
-      "icon": "assets/icon.png",
-      "target": [
-        "dmg",
-        "zip"
-      ],
-      "category": "public.app-category.utilities"
-    }
   }
 }

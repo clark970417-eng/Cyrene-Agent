@@ -1,5 +1,6 @@
-appId: com.cyrene.live2d
-productName: Cyrene
+appId: com.cyrene.desktop
+productName: 昔漣桌寵
+executableName: Agent
 directories:
   output: release
 asar: true
@@ -9,6 +10,7 @@ files:
   - package.json
   - prompts/**/*
   - assets/**/*
+  - mobile/**/*
   - skills/**/*
   - game-recipes/**/*
   - vendor/**/*
@@ -16,6 +18,15 @@ files:
 extraResources:
   - from: resources/bin/cyrene-screenshot.exe
     to: bin/cyrene-screenshot.exe
+mac:
+  icon: assets/icon.icns
+  target:
+    - dmg
+    - zip
+  category: public.app-category.utilities
+  extendInfo:
+    NSMicrophoneUsageDescription: 昔漣需要使用麥克風才能進行通話與語音辨識（ASR）。
+    NSCameraUsageDescription: 昔漣需要使用攝影機才能在通話中分享畫面。
 win:
   target:
     - dir
