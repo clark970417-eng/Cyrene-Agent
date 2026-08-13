@@ -2163,6 +2163,11 @@
                   <span class="tts-engine__name">小米 MiMo</span>
                   <span class="tts-engine__tag">雲端</span>
                 </button>
+                <button type="button" class="tts-engine" data-engine="mossland" role="radio" aria-checked="false">
+                  <span class="tts-engine__icon">🌙</span>
+                  <span class="tts-engine__name">Mossland</span>
+                  <span class="tts-engine__tag">雲端</span>
+                </button>
               </div>
             </div>
 
@@ -2293,7 +2298,45 @@
               <div class="tts-clone-status" id="tts-mimo-test-status"></div>
             </div>
 
-            <p class="tts-hint">💡 MiniMax 需在控制台訓練音色並填寫音色 ID。GPT-SoVITS 需自行啟動本地服務並提供參考音頻。自定義雲端會 POST 固定 JSON 到你的 Endpoint。小米 MiMo 當前使用昔漣參考音頻走 voiceclone 非流式 wav 合成。</p>
+            <div class="tts-config" id="tts-config-mossland" hidden>
+              <h2 class="tts-section__title">🌙 Mossland 配置</h2>
+              <div class="tts-field">
+                <label>API Key</label>
+                <input type="password" id="tts-mossland-key" placeholder="Mossland API Key（api.mosi.cn）" />
+              </div>
+              <div class="tts-field">
+                <label>音色 ID</label>
+                <input type="text" id="tts-mossland-voice" placeholder="克隆後自動填入，或手動貼上已有的 voice_id" />
+                <button type="button" class="ghost-btn tts-pick-btn" id="tts-mossland-list-voices">拉取已克隆音色</button>
+              </div>
+              <div class="tts-field">
+                <label>克隆新音色</label>
+                <button type="button" class="ghost-btn tts-pick-btn" id="tts-mossland-clone-pick">選擇音頻並克隆</button>
+                <div class="tts-clone-status" id="tts-mossland-clone-status"></div>
+              </div>
+              <div class="tts-field">
+                <label>模型</label>
+                <select id="tts-mossland-model">
+                  <option value="moss-tts">moss-tts（單說話人）</option>
+                </select>
+              </div>
+              <div class="tts-field">
+                <label>輸出格式</label>
+                <select id="tts-mossland-format">
+                  <option value="mp3">mp3</option>
+                  <option value="wav">wav</option>
+                  <option value="pcm">pcm</option>
+                </select>
+              </div>
+              <div class="tts-field">
+                <label>測試文字</label>
+                <input type="text" id="tts-mossland-text" placeholder="你好，我是昔漣，很高興見到你。" />
+              </div>
+              <button type="button" class="ghost-btn" id="tts-mossland-test">🔊 測試發音</button>
+              <div class="tts-clone-status" id="tts-mossland-test-status"></div>
+            </div>
+
+            <p class="tts-hint">💡 MiniMax 需在控制台訓練音色並填寫音色 ID。GPT-SoVITS 需自行啟動本地服務並提供參考音頻。自定義雲端會 POST 固定 JSON 到你的 Endpoint。小米 MiMo 當前使用昔漣參考音頻走 voiceclone 非流式 wav 合成。Mossland 可上傳音頻克隆音色，或直接貼上已有的 voice_id。</p>
 
             <hr class="api-section-divider" />
             <section class="opener-console" aria-labelledby="opener-title">

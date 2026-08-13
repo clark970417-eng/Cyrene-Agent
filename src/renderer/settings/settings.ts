@@ -6490,6 +6490,22 @@ interface TtsApi {
     apiKey: string; voiceAudioPath?: string; text: string; stylePrompt?: string;
     expectedCacheKey?: string;
   }) => Promise<{ base64: string; cacheKey: string; cached: boolean; format: "wav" }>;
+  // Mossland（api.mosi.cn；返回 base64 + cacheKey + cached + format）
+  synthesizeMossland: (payload: {
+    apiKey: string; voiceId: string; text: string;
+    speed?: number; volume?: number; model?: string; format?: "mp3" | "wav" | "pcm";
+  }) => Promise<string>;
+  synthesizeCachedMossland: (payload: {
+    apiKey: string; voiceId: string; text: string;
+    speed?: number; volume?: number; model?: string; format?: "mp3" | "wav" | "pcm";
+    expectedCacheKey?: string;
+  }) => Promise<{ base64: string; cacheKey: string; cached: boolean; format: "mp3" | "wav" | "pcm" }>;
+  cloneMossland: (payload: {
+    apiKey: string; filePath: string; name?: string; description?: string;
+  }) => Promise<{ voiceId: string; name?: string; createdAt?: number }>;
+  listMosslandVoices: (payload: {
+    apiKey: string; limit?: number;
+  }) => Promise<{ voices: Array<{ id: string; name: string; createdAt: number }> }>;
   pickAudioFile: () => Promise<string | null>;
   saveSettings: (tts: Record<string, unknown>) => Promise<unknown>;
   loadSettings: () => Promise<Record<string, unknown>>;
@@ -6566,6 +6582,12 @@ async function loadTtsConfig(): Promise<void> {
   ttsEl("tts-mimo-key").value = String(ttsConfig.ttsMimoKey ?? "");
   ttsEl("tts-mimo-voice-audio").value = String(ttsConfig.ttsMimoVoiceAudioPath ?? "");
   ttsEl("tts-mimo-style").value = String(ttsConfig.ttsMimoStylePrompt ?? "溫柔、自然、略帶親近感，像在輕聲陪用戶聊天。");
+  // Mossland
+  ttsEl("tts-mossland-key").value = String(ttsConfig.ttsMosslandKey ?? "");
+  ttsEl("tts-mossland-voice").value = String(ttsConfig.ttsMosslandVoiceId ?? "");
+  ttsEl("tts-mossland-text").value = String(ttsConfig.ttsMosslandTestText ?? TTS_TEST_TEXT);
+  (ttsEl("tts-mossland-format") as HTMLSelectElement).value =
+    ttsConfig.ttsMosslandFormat === "wav" ? "wav" : ttsConfig.ttsMosslandFormat === "pcm" ? "pcm" : "mp3";
 
   // Opener 主動開口檔位
   const openerMode = String(ttsConfig.openerMode ?? "off");
@@ -6865,6 +6887,9 @@ const ttsSaveFields: Array<[string, string]> = [
   ["tts-mimo-key", "ttsMimoKey"],
   ["tts-mimo-voice-audio", "ttsMimoVoiceAudioPath"],
   ["tts-mimo-style", "ttsMimoStylePrompt"],
+  ["tts-mossland-key", "ttsMosslandKey"],
+  ["tts-mossland-voice", "ttsMosslandVoiceId"],
+  ["tts-mossland-text", "ttsMosslandTestText"],
 ];
 const ttsDebounceTimers: Record<string, ReturnType<typeof setTimeout> | undefined> = {};
 for (const [elId, field] of ttsSaveFields) {
@@ -6886,6 +6911,14 @@ for (const [elId, field] of ttsSaveFields) {
 // 自定義雲端格式選擇
 (ttsEl("tts-custom-cloud-format") as HTMLSelectElement).addEventListener("change", () => {
   void saveTtsField("ttsCustomCloudFormat", (ttsEl("tts-custom-cloud-format") as HTMLSelectElement).value as "wav" | "mp3");
+});
+
+// Mossland 格式／模型選擇
+(ttsEl("tts-mossland-format") as HTMLSelectElement).addEventListener("change", () => {
+  void saveTtsField("ttsMosslandFormat", (ttsEl("tts-mossland-format") as HTMLSelectElement).value as "mp3" | "wav" | "pcm");
+});
+(ttsEl("tts-mossland-model") as HTMLSelectElement).addEventListener("change", () => {
+  void saveTtsField("ttsMosslandModel", (ttsEl("tts-mossland-model") as HTMLSelectElement).value);
 });
 
 // MiniMax 流式播放開關
@@ -7009,6 +7042,77 @@ document.getElementById("tts-mimo-voice-pick")?.addEventListener("click", async 
   if (filePath) {
     ttsEl("tts-mimo-voice-audio").value = filePath;
     void saveTtsField("ttsMimoVoiceAudioPath", filePath);
+  }
+});
+
+// Mossland 選擇音頻並克隆新音色
+document.getElementById("tts-mossland-clone-pick")?.addEventListener("click", async () => {
+  if (!window.tts) return;
+  const apiKey = ttsEl("tts-mossland-key").value.trim();
+  if (!apiKey) { window.alert("請先填寫 Mossland API Key"); return; }
+  const filePath = await window.tts.pickAudioFile();
+  if (!filePath) return;
+
+  const statusEl = document.getElementById("tts-mossland-clone-status");
+  if (statusEl) statusEl.textContent = "克隆中…";
+  try {
+    const result = await window.tts.cloneMossland({ apiKey, filePath, name: "昔漣" });
+    ttsEl("tts-mossland-voice").value = result.voiceId;
+    void saveTtsField("ttsMosslandVoiceId", result.voiceId);
+    if (statusEl) statusEl.textContent = `已克隆音色：${result.voiceId}`;
+  } catch (err) {
+    if (statusEl) statusEl.textContent = "克隆失敗：" + (err instanceof Error ? err.message : String(err));
+  }
+});
+
+// Mossland 拉取已克隆音色列表
+document.getElementById("tts-mossland-list-voices")?.addEventListener("click", async () => {
+  if (!window.tts) return;
+  const apiKey = ttsEl("tts-mossland-key").value.trim();
+  if (!apiKey) { window.alert("請先填寫 Mossland API Key"); return; }
+
+  const statusEl = document.getElementById("tts-mossland-clone-status");
+  if (statusEl) statusEl.textContent = "讀取中…";
+  try {
+    const result = await window.tts.listMosslandVoices({ apiKey });
+    if (result.voices.length === 0) {
+      if (statusEl) statusEl.textContent = "目前沒有已克隆的音色";
+      return;
+    }
+    if (statusEl) {
+      statusEl.textContent = "已克隆音色：" + result.voices.map((v) => `${v.name || "（未命名）"} (${v.id})`).join("、");
+    }
+  } catch (err) {
+    if (statusEl) statusEl.textContent = "讀取失敗：" + (err instanceof Error ? err.message : String(err));
+  }
+});
+
+// Mossland 測試發音
+document.getElementById("tts-mossland-test")?.addEventListener("click", async () => {
+  if (!window.tts) return;
+  const apiKey = ttsEl("tts-mossland-key").value.trim();
+  const voiceId = ttsEl("tts-mossland-voice").value.trim();
+  const model = (ttsEl("tts-mossland-model") as HTMLSelectElement).value;
+  const text = ttsEl("tts-mossland-text").value.trim() || TTS_TEST_TEXT;
+  if (!apiKey) { window.alert("請先填寫 Mossland API Key"); return; }
+  if (!voiceId) { window.alert("請先克隆或填寫音色 ID"); return; }
+
+  const btn = document.getElementById("tts-mossland-test") as HTMLButtonElement;
+  btn.disabled = true;
+  btn.textContent = "合成中…";
+  try {
+    const result = await window.tts.synthesizeCachedMossland({
+      apiKey, voiceId, text, model,
+      speed: Number(ttsEl("tts-speed").value),
+      volume: Number(ttsEl("tts-volume").value),
+      format: "mp3",
+    });
+    playTtsAudio(result.base64, "mp3");
+  } catch (err) {
+    window.alert("測試失敗: " + (err instanceof Error ? err.message : String(err)));
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "🔊 測試發音";
   }
 });
 
