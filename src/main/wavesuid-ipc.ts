@@ -35,7 +35,10 @@ function exec(file: string, args: string[], timeout = 30_000): Promise<string> {
 
 async function linkedUid(): Promise<string | undefined> {
   if (!fs.existsSync(databasePath())) return undefined;
-  const safe = userId().replace(/[^0-9]/g, "");
+  // Desktop sessions use the stable local id `desktop-owner`, while Discord
+  // sessions use a numeric snowflake. Keep both forms queryable and strip
+  // everything that cannot belong to either identifier before building SQL.
+  const safe = userId().replace(/[^A-Za-z0-9_-]/g, "");
   if (!safe) return undefined;
   try {
     const stdout = await exec("sqlite3", ["-noheader", databasePath(), `SELECT uid FROM wavesuser WHERE bot_id = 'discord' AND user_id = '${safe}' AND cookie != '' ORDER BY id DESC LIMIT 1;`], 2_500);

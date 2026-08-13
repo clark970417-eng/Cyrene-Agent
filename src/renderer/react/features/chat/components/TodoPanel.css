@@ -220,6 +220,32 @@
 .cy-todo__content {
   flex: 1;
   word-break: break-word;
+  color: #1a1a1a;
+}
+
+/* ── 深色主題對比度美化 ── */
+[data-ui-theme="polished-pink"] .cy-todo,
+.dark .cy-todo {
+  background: rgba(30, 24, 48, 0.92);
+  color: #ffffff;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+}
+
+[data-ui-theme="polished-pink"] .cy-todo__content,
+.dark .cy-todo__content {
+  color: #ffffff !important;
+  font-weight: 500;
+}
+
+[data-ui-theme="polished-pink"] .cy-todo__hero-title,
+.dark .cy-todo__hero-title {
+  color: #ffffff;
+}
+
+[data-ui-theme="polished-pink"] .cy-todo__hero-sub,
+.dark .cy-todo__hero-sub {
+  color: rgba(255, 255, 255, 0.8);
 }
 
 /* ── 进度条 ── */

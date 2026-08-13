@@ -36,6 +36,20 @@ if [ ! -d "${CYRENE_PROJECT_ROOT}/node_modules" ]; then
   exit 1
 fi
 
+# TTS is optional for the desktop UI. Start GPT-SoVITS in the background when
+# it is installed locally, but never make the workspace wait for port 9880.
+if ! lsof -i :9880 >/dev/null 2>&1 && \
+   [ -x "/Users/clark/GPT-SoVITS/venv/bin/python" ] && \
+   [ -f "/Users/clark/GPT-SoVITS/api_v2.py" ]; then
+  printf '[%s] Starting GPT-SoVITS in background.\n' "$(date '+%Y-%m-%d %H:%M:%S')" >> "${CYRENE_LOG_FILE}"
+  (
+    cd "/Users/clark/GPT-SoVITS" || exit 1
+    PYTHONUNBUFFERED=1 PATH="/Users/clark/bin:${PATH}" \
+      "/Users/clark/GPT-SoVITS/venv/bin/python" api_v2.py -a 127.0.0.1 -p 9880 \
+      >> "${CYRENE_LOG_DIR}/gptsovits-startup.log" 2>&1 &
+  )
+fi
+
 cd "${CYRENE_PROJECT_ROOT}" || exit 1
 printf '[%s] Starting Cyrene from %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "${CYRENE_PROJECT_ROOT}" >> "${CYRENE_LOG_FILE}"
 # The Dock launcher uses the compiled renderer instead of a Vite development

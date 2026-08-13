@@ -14,14 +14,6 @@ declare global {
       readSharedNotebook: () => Promise<string>;
       openSharedNotebook: () => Promise<boolean>;
     };
-    chat?: {
-      minimize: () => void;
-      close: () => void;
-      toggleMaximize: () => void;
-    };
-    workspace?: {
-      onNavigate: (cb: (target: { section: string; detail?: string }) => void) => () => void;
-    };
     modelConfig?: {
       get: () => Promise<{ model: string; provider: string; connected: boolean }>;
       onChanged: (cb: (config: { model: string; provider: string; connected: boolean }) => void) => () => void;
@@ -145,7 +137,7 @@ tabs.forEach((tab) => {
     }
 
     if (targetTab === "chat") {
-      iframe.src = "../react/index.html";
+      iframe.src = "../chat/index.html";
     } else if (targetTab === "tasks") {
       iframe.src = "../tasks/index.html";
     } else if (targetTab === "memory") {
@@ -234,20 +226,15 @@ function broadcastStateToIframe() {
 
 // 監聽 iframe 載入完成，確保每次切換回聊天頁面時能自動同步最新模式與風格
 iframe.addEventListener("load", () => {
-  document.body.dataset.content = iframe.src.includes("/react/") || iframe.src.includes("react/index.html")
-    ? "react"
-    : "tool";
   broadcastStateToIframe();
 });
-
-document.body.dataset.content = "react";
 
 modeItems.forEach((item) => {
   item.addEventListener("click", (e) => {
     e.stopPropagation();
     modeItems.forEach((i) => i.classList.remove("is-active"));
     item.classList.add("is-active");
-
+    
     const value = item.getAttribute("data-value") || "chat";
     const label = item.textContent?.trim() || "協作";
     activeMode = value;
@@ -262,7 +249,7 @@ styleItems.forEach((item) => {
     e.stopPropagation();
     styleItems.forEach((i) => i.classList.remove("is-active"));
     item.classList.add("is-active");
-
+    
     const value = item.getAttribute("data-value") || "01_default.md";
     const label = item.textContent?.trim() || "🌸 溫柔 · 和善";
     activeStyle = value;
@@ -279,10 +266,10 @@ reasoningItems.forEach((item) => {
     e.stopPropagation();
     reasoningItems.forEach((i) => i.classList.remove("is-active"));
     item.classList.add("is-active");
-
+    
     const label = item.textContent?.trim() || "Auto · 自動";
     if (reasoningValEl) reasoningValEl.textContent = label;
-
+    
     const value = item.getAttribute("data-value") || "auto";
     try {
       iframe.contentWindow?.postMessage({ type: "set-reasoning", value }, "*");
@@ -323,15 +310,15 @@ infoTabs.forEach((tab) => {
 
 // 2. 視窗控制按鈕
 minBtn?.addEventListener("click", () => {
-  window.chat?.minimize();
+  window.sidebar?.minimize();
 });
 
 maxBtn?.addEventListener("click", () => {
-  window.chat?.toggleMaximize();
+  window.sidebar?.toggleMaximize();
 });
 
 closeBtn?.addEventListener("click", () => {
-  window.chat?.close();
+  window.sidebar?.close();
 });
 
 resetBtn?.addEventListener("click", () => {
@@ -353,30 +340,13 @@ function openSettingsSection(section: string) {
   iframe.src = `../settings/index.html#${section}`;
 }
 
-window.workspace?.onNavigate(({ section, detail }) => {
-  if (section === "overview" || section === "chat") {
-    (document.querySelector('.sidebar__tab[data-tab="chat"]') as HTMLElement | null)?.click();
-    return;
-  }
-  if (section === "call") {
-    iframe.src = "../call/index.html";
-    updateTitlebarModeText("call");
-    return;
-  }
-  const tabName = section === "stickers" ? "stickers" : section;
-  const tab = document.querySelector(`.sidebar__tab[data-tab="${tabName}"]`) as HTMLElement | null;
-  if (tab) tab.click();
-  if (section === "settings" && detail) navigateSettingsIframe(detail);
-});
-
 panelChatBtn?.addEventListener("click", () => {
   const chatTab = document.querySelector('.sidebar__tab[data-tab="chat"]') as HTMLElement;
   if (chatTab) chatTab.click();
 });
 
 panelCallBtn?.addEventListener("click", () => {
-  iframe.src = "../call/index.html";
-  updateTitlebarModeText("call");
+  window.sidebar?.openCall();
 });
 
 panelModelBtn?.addEventListener("click", () => {
@@ -446,7 +416,7 @@ async function initStatusSync() {
       const cfg = await window.modelConfig.get();
       modelConnected = cfg.connected;
       if (modelNameEl) modelNameEl.textContent = cfg.model || "未連接";
-      if (headerModelStatusEl) headerModelStatusEl.textContent = `${cfg.model || "模型"} 已連接`;
+      if (headerModelStatusEl) headerModelStatusEl.textContent = cfg.connected ? `${cfg.model || "模型"} 已連接` : "模型未連接";
       if (agentCoreStatusEl) agentCoreStatusEl.textContent = cfg.connected ? "Agent Core 運行中" : "Agent Core 未連接";
       renderLiveProfile();
     } catch (err) {
@@ -537,7 +507,7 @@ async function initStatusSync() {
       // 5.1 更新日程分頁的 Token 用量與圖表
       const today = new Date();
       const weekdays = ["週日", "週一", "週二", "週三", "週四", "週五", "週六"];
-
+      
       const scheduleDateTextEl = document.getElementById("schedule-date-text");
       if (scheduleDateTextEl) {
         scheduleDateTextEl.textContent = `📅 ${today.getFullYear()}年${today.getMonth() + 1}月${today.getDate()}日 · ${weekdays[today.getDay()]}`;
@@ -545,7 +515,7 @@ async function initStatusSync() {
 
       const todayData = tokenData[tokenData.length - 1];
       const todayTotal = todayData ? (todayData.input + todayData.output) : 0;
-
+      
       const tokenUsageTodayValEl = document.getElementById("token-usage-today-val");
       if (tokenUsageTodayValEl) {
         tokenUsageTodayValEl.textContent = todayTotal.toLocaleString();
@@ -561,14 +531,21 @@ async function initStatusSync() {
       let maxDayName = "週日";
       let totalSum = 0;
 
-      // 使用滾動近 7 日，跨週時仍可看見完整歷史，不會把上週資料藏掉。
-      const weekDayTotals = tokenData.map((entry) => {
-        const [month, day] = entry.date.split("-").map(Number);
-        const date = new Date(today.getFullYear(), month - 1, day);
-        return { dayName: weekdays[date.getDay()], total: entry.input + entry.output };
+      // 圖表表示「本週（日～六）」而不是「最近七天」。只用 weekday
+      // 配對會把上週六的資料錯畫到本週尚未到來的週六。
+      const weekStart = new Date(today);
+      weekStart.setHours(0, 0, 0, 0);
+      weekStart.setDate(today.getDate() - today.getDay());
+      const weekDayTotals = weekdays.map((dayName, dayIndex) => {
+        const date = new Date(weekStart);
+        date.setDate(weekStart.getDate() + dayIndex);
+        const dateKey = `${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+        const isFuture = date.getTime() > today.getTime();
+        const data = isFuture ? undefined : tokenData.find((entry) => entry.date === dateKey);
+        return { dayName, total: data ? data.input + data.output : 0 };
       });
 
-      weekDayTotals.forEach(({ dayName, total: sum }) => {
+      weekDayTotals.slice(0, today.getDay() + 1).forEach(({ dayName, total: sum }) => {
         totalSum += sum;
         if (sum > maxTokens) {
           maxTokens = sum;
@@ -576,7 +553,7 @@ async function initStatusSync() {
         }
       });
 
-      const elapsedDays = Math.max(1, weekDayTotals.length);
+      const elapsedDays = today.getDay() + 1;
       const avgTokens = Math.round(totalSum / elapsedDays);
       const avgK = (avgTokens / 1000).toFixed(1);
       const maxK = (maxTokens / 1000).toFixed(1);
@@ -588,16 +565,14 @@ async function initStatusSync() {
 
       const tokenChartPeakDescEl = document.getElementById("token-chart-peak-desc");
       if (tokenChartPeakDescEl) {
-        tokenChartPeakDescEl.textContent = `📊 近 7 日 Token 消耗 | 峰值 ${maxK}K (${maxDayName})`;
+        tokenChartPeakDescEl.textContent = `📊 本周 Token 消耗趨勢 | 峰值 ${maxK}K (${maxDayName})`;
       }
 
       const barItems = document.querySelectorAll(".chart-bar-item");
       barItems.forEach((item) => {
-        const dayIndex = Number((item as HTMLElement).dataset.day);
-        const labelEl = item.querySelector(".chart-bar-label");
-        if (labelEl) labelEl.textContent = weekDayTotals[dayIndex]?.dayName ?? "";
         const fillEl = item.querySelector(".chart-bar-fill") as HTMLElement;
         if (fillEl) {
+          const dayIndex = Number((item as HTMLElement).dataset.day);
           const dayTotal = weekDayTotals[dayIndex]?.total ?? 0;
           const heightPercent = maxTokens > 0 ? Math.min(100, (dayTotal / maxTokens) * 100) : 0;
           fillEl.style.height = `${heightPercent}%`;
@@ -643,24 +618,32 @@ async function initStatusSync() {
       const liveIndicator = document.getElementById("call-live-indicator");
       if (liveIndicator) liveIndicator.hidden = !current.active;
 
-      const week = data.map((entry) => ({ weekday: entry.weekday, totalMs: entry.totalMs }));
-      const weekTotal = week.reduce((sum, item) => sum + item.totalMs, 0);
-      const peak = week.reduce((best, item) => item.totalMs > best.totalMs ? item : best, { weekday: "週日", totalMs: 0 });
-      const average = weekTotal / Math.max(1, week.length);
+      const weekStart = new Date(today);
+      weekStart.setHours(0, 0, 0, 0);
+      weekStart.setDate(today.getDate() - today.getDay());
+      const week = weekdays.map((weekday, index) => {
+        const date = new Date(weekStart);
+        date.setDate(weekStart.getDate() + index);
+        const key = `${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+        const entry = date.getTime() > today.getTime() ? undefined : data.find((item) => item.date === key);
+        return { weekday, totalMs: entry?.totalMs ?? 0 };
+      });
+      const elapsed = week.slice(0, today.getDay() + 1);
+      const weekTotal = elapsed.reduce((sum, item) => sum + item.totalMs, 0);
+      const peak = elapsed.reduce((best, item) => item.totalMs > best.totalMs ? item : best, { weekday: "週日", totalMs: 0 });
+      const average = weekTotal / Math.max(1, elapsed.length);
 
       const avgEl = document.getElementById("call-avg-val");
       const peakEl = document.getElementById("call-chart-peak-desc");
       if (avgEl) avgEl.textContent = `日均 ${formatCallDuration(average, true)}`;
       if (peakEl) {
         peakEl.textContent = peak.totalMs > 0
-          ? `🎙️ 近 7 日累計 ${formatCallDuration(weekTotal, true)} · 最長 ${formatCallDuration(peak.totalMs, true)} (${peak.weekday})`
-          : "🎙️ 近 7 日尚無通話紀錄";
+          ? `🎙️ 本週累計 ${formatCallDuration(weekTotal, true)} · 最長 ${formatCallDuration(peak.totalMs, true)} (${peak.weekday})`
+          : "🎙️ 本週尚無通話紀錄";
       }
 
       document.querySelectorAll(".call-chart-bar-item").forEach((item) => {
         const dayIndex = Number((item as HTMLElement).dataset.day);
-        const labelEl = item.querySelector("span");
-        if (labelEl) labelEl.textContent = week[dayIndex]?.weekday ?? "";
         const fill = item.querySelector(".call-chart-bar-fill") as HTMLElement | null;
         if (!fill) return;
         const duration = week[dayIndex]?.totalMs ?? 0;
@@ -710,7 +693,23 @@ async function initStatusSync() {
     try {
       if (window.chatStore) {
         const stats = await window.chatStore.stats();
-        if (agentSessionCountEl) agentSessionCountEl.textContent = `${stats.sessionCount} 個會話`;
+        const sessionsList = await window.chatStore.list().catch(() => []);
+        const totalSessions = Math.max(stats.sessionCount || 0, sessionsList.length);
+        const msgTurns = stats.userMessageCount > 0 
+          ? stats.userMessageCount 
+          : (stats.messageCount > 0 ? Math.ceil(stats.messageCount / 2) : 0);
+        
+        if (agentSessionCountEl) {
+          if (totalSessions > 0 && msgTurns > 0) {
+            agentSessionCountEl.textContent = `${totalSessions} 個會話 (${msgTurns} 次對話)`;
+          } else if (totalSessions > 0) {
+            agentSessionCountEl.textContent = `${totalSessions} 個會話`;
+          } else if (msgTurns > 0) {
+            agentSessionCountEl.textContent = `${msgTurns} 次對話`;
+          } else {
+            agentSessionCountEl.textContent = "0 個會話";
+          }
+        }
         if (statMessagesEl) statMessagesEl.textContent = String(stats.messageCount);
         if (statInteractionsEl) statInteractionsEl.textContent = String(stats.userMessageCount);
       }
@@ -779,7 +778,7 @@ let isPetDocked = true; // 預設為停靠狀態
 
 function reportSlotBounds() {
   if (!window.sidebar?.reportSlotBounds) return;
-
+  
   const currentTab = document.querySelector(".sidebar__tab.is-active")?.getAttribute("data-tab");
   const usesFullWidth = currentTab === "notebook" || currentTab === "game-room" || currentTab === "exam" || currentTab === "wavesuid";
 
@@ -934,15 +933,7 @@ async function renderSidebarSessionsList() {
   try {
     const list = await window.chatStore.list();
     sidebarSessionsList.innerHTML = "";
-
-    if (list.length === 0) {
-      const empty = document.createElement("li");
-      empty.className = "sidebar__sessions-empty";
-      empty.textContent = "還沒有對話";
-      sidebarSessionsList.appendChild(empty);
-      return;
-    }
-
+    
     list.forEach((session) => {
       const li = document.createElement("li");
       li.className = "sidebar__session-item";
@@ -953,20 +944,24 @@ async function renderSidebarSessionsList() {
       li.tabIndex = 0;
       li.setAttribute("aria-haspopup", "menu");
       li.setAttribute("aria-label", `${session.title || "新對話"}，右鍵可管理`);
-
+      
       const title = document.createElement("span");
       title.className = "sidebar__session-title";
       title.textContent = session.title || "新對話";
-
+      
       const time = document.createElement("span");
       time.className = "sidebar__session-time";
       time.textContent = formatSessionTime(session.updatedAt);
-
+      
       li.appendChild(title);
       li.appendChild(time);
-
+      
       const openSession = () => {
+        currentActiveSessionId = session.id;
+        updateActiveSessionHighlight();
         iframe.contentWindow?.postMessage({ type: "switch-session", sessionId: session.id }, "*");
+        void window.chatStore?.openInChatWindow(session.id);
+
         // 切換 workspace 分頁至「閒聊」
         const chatTab = document.querySelector('.sidebar__tab[data-tab="chat"]') as HTMLElement | null;
         if (chatTab && !chatTab.classList.contains("is-active")) {
@@ -989,7 +984,7 @@ async function renderSidebarSessionsList() {
           openSessionContextMenu(event, { id: session.id, title: session.title || "新對話" }, li);
         }
       });
-
+      
       sidebarSessionsList.appendChild(li);
     });
   } catch (err) {
@@ -1068,9 +1063,7 @@ function updateActiveSessionHighlight() {
 window.addEventListener("message", (e) => {
   if (e.data && e.data.type === "active-session-changed") {
     currentActiveSessionId = e.data.sessionId || "";
-    // iframe 與工作台共用同一個 BrowserWindow，主進程會刻意略過發起方的
-    // chats:changed 廣播；因此由這個回報主動重讀清單，讓新建對話立即出現。
-    void renderSidebarSessionsList();
+    updateActiveSessionHighlight();
   }
   if (e.data && e.data.type === "mode-updated-by-text") {
     const value = e.data.value;

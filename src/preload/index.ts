@@ -234,6 +234,11 @@ contextBridge.exposeInMainWorld("paint", {
   openSettings: () => ipcRenderer.send(IPC.SIDEBAR_OPEN_SETTINGS, "api"),
 });
 
+contextBridge.exposeInMainWorld("webLlm", {
+  openLoginWindow: (provider: string) => ipcRenderer.invoke(IPC.WEB_LLM_OPEN_LOGIN, provider),
+  checkStatus: (provider: string) => ipcRenderer.invoke(IPC.WEB_LLM_CHECK_STATUS, provider),
+});
+
 const workspaceApi = {
   onNavigate: (callback: (target: { section: string; detail?: string }) => void) => {
     const listener = (_event: unknown, target: { section: string; detail?: string }) => callback(target);

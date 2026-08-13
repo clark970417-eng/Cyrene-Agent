@@ -42,7 +42,13 @@ export function getAdapter(provider: string): ChatVendorAdapter {
  * 按运行时配置取适配器实例。协议由用户显式选择；旧配置才回退厂商默认。
  * cache key 用 `${provider}::${transport}`，避免显式切 transport 后命中旧实例。
  */
+import { WebLlmAdapter } from "./web-llm-adapter";
+
 export function getAdapterForConfig(cfg: VendorConfig): ChatVendorAdapter {
+  if (cfg.provider === "chatgpt_web" || cfg.provider === "gemini_web") {
+    const cap = getCapabilityOrOpenAI(cfg.provider);
+    return new WebLlmAdapter(cfg.provider, cap);
+  }
   const transport = resolveTransport({
     baseUrl: cfg.baseUrl,
     explicitTransport: cfg.explicitTransport,

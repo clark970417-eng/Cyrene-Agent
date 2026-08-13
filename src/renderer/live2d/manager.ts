@@ -22,18 +22,6 @@ export interface Live2DManagerOptions {
   onError?: (err: Error) => void;
 }
 
-export interface Live2DResourceMetrics {
-  appActive: boolean;
-  modelLoaded: boolean;
-  disposed: boolean;
-  tickerStarted: boolean | null;
-  stageChildren: number | null;
-  textureCacheSize: number | null;
-  rendererType: "webgl" | "unknown" | null;
-  drawingBufferWidth: number | null;
-  drawingBufferHeight: number | null;
-}
-
 interface MotionEntry {
   Name?: string;
   File?: string;
@@ -90,7 +78,6 @@ export class Live2DManager {
   private motionIndexMap: Map<string, Map<string, number>> = new Map();
   private options: Live2DManagerOptions;
   private disposed = false;
-  private initPromise: Promise<void> | null = null;
   /** Scale that fits the model into the base window (zoom=1.0). Cached once
    *  at load so applyZoom can multiply it by the user's zoom factor. */
   private baseScale = 1;
@@ -104,16 +91,6 @@ export class Live2DManager {
 
   async init(): Promise<void> {
     if (this.disposed) return;
-    if (this.initPromise) return this.initPromise;
-    this.initPromise = this.initialize();
-    try {
-      await this.initPromise;
-    } finally {
-      this.initPromise = null;
-    }
-  }
-
-  private async initialize(): Promise<void> {
     const { canvas, width, height } = this.options;
     this.app = new PIXI.Application({
       view: canvas,
@@ -127,8 +104,8 @@ export class Live2DManager {
       // under the cursor to decide transparent vs. opaque). Without this the
       // WebGL framebuffer is cleared after each frame and readPixels is UB.
       preserveDrawingBuffer: true,
-      // Cap DPR to avoid an oversized WebGL drawing buffer on high-DPI
-      // displays; 2x is enough visual fidelity for the pet window.
+      // 2x 已足夠維持桌寵清晰度；限制高 DPI drawing buffer 可顯著降低
+      // 4K／縮放螢幕上的 GPU 與記憶體負擔，不改變畫面尺寸或 UI。
       resolution: Math.min(window.devicePixelRatio || 1, 2),
       autoDensity: true,
     });
@@ -136,10 +113,6 @@ export class Live2DManager {
       await this.loadModel();
     } catch (err) {
       this.options.onError?.(err instanceof Error ? err : new Error(String(err)));
-      if (this.app) {
-        this.app.destroy(false, { children: true, texture: true });
-        this.app = null;
-      }
     }
   }
 
@@ -156,18 +129,7 @@ export class Live2DManager {
       if (!r.ok) throw new Error("Failed to fetch " + modelPath + ": " + r.status);
       return r.json() as Promise<ModelJsonShape>;
     });
-    let model: Live2DModel;
-    let json: ModelJsonShape;
-    try {
-      [model, json] = await Promise.all([modelPromise, jsonPromise]);
-    } catch (err) {
-      // A JSON fetch failure can race with a successful Cubism load. Wait for
-      // that model and destroy it before propagating the error so its textures
-      // never survive an unsuccessful initialization attempt.
-      const loadedModel = await modelPromise.catch(() => null);
-      loadedModel?.destroy();
-      throw err;
-    }
+    const [model, json] = await Promise.all([modelPromise, jsonPromise]);
     if (!this.app || this.disposed) {
       model.destroy();
       return;
@@ -224,22 +186,6 @@ export class Live2DManager {
 
   getHitAreaDefs(): HitAreaDef[] {
     return this.hitAreaDefs;
-  }
-
-  getResourceMetrics(): Live2DResourceMetrics {
-    const gl = this.getGL();
-    const textureCache = (PIXI as unknown as { utils?: { TextureCache?: Record<string, unknown> } }).utils?.TextureCache;
-    return {
-      appActive: this.app !== null,
-      modelLoaded: this.model !== null,
-      disposed: this.disposed,
-      tickerStarted: this.app ? Boolean((this.app.ticker as unknown as { started?: boolean }).started) : null,
-      stageChildren: this.app ? ((this.app.stage as unknown as { children?: unknown[] }).children?.length ?? null) : null,
-      textureCacheSize: textureCache ? Object.keys(textureCache).length : null,
-      rendererType: gl ? "webgl" : this.app ? "unknown" : null,
-      drawingBufferWidth: gl?.drawingBufferWidth ?? null,
-      drawingBufferHeight: gl?.drawingBufferHeight ?? null,
-    };
   }
 
   /**
@@ -305,7 +251,7 @@ export class Live2DManager {
     this.app.ticker.start();
   }
 
-    dispose(): void {
+  dispose(): void {
     this.disposed = true;
     if (this.model) {
       this.model.destroy();
@@ -315,18 +261,18 @@ export class Live2DManager {
       this.app.destroy(false, { children: true, texture: true, baseTexture: true });
       this.app = null;
     }
-    // Explicitly clear PIXI global texture caches so a reload/reinit does not
-    // retain GPU memory from the previous model session.
-    const pixiUtils = (PIXI as unknown as { utils?: { TextureCache?: Record<string, unknown>; BaseTextureCache?: Record<string, unknown> } }).utils;
-    if (pixiUtils?.TextureCache) {
-      for (const key of Object.keys(pixiUtils.TextureCache)) {
-        delete pixiUtils.TextureCache[key];
-      }
-    }
-    if (pixiUtils?.BaseTextureCache) {
-      for (const key of Object.keys(pixiUtils.BaseTextureCache)) {
-        delete pixiUtils.BaseTextureCache[key];
-      }
+    // pixi-live2d-display 會把模型貼圖留在 PIXI 全域快取；重載桌寵時若不
+    // 清除，GPU 記憶體會逐次累積。dispose 只在整個 manager 結束時呼叫，
+    // 因此在這裡清理不會影響其他作用中的畫面。
+    const caches = (PIXI as unknown as {
+      utils?: {
+        TextureCache?: Record<string, unknown>;
+        BaseTextureCache?: Record<string, unknown>;
+      };
+    }).utils;
+    for (const cache of [caches?.TextureCache, caches?.BaseTextureCache]) {
+      if (!cache) continue;
+      for (const key of Object.keys(cache)) delete cache[key];
     }
   }
 }

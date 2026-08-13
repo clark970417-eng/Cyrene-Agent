@@ -519,6 +519,16 @@ const PROVIDER_SHORT_NAMES: Record<string, string> = {
   "Gemini（Google）": "Gemini",
 };
 
+function isModelConnected(settings: ModelSettings): boolean {
+  if (settings.provider === "chatgpt_web" || settings.provider === "gemini_web") {
+    return true;
+  }
+  if (settings.provider === "openrouter") {
+    return true;
+  }
+  return Boolean(settings.apiKey && settings.apiKey.trim().length > 0);
+}
+
 export function getPublicModelConfig(settings = loadModelSettings()): PublicModelConfig {
   return {
     mode: settings.mode,
@@ -526,7 +536,7 @@ export function getPublicModelConfig(settings = loadModelSettings()): PublicMode
     displayName: settings.displayName,
     shortName: PROVIDER_SHORT_NAMES[settings.provider] ?? settings.provider,
     model: settings.model,
-    connected: Boolean(settings.apiKey),
+    connected: isModelConnected(settings),
     runtimeSync: settings.runtimeSync,
     stickerSize: settings.stickerSize,
     rerankerMode: settings.rerankerMode,

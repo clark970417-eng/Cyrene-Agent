@@ -755,6 +755,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const app = new App();
   app.init();
 });
+
 // Service Worker & PWA 安裝邏輯
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {

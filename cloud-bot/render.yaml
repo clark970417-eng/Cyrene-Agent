@@ -1,0 +1,44 @@
+services:
+  - type: web
+    name: cyrene-discord-cloud
+    runtime: docker
+    plan: starter
+    dockerfilePath: ./cloud-bot/Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    autoDeployTrigger: commit
+    envVars:
+      - key: DISCORD_BOT_TOKEN
+        sync: false
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_BASE_URL
+        value: https://generativelanguage.googleapis.com/v1beta/openai
+      - key: GEMINI_MODEL
+        value: gemini-3.5-flash-lite
+      - key: SPOTIFY_CLIENT_ID
+        sync: false
+      - key: SPOTIFY_CLIENT_SECRET
+        sync: false
+      - key: SPOTIFY_REFRESH_TOKEN
+        sync: false
+      - key: LLM_BASE_URL
+        value: https://openrouter.ai/api/v1
+      - key: LLM_MODEL
+        value: openrouter/free
+      - key: LLM_VISION_MODEL
+        value: openrouter/free
+      - key: DISCORD_REQUIRE_MENTION
+        value: "true"
+      - key: BOT_ACTIVITY
+        value: 在雲端守望永晝花庭
+      - key: DATA_DIR
+        value: /data
+      - key: PORT
+        value: "3000"
+    disk:
+      name: cyrene-memory
+      mountPath: /data
+      sizeGB: 1

@@ -169,6 +169,7 @@ import { contextRefRegistry } from "./orchestrator/tool-context";
 import { registerCustomFeaturesIpc } from "./custom-features-ipc";
 import { registerWavesUidIpc } from "./wavesuid-ipc";
 import { registerPaintIpc } from "./paint-ipc";
+import { startDesktopWindows } from "./desktop-window-startup";
 
 // Electron 的 safeStorage 在 macOS 以應用名稱選擇 Keychain 金鑰。
 // 開發版由 `electron .` 啟動時若沒有先固定名稱，會以 "Electron" 嘗試解密，
@@ -201,7 +202,8 @@ let schedulerSubsystem: SchedulerSubsystem | null = null;
 let channelsSubsystem: ChannelsSubsystem | null = null;
 let screenshotService: ScreenshotService | null = null;
 let windowManager: WindowManager | null = null;
-const isPrimaryAppInstance = app.requestSingleInstanceLock();
+const allowMultipleInstancesForTesting = process.env.CYRENE_ALLOW_MULTIPLE_INSTANCES === "1";
+const isPrimaryAppInstance = allowMultipleInstancesForTesting || app.requestSingleInstanceLock();
 if (!isPrimaryAppInstance) app.quit();
 
 app.on("second-instance", () => {
@@ -452,34 +454,7 @@ if (isPrimaryAppInstance) app.whenReady().then(async () => {
     proactiveLifecycle.proactiveConversationLifecycle,
   );
 
-  // 沿用舊版手機 PWA：以相同的 Agent Runtime、記憶與會話資料提供區域網路聊天。
-  // 手機服務獨立於 Discord；即使 Google Cloud 暫時停止，Mac App 開著時仍可使用。
-  try {
-    const mobileHandle = await startMobileServer(
-      (input: AguiRunInput) => agentRuntime.buildOptions(input),
-      (result, latestUserText, conversationId) => agentRuntime.onRunFinished(
-        result,
-        latestUserText,
-        undefined,
-        conversationId,
-      ),
-    );
-    console.log(`[MobileServer] 手機版就緒: http://${mobileHandle.localIp}:${mobileHandle.port}  Token: ${mobileHandle.token}`);
-    ipcMain.handle("mobile:get-connection-info", () => {
-      const handle = getMobileServerHandle();
-      return handle
-        ? { ip: handle.localIp, port: handle.port, token: handle.token }
-        : null;
-    });
-  } catch (error) {
-    console.error("[MobileServer] 啟動失敗:", error);
-  }
-
-  // 状态栏专用入口：打开/复用 reactChatWindow
-  ipcMain.handle(IPC.TODOS_GET_CURRENT, () => getCurrentTodos());
-
   const generalSettings = loadGeneralSettings();
-  // 初始化 Locale Context（从 GeneralSettings 的语言配置同步）
   updateLocaleContext({
     uiLocale: generalSettings.language,
     dateLocale: generalSettings.language,
@@ -494,14 +469,56 @@ if (isPrimaryAppInstance) app.whenReady().then(async () => {
   });
   windowManager = manager;
 
-  createWindow(manager);
-  setLive2dWindowSender((channel, payload) => manager.sendToMainWindow(channel, payload));
-  manager.createReactChatWindow();
-  tray = createTray({
-    toggleMainWindow: () => manager.toggleMainWindow(),
-    createSidebarWindow: () => manager.createSidebarWindow(),
-    createSettingsWindow: () => manager.createSettingsWindow(),
+  const isHeadless =
+    process.env.HEADLESS === "1" ||
+    process.env.NO_ELECTRON === "1" ||
+    process.env.NO_WINDOW === "1" ||
+    process.env.SHOW_GUI === "0";
+
+  if (!isHeadless) {
+    startDesktopWindows({
+      createWorkspaceWindow: () => manager.createReactChatWindow(),
+      createPetWindow: () => createWindow(manager),
+      onError: (kind, error) => console.error(`[Cyrene] ${kind} window startup failed:`, error),
+    });
+    setLive2dWindowSender((channel, payload) => manager.sendToMainWindow(channel, payload));
+    tray = createTray({
+      toggleMainWindow: () => manager.toggleMainWindow(),
+      createSidebarWindow: () => manager.createSidebarWindow(),
+      createSettingsWindow: () => manager.createSettingsWindow(),
+    });
+  } else {
+    console.log("[Cyrene] 正在以無界面 (Headless) 模式啟動，未自動開啟 Electron 視窗");
+  }
+
+  ipcMain.handle("mobile:get-connection-info", () => {
+    const handle = getMobileServerHandle();
+    return handle
+      ? { ip: handle.localIp, port: handle.port, token: handle.token }
+      : null;
   });
+
+  // 沿用舊版手機 PWA：以相同的 Agent Runtime、記憶與會話資料提供區域網路聊天。
+  // 手機服務獨立於 Discord；即使 Google Cloud 暫時停止，Mac App 開著時仍可使用。
+  void startMobileServer(
+      (input: AguiRunInput) => agentRuntime.buildOptions(input),
+      (result, latestUserText, conversationId) => agentRuntime.onRunFinished(
+        result,
+        latestUserText,
+        undefined,
+        conversationId,
+      ),
+    )
+    .then((mobileHandle) => {
+      console.log(`[MobileServer] 手機版就緒: http://${mobileHandle.localIp}:${mobileHandle.port}  Token: ${mobileHandle.token}`);
+    })
+    .catch((error) => {
+      console.error("[MobileServer] 啟動失敗:", error);
+    });
+
+  // 状态栏专用入口：打开/复用 reactChatWindow
+  ipcMain.handle(IPC.TODOS_GET_CURRENT, () => getCurrentTodos());
+
   // 权限模块初始化：必须在 createWindow 之后但任意工具调用之前
   bootstrapPermission();
   registerCallIpc();
@@ -552,6 +569,7 @@ app.on("before-quit", () => {
 });
 
 app.on("activate", () => {
+  windowManager?.createReactChatWindow();
   windowManager?.createMainWindow();
 });
 

@@ -63,8 +63,31 @@ export function createReactChatWindow(sessionId?: string): void {
   });
   setReactChatWindow(window);
 
+  let revealFallback: ReturnType<typeof setTimeout> | null = null;
+  const revealWindow = (reason: string): void => {
+    if (window.isDestroyed()) return;
+    if (revealFallback) {
+      clearTimeout(revealFallback);
+      revealFallback = null;
+    }
+    console.log(`[Workspace] 顯示工作台 (${reason})`);
+    if (window.isMinimized()) window.restore();
+    window.show();
+    window.focus();
+  };
+
   window.webContents.on("did-start-loading", () => {
     reactChatSession.markLoading();
+  });
+
+  window.webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+    if (!isMainFrame) return;
+    console.error("[Workspace] did-fail-load", { errorCode, errorDescription, validatedURL });
+    revealWindow("load-failed");
+  });
+
+  window.webContents.on("render-process-gone", (_event, details) => {
+    console.error("[Workspace] renderer process gone", details);
   });
 
   // search 字段必须含前导 "?"（Electron url.format() 要求）
@@ -82,10 +105,14 @@ export function createReactChatWindow(sessionId?: string): void {
   }
 
   window.once("ready-to-show", () => {
-    if (!window.isDestroyed()) window.show();
+    revealWindow("ready-to-show");
   });
 
+  window.webContents.once("did-finish-load", () => revealWindow("did-finish-load"));
+  revealFallback = setTimeout(() => revealWindow("startup-fallback"), 3000);
+
   window.on("closed", () => {
+    if (revealFallback) clearTimeout(revealFallback);
     // 闭包引用 + 仅当当前全局仍指向自己时才清理，避免旧窗口 closed 误清新窗口
     if (reactChatWindow === window) {
       setReactChatWindow(null);

@@ -11,7 +11,9 @@
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
     "declaration": false,
-    "sourceMap": true
+    "sourceMap": true,
+    "incremental": true,
+    "tsBuildInfoFile": "dist/.tsbuildinfo.preload"
   },
   "include": ["src/preload/**/*.ts", "src/shared/**/*.ts"],
   "exclude": ["src/shared/renderer-base.ts"]

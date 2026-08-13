@@ -305,6 +305,20 @@ export function registerSettingsIpc(deps: SettingsIpcDependencies): void {
     }
   });
 
+  ipcMain.handle(IPC.WEB_LLM_OPEN_LOGIN, async (_event, provider: string) => {
+    const { openWebLlmLoginWindow } = require("../web-llm/web-llm-manager");
+    await openWebLlmLoginWindow(provider);
+    return { ok: true };
+  });
+
+  ipcMain.handle(IPC.WEB_LLM_CHECK_STATUS, async (_event, provider: string) => {
+    const { getWebLlmSession } = require("../web-llm/web-llm-manager");
+    const session = getWebLlmSession();
+    const cookies = await session.cookies.get({});
+    const hasLoginCookie = cookies.some((c: { name: string }) => c.name.includes("session") || c.name.includes("auth") || c.name.includes("token"));
+    return { isLoggedIn: hasLoginCookie };
+  });
+
   ipcMain.on(IPC.SETTINGS_PREVIEW_RUNTIME_SYNC, (_event, value: "off" | "local" | "llm") => {
     const current = getModelSettings();
     const preview = normalizeModelSettings({

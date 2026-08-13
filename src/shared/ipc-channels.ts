@@ -24,6 +24,10 @@ export const IPC = {
   PET_CHAT_INPUT_VISIBILITY: "pet-chat:input-visibility",
   APP_QUIT: "app:quit",
 
+  // Web LLM (ChatGPT / Gemini Account Login)
+  WEB_LLM_OPEN_LOGIN: "web-llm:open-login",
+  WEB_LLM_CHECK_STATUS: "web-llm:check-status",
+
   // chat window
   CHAT_MINIMIZE: "chat:minimize",
   CHAT_CLOSE: "chat:close",
