@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="zh-TW" data-ui-theme="cyrene-night">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -12,6 +12,7 @@
   <link rel="stylesheet" href="../ui/fonts.css" />
   <link rel="stylesheet" href="../ui/base.css" />
   <link rel="stylesheet" href="./settings.css" />
+  <link rel="stylesheet" href="../ui/theme.css" />
 </head>
 <body>
   <div class="settings-shell">
@@ -1031,7 +1032,7 @@
           <h1>連接手機</h1>
           <p class="panel-hint">把 Cyrene 接到微信、飛書等聊天平臺。在外部渠道里的每個用戶會擁有獨立的對話上下文與記憶。</p>
 
-          <div class="channels-card">
+          <div class="channels-card channels-card--wechat">
             <div class="channels-card__header">
               <h2>微信</h2>
               <span class="switch"><input id="channels-wechat-enabled" type="checkbox" /><span class="switch__track"><span class="switch__thumb"></span></span></span>
@@ -1062,7 +1063,7 @@
             </div>
           </div>
 
-          <div class="channels-card">
+          <div class="channels-card channels-card--feishu">
             <div class="channels-card__header">
               <h2>飛書</h2>
               <span class="switch"><input id="channels-feishu-enabled" type="checkbox" /><span class="switch__track"><span class="switch__thumb"></span></span></span>
@@ -1202,7 +1203,7 @@
                 <article><small>FAILOVER WATCHDOG</small><strong>自動接手</strong><span id="channels-cloud-watchdog">讀取中</span></article>
                 <article><small>LOCAL HEARTBEAT</small><strong>20 秒週期</strong><span id="channels-cloud-heartbeat">讀取中</span></article>
               </div>
-              <div class="gcloud-safety"><span aria-hidden="true">◇</span><div><strong>本機優先保護已啟用</strong><small>本機中斷後，Google Cloud 會在約 60–75 秒內接手。</small></div></div>
+              <div class="gcloud-safety"><span aria-hidden="true">◇</span><div><strong>本機優先保護已啟用</strong><small>本機中斷後，Google Cloud 會在約 60–75 秒內自動接手。</small></div></div>
               <div class="channels-card__actions gcloud-actions">
                 <button type="button" class="btn-secondary gcloud-action" id="channels-cloud-local">⌘ 本機接管</button>
                 <button type="button" class="btn-secondary gcloud-action" id="channels-cloud-remote">☁ 雲端接管</button>
@@ -1211,6 +1212,31 @@
                 <a href="https://console.cloud.google.com/compute/instancesDetail/zones/us-central1-a/instances/instance-20260728-054602?project=project-8d91f4e9-9534-454f-a32" target="_blank" rel="noopener" class="btn-secondary gcloud-console-link">Google Cloud Console ↗</a>
               </div>
               <p class="channels-feedback" id="channels-cloud-feedback" aria-live="polite"></p>
+
+              <details class="gcloud-connection-settings">
+                <summary>連線設定（VM 位址 · SSH 憑證）</summary>
+                <label class="setting-row">
+                  <div><strong>啟用自動接手</strong><p class="tts-hint">桌面程式離線後，由 Google Cloud VM 自動接手 Discord Bot。</p></div>
+                  <span class="switch"><input id="channels-cloud-enabled" type="checkbox" /><span class="switch__track"><span class="switch__thumb"></span></span></span>
+                </label>
+                <div class="form-field">
+                  <label for="channels-cloud-host">VM 主機位址</label>
+                  <input type="text" id="channels-cloud-host" class="form-input form-input--wide" placeholder="例：34.123.45.67 或 instance-xxxx.us-central1-a.c.project.internal" autocomplete="off" />
+                </div>
+                <div class="form-field">
+                  <label for="channels-cloud-user">SSH 使用者</label>
+                  <input type="text" id="channels-cloud-user" class="form-input form-input--wide" placeholder="例：clark" autocomplete="off" />
+                </div>
+                <div class="form-field">
+                  <label for="channels-cloud-key-path">SSH 私鑰路徑</label>
+                  <div class="sticker-file-row">
+                    <input type="text" id="channels-cloud-key-path" class="form-input form-input--wide" placeholder="尚未選擇" readonly />
+                    <button type="button" class="btn-secondary" id="channels-cloud-pick-key">選擇檔案</button>
+                  </div>
+                  <p class="tts-hint">只會儲存檔案路徑；私鑰內容本身不會寫入設定檔。</p>
+                </div>
+                <button type="button" class="btn-secondary" id="channels-cloud-save">保存連線設定</button>
+              </details>
             </div>
           </div>
 

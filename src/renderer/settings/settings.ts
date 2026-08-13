@@ -3216,6 +3216,12 @@ const channelsCloudRemoteBtn = document.getElementById("channels-cloud-remote") 
 const channelsCloudRestartBtn = document.getElementById("channels-cloud-restart") as HTMLButtonElement | null;
 const channelsCloudRefreshBtn = document.getElementById("channels-cloud-refresh") as HTMLButtonElement | null;
 const channelsCloudFeedbackEl = document.getElementById("channels-cloud-feedback");
+const channelsCloudEnabledEl = document.getElementById("channels-cloud-enabled") as HTMLInputElement | null;
+const channelsCloudHostEl = document.getElementById("channels-cloud-host") as HTMLInputElement | null;
+const channelsCloudUserEl = document.getElementById("channels-cloud-user") as HTMLInputElement | null;
+const channelsCloudKeyPathEl = document.getElementById("channels-cloud-key-path") as HTMLInputElement | null;
+const channelsCloudPickKeyBtn = document.getElementById("channels-cloud-pick-key") as HTMLButtonElement | null;
+const channelsCloudSaveBtn = document.getElementById("channels-cloud-save") as HTMLButtonElement | null;
 
 let channelsInitialized = false;
 let channelsSaveTimer: number | null = null;
@@ -3742,6 +3748,10 @@ async function loadChannelsPanel(): Promise<void> {
     if (channelsDiscordCodexOwnerIdEl) channelsDiscordCodexOwnerIdEl.value = cfg?.discord?.codexImageOwnerId ?? "";
     if (channelsDiscordRequireMentionEl) channelsDiscordRequireMentionEl.checked = cfg?.discord?.requireMention !== false;
     if (channelsDiscordVoiceEnabledEl) channelsDiscordVoiceEnabledEl.checked = cfg?.discord?.voiceEnabled !== false;
+    if (channelsCloudEnabledEl) channelsCloudEnabledEl.checked = !!cfg?.discord?.cloudStandbyEnabled;
+    if (channelsCloudHostEl) channelsCloudHostEl.value = cfg?.discord?.cloudStandbyHost ?? "";
+    if (channelsCloudUserEl) channelsCloudUserEl.value = cfg?.discord?.cloudStandbyUser ?? "";
+    if (channelsCloudKeyPathEl) channelsCloudKeyPathEl.value = cfg?.discord?.cloudStandbyKeyPath ?? "";
     if (channelsSpotifyClientIdEl) channelsSpotifyClientIdEl.value = cfg?.spotify?.clientId ?? "";
     if (channelsSpotifyClientSecretEl) {
       channelsSpotifyClientSecretEl.value = "";
@@ -4117,6 +4127,38 @@ async function loadChannelsPanel(): Promise<void> {
       await refreshDiscordProfile();
     } catch (err) {
       setDiscordFeedback("err", err instanceof Error ? err.message : String(err));
+    }
+  });
+
+  channelsCloudPickKeyBtn?.addEventListener("click", async () => {
+    const picked = await window.settings.channelsDiscordPickCloudKey();
+    if (picked && channelsCloudKeyPathEl) channelsCloudKeyPathEl.value = picked;
+  });
+
+  channelsCloudSaveBtn?.addEventListener("click", async () => {
+    if (channelsCloudFeedbackEl) {
+      channelsCloudFeedbackEl.textContent = "保存中…";
+      channelsCloudFeedbackEl.className = "channels-feedback channels-feedback--info";
+    }
+    try {
+      await window.settings.channelsSaveConfig({
+        discord: {
+          cloudStandbyEnabled: channelsCloudEnabledEl?.checked ?? false,
+          cloudStandbyHost: channelsCloudHostEl?.value.trim() || undefined,
+          cloudStandbyUser: channelsCloudUserEl?.value.trim() || undefined,
+          cloudStandbyKeyPath: channelsCloudKeyPathEl?.value.trim() || undefined,
+        },
+      });
+      if (channelsCloudFeedbackEl) {
+        channelsCloudFeedbackEl.textContent = "連線設定已保存";
+        channelsCloudFeedbackEl.className = "channels-feedback channels-feedback--ok";
+      }
+      await refreshGoogleCloudControl();
+    } catch (err) {
+      if (channelsCloudFeedbackEl) {
+        channelsCloudFeedbackEl.textContent = err instanceof Error ? err.message : String(err);
+        channelsCloudFeedbackEl.className = "channels-feedback channels-feedback--err";
+      }
     }
   });
 

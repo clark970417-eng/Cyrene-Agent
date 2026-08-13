@@ -78,6 +78,8 @@ export class Live2DManager {
   private motionIndexMap: Map<string, Map<string, number>> = new Map();
   private options: Live2DManagerOptions;
   private disposed = false;
+  /** In-flight init() promise, so concurrent callers await the same load instead of racing two model loads. */
+  private initPromise: Promise<void> | null = null;
   /** Scale that fits the model into the base window (zoom=1.0). Cached once
    *  at load so applyZoom can multiply it by the user's zoom factor. */
   private baseScale = 1;
@@ -90,6 +92,17 @@ export class Live2DManager {
   }
 
   async init(): Promise<void> {
+    if (this.disposed) return;
+    if (this.initPromise) return this.initPromise;
+    this.initPromise = this.doInit();
+    try {
+      await this.initPromise;
+    } finally {
+      this.initPromise = null;
+    }
+  }
+
+  private async doInit(): Promise<void> {
     if (this.disposed) return;
     const { canvas, width, height } = this.options;
     this.app = new PIXI.Application({
@@ -169,6 +182,23 @@ export class Live2DManager {
 
   getModel(): Live2DModel | null {
     return this.model;
+  }
+
+  /** Snapshot of live resource state, for diagnostics/leak-checking (e.g. after window reload cycles). */
+  getResourceMetrics(): {
+    appActive: boolean;
+    modelLoaded: boolean;
+    disposed: boolean;
+    tickerStarted: boolean;
+    stageChildren: number;
+  } {
+    return {
+      appActive: this.app != null,
+      modelLoaded: this.model != null,
+      disposed: this.disposed,
+      tickerStarted: this.app?.ticker.started ?? false,
+      stageChildren: this.app?.stage.children.length ?? 0,
+    };
   }
 
   /**
