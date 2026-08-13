@@ -295,7 +295,7 @@ html, body {
 
 .content-frame-container {
   flex: 1;
-  min-width: 0;
+  min-width: 620px;
   min-height: 0;
   width: 100%;
   position: relative;
