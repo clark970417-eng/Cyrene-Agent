@@ -5,6 +5,7 @@ directories:
   output: release
 asar: true
 electronDist: node_modules/electron/dist
+afterPack: scripts/after-pack.cjs
 files:
   - dist/**/*
   - package.json
@@ -14,10 +15,11 @@ files:
   - skills/**/*
   - game-recipes/**/*
   - vendor/**/*
+  - "!vendor/**/.venv"
+  - "!vendor/**/.venv/**/*"
+  - "!vendor/**/node_modules"
+  - "!vendor/**/node_modules/**/*"
   - models/**/*
-extraResources:
-  - from: resources/bin/cyrene-screenshot.exe
-    to: bin/cyrene-screenshot.exe
 mac:
   icon: assets/icon.icns
   target:
@@ -30,3 +32,6 @@ mac:
 win:
   target:
     - dir
+  extraResources:
+    - from: resources/bin/cyrene-screenshot.exe
+      to: bin/cyrene-screenshot.exe
