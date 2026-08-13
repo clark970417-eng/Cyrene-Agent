@@ -290,6 +290,8 @@ interface GeneralSettings {
   launchAtLogin: boolean;
   language: "zh-CN";
   uiTheme: "classic" | "polished-pink" | "pearl-white";
+  uiIcon?: "cyrene-pink" | "cyrene-sun";
+  windowCornerRadius?: number;
 }
 
 interface UserApi {
@@ -945,6 +947,9 @@ const petZoomInput = document.getElementById("pet-zoom") as HTMLInputElement;
 const petZoomVal = document.getElementById("pet-zoom-val") as HTMLElement;
 const launchAtLoginInput = document.getElementById("launch-at-login") as HTMLInputElement;
 const uiThemeSelect = document.getElementById("ui-theme-select") as HTMLElement;
+const uiIconSelect = document.getElementById("ui-icon-select") as HTMLElement;
+const windowCornerRadiusInput = document.getElementById("window-corner-radius") as HTMLInputElement;
+const windowCornerRadiusVal = document.getElementById("window-corner-radius-val") as HTMLElement;
 const languageSelect = document.getElementById("language-select") as HTMLElement;
 const sidebarVisibleInput = document.getElementById("sidebar-visible") as HTMLInputElement;
 const tasksVisibleInput = document.getElementById("tasks-visible") as HTMLInputElement;
@@ -1069,6 +1074,19 @@ function applyUiThemeSelection(theme: GeneralSettings["uiTheme"]): void {
     button.setAttribute("aria-pressed", String(active));
   });
   document.documentElement.dataset.uiTheme = theme;
+}
+
+function normalizeUiIcon(icon: unknown): NonNullable<GeneralSettings["uiIcon"]> {
+  return icon === "cyrene-pink" ? "cyrene-pink" : "cyrene-sun";
+}
+
+function applyUiIconSelection(icon: GeneralSettings["uiIcon"]): void {
+  const value = normalizeUiIcon(icon);
+  uiIconSelect.querySelectorAll<HTMLButtonElement>(".option-block").forEach((button) => {
+    const active = button.dataset.icon === value;
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-pressed", String(active));
+  });
 }
 
 function setGeneralSaveStatus(text: string, cls?: string): void {
@@ -1384,6 +1402,9 @@ async function loadGeneralSettings(): Promise<void> {
     tasksVisibleInput.checked = cfg.tasksVisible ?? true;
     launchAtLoginInput.checked = cfg.launchAtLogin;
     applyUiThemeSelection(normalizeUiTheme(cfg.uiTheme));
+    applyUiIconSelection(cfg.uiIcon);
+    windowCornerRadiusInput.value = String(cfg.windowCornerRadius ?? 16);
+    windowCornerRadiusVal.textContent = String(cfg.windowCornerRadius ?? 16) + "px";
     applyLanguageSelection("zh-CN");
     setGeneralSaveStatus("等待保存");
   } catch {
@@ -1481,6 +1502,34 @@ petZoomInput.addEventListener("input", () => {
 });
 petZoomInput.addEventListener("change", () => {
   window.settings?.setPetZoom(Number(petZoomInput.value));
+});
+
+uiIconSelect.querySelectorAll<HTMLButtonElement>(".option-block").forEach((button) => {
+  button.addEventListener("click", async () => {
+    const icon = normalizeUiIcon(button.dataset.icon);
+    applyUiIconSelection(icon);
+    setGeneralSaveStatus("正在套用圖示…");
+    try {
+      await window.settings!.saveGeneral({ uiIcon: icon });
+      setGeneralSaveStatus("圖示已套用", "is-ok");
+    } catch {
+      setGeneralSaveStatus("套用失敗", "is-error");
+    }
+  });
+});
+
+windowCornerRadiusInput.addEventListener("input", () => {
+  windowCornerRadiusVal.textContent = windowCornerRadiusInput.value + "px";
+});
+windowCornerRadiusInput.addEventListener("change", async () => {
+  const radius = Number(windowCornerRadiusInput.value);
+  setGeneralSaveStatus("正在套用圓角…");
+  try {
+    await window.settings!.saveGeneral({ windowCornerRadius: radius });
+    setGeneralSaveStatus("圓角已套用", "is-ok");
+  } catch {
+    setGeneralSaveStatus("套用失敗", "is-error");
+  }
 });
 
 uiThemeSelect.querySelectorAll<HTMLButtonElement>(".option-block").forEach((button) => {

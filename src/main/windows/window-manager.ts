@@ -131,6 +131,14 @@ export function createWindowManager(options: WindowManagerOptions): WindowManage
 
   function setMainWindow(window: BrowserWindow): void {
     mainWindow = window;
+    // PET_ZOOM sent before the renderer registers its listener is lost.  Reapply
+    // the *effective* appearance after every load so a docked pet stays at the
+    // dock scale, while a detached pet restores the user's desktop scale.
+    window.webContents.on("did-finish-load", () => {
+      if (!mainWindow || mainWindow.isDestroyed()) return;
+      if (petDockBounds?.isDocked) applyPetDock();
+      else applyDetachedPetAppearance();
+    });
     window.once("ready-to-show", () => {
       if (!mainWindow || mainWindow.isDestroyed()) return;
       mainWindow.show();

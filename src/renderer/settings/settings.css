@@ -110,11 +110,15 @@ body {
   text-align: left;
   background: transparent;
   border: 1px solid transparent;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   transition: background 120ms ease, color 120ms ease, border-color 120ms ease, transform 120ms ease;
 }
 
 .nav-item span {
   width: 18px;
+  flex-shrink: 0;
   text-align: center;
   filter: drop-shadow(0 0 5px rgba(236, 72, 153, 0.35));
 }
@@ -973,6 +977,21 @@ html[data-embedded="true"] .settings-content {
   box-shadow: inset 0 0 0 2px var(--rb-pink-100);
 }
 .option-block .theme-swatch + span {
+  vertical-align: middle;
+}
+
+/* App icon picker previews */
+.icon-swatch {
+  display: inline-block;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--rb-radius-sm, 6px);
+  margin-right: var(--rb-space-xs, 8px);
+  vertical-align: middle;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+.option-block .icon-swatch + span {
   vertical-align: middle;
 }
 

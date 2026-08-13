@@ -19,7 +19,7 @@ const mocks = vi.hoisted(() => {
     getPosition: vi.fn(() => [20, 30]),
     setPosition: vi.fn(),
     setIcon: vi.fn(),
-    webContents: { send: vi.fn(), capturePage: vi.fn() },
+    webContents: { send: vi.fn(), capturePage: vi.fn(), on: vi.fn() },
   };
   const host = {
     isDestroyed: vi.fn(() => false),
@@ -50,6 +50,27 @@ describe("window manager pet docking", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.pet.getPosition.mockReturnValue([20, 30]);
+  });
+
+  it("渲染器重載後重新套用停靠縮放，不被桌面縮放覆蓋", async () => {
+    const { createWindowManager } = await import("./window-manager");
+    const manager = createWindowManager({
+      getCurrentAppIconPath: () => "icon.png",
+      isDev: false,
+      loadMainWindowSettingsSlice: () => ({ petZoom: 1.8, petAlwaysOnTop: true, petChatInputEnabled: true }),
+      persistMainWindowPosition: vi.fn(),
+    });
+    manager.createMainWindow();
+    manager.updatePetDock({ x: 900, y: 120, width: 220, height: 180, isDocked: true });
+    mocks.pet.webContents.send.mockClear();
+
+    const didFinishLoad = mocks.pet.webContents.on.mock.calls.find(([event]) => event === "did-finish-load")?.[1];
+    expect(didFinishLoad).toBeTypeOf("function");
+    didFinishLoad?.();
+
+    expect(mocks.pet.webContents.send).toHaveBeenCalledWith("pet:zoom", 0.45);
+    expect(mocks.pet.webContents.send).not.toHaveBeenCalledWith("pet:zoom", 1.8);
+    expect(mocks.pet.setBounds).toHaveBeenLastCalledWith(expect.objectContaining({ width: 180, height: 225 }));
   });
 
   it("uses one pet window and restores detached chat only after drag finishes", async () => {
