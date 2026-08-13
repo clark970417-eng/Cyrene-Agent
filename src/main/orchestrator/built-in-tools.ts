@@ -6,6 +6,9 @@ import { toolRegistry } from "./tool-registry";
 import { getDateLocale, getWeatherLanguage } from "../locale-context";
 import { addMcpServer } from "./mcp-manager";
 import { createPlayLive2DActionTool } from "./tools/play-live2d-action";
+import { createMemorySaveUserFactTool } from "./tools/memory-tool";
+import { createNotebookWriteTool, createNotebookSearchTool } from "./tools/notebook-tool";
+import { createWuwaTaskTool } from "./tools/wuwa-tool";
 
 let sendToLive2DWindow: (channel: string, payload?: unknown) => void = () => {};
 export function setLive2dWindowSender(sender: typeof sendToLive2DWindow): void {
@@ -1695,3 +1698,7 @@ toolRegistry.register({
 });
 
 toolRegistry.register(createPlayLive2DActionTool({ sendToLive2DWindow }));
+toolRegistry.register(createMemorySaveUserFactTool());
+toolRegistry.register(createNotebookWriteTool());
+toolRegistry.register(createNotebookSearchTool());
+toolRegistry.register(createWuwaTaskTool());

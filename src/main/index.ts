@@ -72,6 +72,7 @@ import { resolveVendorRuntimeSettings, setVendorRuntimeSettingsGetter } from "./
 
 import { toolRegistry } from "./orchestrator/tool-registry";
 import { setLive2dWindowSender } from "./orchestrator/built-in-tools";
+import { initGameRoom } from "./game-room";
 import { registerAllTools } from "./orchestrator/tool-registration";
 import { initMcpManager, pruneMcpServersByIds } from "./orchestrator/mcp-manager";
 import { syncPlaywrightMcp, PLAYWRIGHT_MCP_ID, REMOVED_BUILTIN_MCP_IDS } from "./sync-mcp-builtin";
@@ -490,6 +491,8 @@ if (isPrimaryAppInstance) app.whenReady().then(async () => {
   } else {
     console.log("[Cyrene] 正在以無界面 (Headless) 模式啟動，未自動開啟 Electron 視窗");
   }
+
+  initGameRoom((channel, payload) => manager.sendToMainWindow(channel, payload));
 
   ipcMain.handle("mobile:get-connection-info", () => {
     const handle = getMobileServerHandle();
