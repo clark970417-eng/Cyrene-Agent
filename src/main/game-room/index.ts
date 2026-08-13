@@ -77,6 +77,10 @@ export function recordGameRoomResult(result: GameResult, filePath = statsPath())
 }
 
 export function initGameRoom(sendToLive2D: (channel: string, payload?: unknown) => void): void {
+  for (const channel of [IPC.GAME_ROOM_GET_STATS, IPC.GAME_ROOM_RECORD_RESULT, IPC.GAME_ROOM_RESET_STATS]) {
+    ipcMain.removeHandler(channel);
+  }
+  ipcMain.removeAllListeners(IPC.GAME_ROOM_REACT);
   ipcMain.handle(IPC.GAME_ROOM_GET_STATS, () => readGameRoomStats());
   ipcMain.handle(IPC.GAME_ROOM_RECORD_RESULT, (_event, result: GameResult) => recordGameRoomResult(result));
   ipcMain.handle(IPC.GAME_ROOM_RESET_STATS, () => {
