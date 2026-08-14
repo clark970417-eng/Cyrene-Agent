@@ -3847,6 +3847,27 @@ html[data-embedded="true"] .settings-content {
   font-size: 16px;
   color: var(--rb-text-strong);
 }
+.channels-card__heading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.channels-card__icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  background: rgba(255, 110, 199, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 18px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+.bilibili-card__logo.channels-card__icon {
+  background: rgba(251, 114, 153, 0.16);
+  color: #fb7299;
+}
 .channels-card__hint {
   margin: 6px 0 12px 0;
   font-size: 12px;
