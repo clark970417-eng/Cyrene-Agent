@@ -4,6 +4,7 @@ import { createMainWindow, PET_WINDOW_BASE_HEIGHT, PET_WINDOW_BASE_WIDTH, type M
 import {
   createReactChatWindow,
   navigateUnifiedWorkspace,
+  createSettingsWindow as createStandaloneSettingsWindow,
 } from "./create-aux-windows";
 import { broadcastToAllWindows } from "./broadcast";
 import { PetWindowMoveController } from "../pet-window-movement";
@@ -181,7 +182,9 @@ export function createWindowManager(options: WindowManagerOptions): WindowManage
 
     createReactChatWindow,
     createSidebarWindow(): void { navigateUnifiedWorkspace("overview"); },
-    createSettingsWindow(section?: string): void { navigateUnifiedWorkspace("settings", section); },
+    // 設定用獨立視窗（1060x920, minWidth 920），不透過工作台 iframe 嵌入——
+    // 嵌入模式下容器寬度會被工作台版面擠壓，側邊欄文字在極窄寬度時會斷字。
+    createSettingsWindow(section?: string): void { createStandaloneSettingsWindow(section); },
     createTasksWindow(): void { navigateUnifiedWorkspace("tasks"); },
     createStickerManagerWindow(): void { navigateUnifiedWorkspace("stickers"); },
     createCallWindow(): void { navigateUnifiedWorkspace("call"); },
