@@ -3824,6 +3824,91 @@ html[data-embedded="true"] .settings-content {
 .channels-card--spotify { --channel-brand: #1ed760; }
 .channels-card--bilibili { --channel-brand: #fb7299; }
 .channels-card--google-cloud { --channel-brand: #7aa2ff; }
+
+/* Bilibili / Google Cloud card content -- these classes only ever existed in
+   my original settings.css (never in the friend's, since Bilibili/GCloud
+   are my own features), and were dropped during the redesign merge. The
+   HTML still emits gcloud-route/gcloud-facts/bilibili-session markup with
+   nothing to style it, which renders as a wall of unstyled stacked text. */
+.bilibili-card__header { border-bottom-color: rgba(251, 114, 153, 0.18); }
+.bilibili-card__brand { display: flex; align-items: center; gap: 11px; }
+.bilibili-card__brand h2 { margin: 0; }
+.bilibili-card__brand small { display: block; margin-top: 2px; color: rgba(255, 161, 187, 0.72); font-size: 9px; font-weight: 800; letter-spacing: 0.16em; }
+.bilibili-card__badge { padding: 5px 9px; border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 999px; color: rgba(255, 255, 255, 0.52); font-size: 10px; }
+.bilibili-card__badge.is-connected { border-color: rgba(251, 114, 153, 0.42); background: rgba(251, 114, 153, 0.12); color: #ffacc4; }
+.bilibili-session { display: grid; grid-template-columns: 148px minmax(0, 1fr); gap: 18px; align-items: center; padding: 18px; border: 1px solid rgba(251, 114, 153, 0.16); border-radius: 16px; background: linear-gradient(135deg, rgba(49, 25, 48, 0.7), rgba(19, 17, 38, 0.72)); }
+.bilibili-session__rail { display: flex; align-items: center; }
+.bilibili-session__node { display: grid; width: 42px; height: 42px; flex: 0 0 auto; place-items: center; border-radius: 13px; color: #fff; font-size: 11px; font-weight: 900; letter-spacing: 0.04em; }
+.bilibili-session__node--gx { border: 1px solid rgba(255, 255, 255, 0.16); background: linear-gradient(145deg, #772ce8, #ff3b7f); }
+.bilibili-session__node--bili { border: 1px solid rgba(255, 255, 255, 0.22); background: #fb7299; }
+.bilibili-session__line { height: 4px; flex: 1; overflow: hidden; background: rgba(255, 255, 255, 0.1); }
+.bilibili-session__line i { display: block; width: 0; height: 100%; background: linear-gradient(90deg, #b25bfa, #fb7299); transition: width 0.45s ease; }
+.channels-card--bilibili.is-connected .bilibili-session__line i { width: 100%; }
+.bilibili-session__copy { display: grid; gap: 5px; min-width: 0; }
+.bilibili-session__copy strong { color: rgba(255, 255, 255, 0.93); font-size: 14px; }
+.bilibili-session__copy span { color: rgba(255, 255, 255, 0.54); font-size: 11px; line-height: 1.55; }
+.bilibili-privacy { display: flex; gap: 10px; align-items: center; margin-top: 12px; padding: 11px 13px; border-radius: 12px; background: rgba(251, 114, 153, 0.07); color: #ffabc3; }
+.bilibili-privacy > span { font-size: 22px; }
+.bilibili-privacy div { display: grid; gap: 2px; }
+.bilibili-privacy strong { font-size: 11px; }
+.bilibili-privacy small { color: rgba(255, 255, 255, 0.48); font-size: 10px; }
+.btn-bilibili { border-color: rgba(251, 114, 153, 0.55); background: #fb7299; color: #29101b; font-weight: 800; }
+.btn-bilibili:hover:not(:disabled) { background: #ff8aaa; }
+.bilibili-portal-link { display: inline-flex; align-items: center; text-decoration: none; }
+@media (max-width: 620px) { .bilibili-session { grid-template-columns: 1fr; } .bilibili-session__rail { max-width: 180px; } }
+@media (prefers-reduced-motion: reduce) { .bilibili-session__line i { transition: none; } }
+
+.channels-card--google-cloud {
+  --gcloud-cyan: #62d9ff;
+  --gcloud-violet: #a984ff;
+}
+.gcloud-heading { display: flex; align-items: center; gap: 12px; }
+.gcloud-heading__mark { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 11px; color: #fff; font: 800 17px/1 ui-monospace, SFMono-Regular, Menlo, monospace; background: conic-gradient(from 45deg, #4285f4 0 25%, #34a853 0 50%, #fbbc05 0 75%, #ea4335 0); box-shadow: 0 0 0 4px rgba(122, 162, 255, 0.08); }
+.gcloud-heading h2 { margin: 0; }
+.gcloud-heading small { display: block; margin-top: 3px; color: rgba(255, 255, 255, 0.42); font: 700 9px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: 0.17em; text-transform: uppercase; }
+.gcloud-live-status .channels-status__dot { background: #77809b; box-shadow: none; }
+.gcloud-live-status.is-online .channels-status__dot { background: #58e5ae; box-shadow: 0 0 0 4px rgba(88, 229, 174, 0.1), 0 0 14px rgba(88, 229, 174, 0.45); }
+.gcloud-live-status.is-transition .channels-status__dot { background: #ffd166; animation: gcloud-pulse 1.2s ease-in-out infinite; }
+@keyframes gcloud-pulse { 50% { opacity: 0.38; transform: scale(0.82); } }
+.gcloud-route { display: grid; grid-template-columns: minmax(170px, 1fr) minmax(140px, 1.15fr) minmax(170px, 1fr); align-items: center; gap: 16px; margin: 18px 0; padding: 16px; border: 1px solid rgba(122, 162, 255, 0.18); border-radius: 18px; background: rgba(5, 9, 28, 0.28); }
+.gcloud-route__node { display: flex; align-items: center; gap: 11px; min-width: 0; }
+.gcloud-route__node--cloud { justify-content: flex-end; text-align: right; }
+.gcloud-route__icon { display: grid; place-items: center; flex: none; width: 38px; height: 38px; border: 1px solid rgba(255, 255, 255, 0.13); border-radius: 13px; background: rgba(255, 255, 255, 0.055); color: #dbe7ff; font-size: 17px; }
+.gcloud-route__node small { display: block; color: rgba(255, 255, 255, 0.38); font: 700 8px/1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: 0.14em; }
+.gcloud-route__node strong { display: block; margin-top: 5px; color: #f5f7ff; font-size: 13px; }
+.gcloud-route__line { position: relative; display: grid; place-items: center; min-height: 38px; }
+.gcloud-route__line::before, .gcloud-route__line::after { content: ""; position: absolute; top: 50%; width: 7px; height: 7px; border-radius: 50%; background: var(--gcloud-cyan); box-shadow: 0 0 14px var(--gcloud-cyan); transform: translateY(-50%); }
+.gcloud-route__line::before { left: 0; }
+.gcloud-route__line::after { right: 0; }
+.gcloud-route__line i { position: absolute; inset: auto 3px 50%; height: 1px; background: linear-gradient(90deg, var(--gcloud-cyan), var(--gcloud-violet)); opacity: 0.72; }
+.gcloud-route__line span { z-index: 1; padding: 5px 10px; border: 1px solid rgba(122, 162, 255, 0.22); border-radius: 999px; background: #181a39; color: #dbe7ff; font: 700 9px/1 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: nowrap; }
+.gcloud-facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.gcloud-facts article { min-width: 0; padding: 14px 15px; border: 1px solid rgba(255, 255, 255, 0.075); border-radius: 15px; background: rgba(255, 255, 255, 0.035); }
+.gcloud-facts small { display: block; color: rgba(255, 255, 255, 0.38); font: 700 8px/1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: 0.13em; }
+.gcloud-facts strong { display: block; overflow: hidden; margin: 8px 0 5px; color: #f4f5ff; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.gcloud-facts span { color: rgba(217, 226, 255, 0.58); font-size: 10px; }
+.gcloud-safety { display: flex; gap: 10px; align-items: center; margin-top: 12px; padding: 11px 13px; border: 1px solid rgba(88, 229, 174, 0.12); border-radius: 13px; background: rgba(88, 229, 174, 0.055); }
+.gcloud-safety > span { color: #58e5ae; font-size: 20px; }
+.gcloud-safety div { display: grid; gap: 2px; }
+.gcloud-safety strong { color: #c9f8e6; font-size: 11px; }
+.gcloud-safety small { color: rgba(255, 255, 255, 0.46); font-size: 10px; }
+.gcloud-actions { margin-top: 14px; }
+.gcloud-action.is-active { border-color: rgba(98, 217, 255, 0.7); background: linear-gradient(135deg, rgba(68, 118, 255, 0.8), rgba(142, 88, 226, 0.8)); color: #fff; box-shadow: 0 8px 22px rgba(76, 91, 214, 0.22); }
+.gcloud-console-link { display: inline-flex; align-items: center; text-decoration: none; }
+#channels-cloud-feedback { margin: 9px 0 0; }
+@media (max-width: 720px) {
+  .gcloud-route { grid-template-columns: 1fr; }
+  .gcloud-route__node--cloud { justify-content: flex-start; text-align: left; }
+  .gcloud-route__line { min-height: 28px; }
+  .gcloud-route__line i { inset: 0 50% 0 auto; width: 1px; height: auto; }
+  .gcloud-route__line::before, .gcloud-route__line::after { left: 50%; right: auto; top: 0; transform: translate(-50%, -50%); }
+  .gcloud-route__line::after { top: auto; bottom: 0; transform: translate(-50%, 50%); }
+  .gcloud-facts { grid-template-columns: 1fr; }
+}
+@media (prefers-reduced-motion: reduce) { .gcloud-live-status.is-transition .channels-status__dot { animation: none; } }
+
+.gcloud-connection-settings { margin-top: 14px; padding-top: 14px; border-top: 1px solid rgba(255, 255, 255, 0.08); }
+.gcloud-connection-settings summary { cursor: pointer; color: rgba(217, 226, 255, 0.72); font-size: 12px; font-weight: 700; }
 .channels-card--service .channels-status {
   padding: 4px 8px;
   border: 1px solid color-mix(in srgb, var(--channel-brand) 18%, var(--rb-border-soft));
