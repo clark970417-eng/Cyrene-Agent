@@ -2908,6 +2908,24 @@ document.querySelectorAll(".nav-item").forEach((el) => {
   });
 });
 
+// 側邊欄在極窄寬度下（外層視窗/嵌入 iframe 被壓縮時）不能讓文字斷成單字——
+// 把圖示後面的文字包成獨立 span，讓 CSS 在窄寬度時直接整段隱藏文字、只留圖示 +
+// title tooltip，而不是留下讀不出來的殘字。
+document.querySelectorAll<HTMLElement>(".nav-item").forEach((el) => {
+  const iconEl = el.querySelector("span");
+  const labelText = Array.from(el.childNodes)
+    .filter((node) => node.nodeType === Node.TEXT_NODE)
+    .map((node) => node.textContent ?? "")
+    .join("")
+    .trim();
+  if (!labelText) return;
+  el.title = labelText;
+  const label = document.createElement("span");
+  label.className = "nav-item__label";
+  label.textContent = labelText;
+  el.replaceChildren(...(iconEl ? [iconEl] : []), label);
+});
+
 schedulerNewBtn?.addEventListener("click", () => void openSchedulerEditor());
 schedulerEditorClose?.addEventListener("click", closeSchedulerEditor);
 schedulerCancelBtn?.addEventListener("click", closeSchedulerEditor);

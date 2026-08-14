@@ -573,6 +573,28 @@ html[data-embedded="true"] .settings-content {
   }
 }
 
+/* 比 620px 斷點更窄時（外層容器仍被壓縮），與其讓文字斷成單字，不如直接收成純圖示側邊欄；
+   完整名稱改用 title tooltip 顯示，功能不受影響。 */
+@media (max-width: 460px) {
+  .settings-shell {
+    grid-template-columns: 56px 1fr;
+  }
+
+  .nav-item {
+    justify-content: center;
+    padding: 8px;
+  }
+
+  .nav-item__label {
+    display: none;
+  }
+
+  .settings-nav__sub,
+  .settings-nav__brand span:not(.settings-nav__logo) {
+    display: none;
+  }
+}
+
 .field-note {
   margin-top: 8px;
   font-style: normal;
