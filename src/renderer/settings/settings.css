@@ -3822,6 +3822,426 @@ html[data-embedded="true"] .settings-content {
 .channels-card--feishu { --channel-brand: #3370ff; }
 .channels-card--discord { --channel-brand: #5865f2; }
 .channels-card--spotify { --channel-brand: #1ed760; }
+
+/* Discord / Spotify card content -- same situation as the Bilibili/Google
+   Cloud fix: these classes exist only in my original settings.css (not the
+   friend's -- Discord/Spotify in his repo never got past bare strings, per
+   the earlier inventory), and were dropped from this file during the
+   redesign merge while the HTML that depends on them stayed. Ported
+   verbatim from the pre-integration ~/cy checkout (settings.css:3258-3263,
+   3392-3428, 3504-3873). */
+.channels-card--discord {
+  scroll-margin-top: 18px;
+  box-shadow: 0 16px 42px rgba(6, 8, 24, 0.24), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+.channels-card--discord:focus { outline: none; }
+
+.spotify-card__header { border-bottom-color: rgba(29, 185, 84, 0.16); }
+.spotify-card__brand { display: flex; align-items: center; gap: 10px; }
+.spotify-card__brand h2 { margin: 0; }
+.spotify-card__brand small { display: block; margin-top: 2px; color: rgba(124, 231, 163, 0.68); font-size: 9px; font-weight: 700; letter-spacing: 0.16em; }
+.spotify-card__badge { padding: 5px 9px; border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 999px; color: rgba(255, 255, 255, 0.52); font-size: 10px; }
+.spotify-card__badge.is-connected { border-color: rgba(30, 215, 96, 0.32); background: rgba(30, 215, 96, 0.10); color: #73e99d; }
+.spotify-player { display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 15px; align-items: center; padding: 14px; border: 1px solid rgba(30, 215, 96, 0.12); border-radius: 15px; background: linear-gradient(135deg, rgba(12, 21, 21, 0.72), rgba(20, 18, 38, 0.72)); }
+.spotify-player__cover { display: grid; width: 72px; height: 72px; place-items: center; overflow: hidden; border-radius: 12px; background: linear-gradient(145deg, #25352c, #171c1a); color: #1ed760; font-size: 24px; box-shadow: 0 12px 28px rgba(0, 0, 0, 0.28); }
+.spotify-player__cover img { width: 100%; height: 100%; object-fit: cover; }
+.spotify-player__meta { display: grid; min-width: 0; gap: 4px; }
+.spotify-player__meta > span { color: #70dc97; font-size: 10px; }
+.spotify-player__meta strong { overflow: hidden; color: rgba(255, 255, 255, 0.94); font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
+.spotify-player__meta small { overflow: hidden; color: rgba(255, 255, 255, 0.5); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.spotify-player__progress { height: 4px; margin-top: 4px; overflow: hidden; border-radius: 99px; background: rgba(255, 255, 255, 0.09); }
+.spotify-player__progress i { display: block; width: 0; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #1ed760, #7ee8a4); transition: width 0.6s linear; }
+.spotify-player__controls { display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 12px; }
+.spotify-player__request { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; margin-top: 14px; }
+.spotify-player__request .form-input { min-width: 0; }
+.spotify-player__request button { white-space: nowrap; }
+.spotify-player__controls button { display: grid; width: 36px; height: 36px; place-items: center; border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 50%; background: rgba(255, 255, 255, 0.055); color: rgba(255, 255, 255, 0.75); cursor: pointer; }
+.spotify-player__controls .spotify-player__primary { width: 42px; height: 42px; border: 0; background: #1ed760; color: #101510; box-shadow: 0 8px 22px rgba(30, 215, 96, 0.22); }
+.spotify-player__controls select { width: min(210px, 36vw); margin-left: 8px; }
+.spotify-player__controls button:disabled, .spotify-player__controls select:disabled, .spotify-player__volume input:disabled { cursor: not-allowed; opacity: 0.38; }
+.spotify-player__volume { display: flex; align-items: center; gap: 10px; margin-top: 12px; color: rgba(255, 255, 255, 0.55); font-size: 10px; }
+.spotify-player__volume input { min-width: 0; flex: 1; accent-color: #1ed760; }
+.spotify-player__volume output { width: 34px; text-align: right; }
+.spotify-connection-divider { display: flex; align-items: center; gap: 10px; margin: 20px 0 10px; color: rgba(255, 255, 255, 0.45); font-size: 10px; font-weight: 700; letter-spacing: 0.1em; }
+.spotify-connection-divider::after { height: 1px; flex: 1; content: ""; background: rgba(30, 215, 96, 0.14); }
+.spotify-credentials { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.spotify-credentials .form-row { min-width: 0; }
+.spotify-credentials .form-input { box-sizing: border-box; max-width: none; }
+.btn-spotify { border-color: rgba(30, 215, 96, 0.52); background: #1db954; color: #07170d; font-weight: 700; }
+.btn-spotify:hover:not(:disabled) { background: #1ed760; }
+.spotify-portal-link { display: inline-flex; align-items: center; text-decoration: none; }
+@media (max-width: 760px) { .spotify-credentials { grid-template-columns: 1fr; } .spotify-player__request { grid-template-columns: 1fr; } .spotify-player__controls { flex-wrap: wrap; } .spotify-player__controls select { width: 100%; margin: 4px 0 0; } }
+
+.discord-identity {
+  position: relative;
+  margin-top: 14px;
+  padding: 18px;
+  overflow: visible;
+  border: 1px solid rgba(88, 101, 242, 0.30);
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at 0 0, rgba(88, 101, 242, 0.22), transparent 42%),
+    rgba(15, 12, 32, 0.46);
+}
+.discord-identity__profile {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+}
+.discord-avatar {
+  position: relative;
+  display: grid;
+  width: 66px;
+  height: 66px;
+  place-items: center;
+  flex: 0 0 auto;
+  border: 2px solid rgba(132, 143, 255, 0.66);
+  border-radius: 50%;
+  background: linear-gradient(145deg, #5865f2, #8b5cf6);
+  box-shadow: 0 0 0 5px rgba(88, 101, 242, 0.10), 0 12px 30px rgba(8, 8, 28, 0.38);
+  color: white;
+  font: 700 18px/1 var(--rb-font-sans);
+}
+.discord-emoji-input {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+.discord-emoji-input .form-input {
+  padding-right: 38px;
+}
+.discord-emoji-button {
+  width: 30px;
+  height: 30px;
+  margin-left: -34px;
+  flex: 0 0 auto;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: rgba(235, 229, 245, 0.62);
+  font-size: 18px;
+  cursor: pointer;
+}
+.discord-emoji-button:hover,
+.discord-emoji-button:focus-visible {
+  outline: none;
+  background: rgba(88, 101, 242, 0.18);
+  color: #fff;
+}
+.discord-emoji-picker {
+  position: fixed;
+  z-index: 10020;
+  display: grid;
+  width: 248px;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 3px;
+  padding: 10px;
+  border: 1px solid rgba(132, 143, 255, 0.32);
+  border-radius: 14px;
+  background: rgba(25, 19, 48, 0.98);
+  box-shadow: 0 18px 52px rgba(0, 0, 0, 0.46);
+  backdrop-filter: blur(18px);
+}
+.discord-emoji-picker[hidden] { display: none; }
+.discord-emoji-picker button {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  place-items: center;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  font-size: 19px;
+  cursor: pointer;
+}
+.discord-emoji-picker button:hover,
+.discord-emoji-picker button:focus-visible {
+  outline: none;
+  background: rgba(88, 101, 242, 0.25);
+}
+.discord-avatar img {
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  object-fit: cover;
+}
+.discord-avatar i {
+  position: absolute;
+  right: 0;
+  bottom: 1px;
+  width: 15px;
+  height: 15px;
+  border: 4px solid #171126;
+  border-radius: 50%;
+  background: #747f8d;
+}
+.discord-avatar i.is-online { background: #23a55a; }
+.discord-media-change { position: relative; justify-self: end; }
+.discord-media-menu {
+  position: absolute;
+  z-index: 40;
+  top: calc(100% + 8px);
+  right: 0;
+  display: grid;
+  width: 218px;
+  gap: 4px;
+  padding: 7px;
+  border: 1px solid rgba(132, 143, 255, 0.28);
+  border-radius: 13px;
+  background: rgba(26, 20, 48, 0.98);
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.42);
+  backdrop-filter: blur(18px);
+}
+.discord-media-menu[hidden] { display: none; }
+.discord-media-menu > button {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  padding: 9px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: rgba(254, 247, 255, 0.88);
+  text-align: left;
+  cursor: pointer;
+}
+.discord-media-menu > button:hover,
+.discord-media-menu > button:focus-visible {
+  outline: none;
+  background: rgba(88, 101, 242, 0.20);
+}
+.discord-media-menu > button > span:first-child {
+  display: grid;
+  width: 27px;
+  height: 27px;
+  place-items: center;
+  border-radius: 8px;
+  background: rgba(88, 101, 242, 0.16);
+  color: rgba(174, 182, 255, 0.96);
+}
+.discord-media-menu > button > span:last-child { display: grid; gap: 2px; }
+.discord-media-menu strong { font-size: 12px; font-weight: 600; }
+.discord-media-menu small { color: rgba(235, 229, 245, 0.44); font-size: 10px; }
+.discord-identity__nameblock { display: grid; gap: 3px; min-width: 0; }
+.discord-identity__eyebrow {
+  color: rgba(158, 167, 255, 0.88);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.13em;
+}
+.discord-identity__nameblock strong {
+  overflow: hidden;
+  color: rgba(255, 255, 255, 0.96);
+  font-size: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.discord-identity__nameblock > span:last-child {
+  overflow: hidden;
+  color: rgba(235, 229, 245, 0.54);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.discord-identity__stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 16px;
+}
+.discord-identity__stats > div {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid rgba(158, 167, 255, 0.12);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.045);
+}
+.discord-identity__stats span { color: rgba(235, 229, 245, 0.48); font-size: 10px; }
+.discord-identity__stats strong {
+  overflow: hidden;
+  color: rgba(254, 247, 255, 0.88);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.discord-guilds { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.discord-guilds > span {
+  padding: 5px 9px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(235, 229, 245, 0.50);
+  font-size: 10px;
+}
+.discord-guilds .discord-guild-chip {
+  border: 1px solid rgba(88, 101, 242, 0.22);
+  background: rgba(88, 101, 242, 0.12);
+  color: rgba(224, 227, 255, 0.84);
+}
+.discord-identity__editor {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr) minmax(110px, 0.5fr);
+  gap: 12px;
+  margin-top: 8px;
+}
+.discord-identity__editor .form-row { min-width: 0; }
+.discord-identity__editor .form-input { box-sizing: border-box; max-width: none; }
+.discord-identity__actions { align-items: center; margin-top: 14px; }
+.btn-discord {
+  border-color: rgba(132, 143, 255, 0.52);
+  background: #5865f2;
+  color: #fff;
+}
+.btn-discord:hover:not(:disabled) { background: #6875f5; }
+.discord-portal-link { display: inline-flex; align-items: center; text-decoration: none; }
+.discord-player {
+  margin-top: 18px;
+  padding: 16px;
+  border: 1px solid rgba(132, 143, 255, 0.20);
+  border-radius: 16px;
+  background: linear-gradient(145deg, rgba(26, 22, 52, 0.88), rgba(13, 12, 30, 0.74));
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.035);
+}
+.discord-player__heading,
+.discord-player__list-head,
+.discord-player__time,
+.discord-player__volume {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.discord-player h3,
+.discord-player h4 { margin: 2px 0 0; color: rgba(255, 255, 255, 0.94); font-weight: 650; }
+.discord-player h3 { font-size: 16px; }
+.discord-player h4 { font-size: 13px; }
+.discord-player__live {
+  padding: 5px 9px;
+  border: 1px solid rgba(235, 229, 245, 0.12);
+  border-radius: 999px;
+  color: rgba(235, 229, 245, 0.52);
+  font-size: 10px;
+}
+.discord-player__live.is-active { border-color: rgba(86, 224, 143, 0.30); color: #72e7a2; background: rgba(35, 165, 90, 0.10); }
+.discord-player__now {
+  display: grid;
+  grid-template-columns: 74px minmax(0, 1fr);
+  gap: 16px;
+  align-items: center;
+  margin-top: 15px;
+  padding: 14px;
+  border-radius: 14px;
+  background: radial-gradient(circle at 0 50%, rgba(88, 101, 242, 0.18), transparent 50%), rgba(255, 255, 255, 0.035);
+}
+.discord-player__record {
+  position: relative;
+  display: grid;
+  width: 66px;
+  height: 66px;
+  place-items: center;
+  border-radius: 50%;
+  background: repeating-radial-gradient(circle, #25213e 0 4px, #19162f 5px 7px);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.34);
+}
+.discord-player__record::before { position: absolute; width: 25px; height: 25px; border-radius: 50%; content: ""; background: linear-gradient(135deg, #ff77bd, #6975ff); }
+.discord-player__record img { position: absolute; inset: 5px; width: calc(100% - 10px); height: calc(100% - 10px); border-radius: 50%; object-fit: cover; }
+.discord-player__record.has-cover::after { position: absolute; width: 10px; height: 10px; border: 3px solid rgba(255, 255, 255, 0.72); border-radius: 50%; content: ""; background: #211b39; box-shadow: 0 0 0 3px rgba(25, 20, 48, 0.38); }
+.discord-player__record.has-cover::before,
+.discord-player__record.has-cover span { display: none; }
+.discord-player__record span { position: relative; z-index: 1; color: white; font-size: 12px; }
+.discord-player__record.is-playing { animation: discord-record-spin 7s linear infinite; }
+.discord-player__record.is-paused { animation-play-state: paused; }
+@keyframes discord-record-spin { to { transform: rotate(360deg); } }
+.discord-player__track { display: grid; min-width: 0; gap: 5px; }
+.discord-player__track > span { color: rgba(235, 229, 245, 0.46); font-size: 10px; }
+.discord-player__track strong { overflow: hidden; color: rgba(255, 255, 255, 0.92); font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.discord-player__progress { height: 4px; overflow: hidden; border-radius: 99px; background: rgba(255, 255, 255, 0.09); }
+.discord-player__progress i { display: block; width: 0; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #6975ff, #ff77bd); transition: width 0.5s linear; }
+.discord-player__time { color: rgba(235, 229, 245, 0.40); font-size: 9px; }
+.discord-player__controls { display: flex; justify-content: center; gap: 8px; margin-top: 12px; }
+.discord-player__controls button {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border: 1px solid rgba(158, 167, 255, 0.15);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.045);
+  color: rgba(235, 229, 245, 0.72);
+  cursor: pointer;
+}
+.discord-player__controls button:hover:not(:disabled),
+.discord-player__controls button:focus-visible { outline: none; border-color: rgba(132, 143, 255, 0.42); color: #fff; background: rgba(88, 101, 242, 0.18); }
+.discord-player__controls button[aria-pressed="true"] { color: #ff8fc8; background: rgba(255, 119, 189, 0.12); }
+.discord-player__controls .discord-player__primary { width: 40px; height: 40px; margin-top: -3px; border: 0; border-radius: 50%; background: linear-gradient(135deg, #6875f5, #a85fe5); color: #fff; box-shadow: 0 8px 20px rgba(88, 101, 242, 0.28); }
+.discord-player button:disabled,
+.discord-player input:disabled { cursor: not-allowed; opacity: 0.38; }
+.discord-player__volume { gap: 10px; margin-top: 13px; color: rgba(235, 229, 245, 0.56); font-size: 10px; }
+.discord-player__volume input { min-width: 0; flex: 1; accent-color: #7d79fa; }
+.discord-player__volume output { width: 34px; color: rgba(235, 229, 245, 0.72); text-align: right; }
+.discord-player__library { margin-top: 14px; padding-top: 13px; border-top: 1px solid rgba(158, 167, 255, 0.10); }
+.discord-player__list-head button { padding: 5px 8px; border: 0; border-radius: 8px; background: rgba(255, 255, 255, 0.05); color: rgba(235, 229, 245, 0.55); font-size: 9px; cursor: pointer; }
+.discord-player__list-actions { display: flex; align-items: center; gap: 6px; }
+.discord-player__tabs { display: flex; gap: 2px; padding: 2px; border: 1px solid rgba(158, 167, 255, 0.10); border-radius: 10px; background: rgba(7, 6, 20, 0.28); }
+.discord-player__tabs button { background: transparent; }
+.discord-player__tabs button[aria-selected="true"] { color: #fff; background: linear-gradient(135deg, rgba(105, 117, 255, 0.36), rgba(255, 119, 189, 0.24)); box-shadow: inset 0 0 0 1px rgba(190, 181, 255, 0.12); }
+.discord-player__tabs button:focus-visible,
+.discord-player__list-actions > button:focus-visible { outline: 2px solid rgba(132, 143, 255, 0.68); outline-offset: 2px; }
+.discord-player__queue { display: grid; max-height: 210px; gap: 4px; margin: 9px 0 0; padding: 0; overflow: auto; list-style: none; }
+.discord-player__queue[hidden] { display: none; }
+.discord-player__queue li { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto auto; gap: 8px; align-items: center; padding: 8px; border-radius: 9px; color: rgba(235, 229, 245, 0.68); font-size: 10px; }
+.discord-player__queue li:hover { background: rgba(255, 255, 255, 0.04); }
+.discord-player__queue li.is-current { background: rgba(255, 119, 189, 0.09); color: #ff96ca; }
+.discord-player__queue li.is-empty { display: block; color: rgba(235, 229, 245, 0.36); text-align: center; }
+.discord-player__queue strong { overflow: hidden; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.discord-player__queue small { color: rgba(235, 229, 245, 0.35); }
+.discord-player__queue button { width: 24px; height: 24px; padding: 0; border: 0; border-radius: 7px; background: transparent; color: rgba(235, 229, 245, 0.36); cursor: pointer; }
+.discord-player__queue button:hover { color: #ff8aaa; background: rgba(255, 102, 142, 0.10); }
+.discord-player__favorites { max-height: 300px; gap: 7px; }
+.discord-player__queue li.discord-player__favorite {
+  position: relative;
+  grid-template-columns: 42px minmax(0, 1fr) 28px;
+  gap: 10px;
+  min-height: 48px;
+  padding: 7px 8px 7px 11px;
+  overflow: hidden;
+  border: 1px solid rgba(158, 167, 255, 0.09);
+  background: linear-gradient(100deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.018));
+}
+.discord-player__queue li.discord-player__favorite::before { position: absolute; inset: 0 auto 0 0; width: 3px; content: ""; background: #a87bff; }
+.discord-player__queue li.discord-player__favorite.is-spotify::before { background: #1ed760; }
+.discord-player__queue li.discord-player__favorite.is-bilibili::before { background: #fb7299; }
+.discord-player__queue li.discord-player__favorite.is-youtube::before { background: #ff4e58; }
+.discord-player__queue li.discord-player__favorite:hover { border-color: rgba(158, 167, 255, 0.20); background: linear-gradient(100deg, rgba(105, 117, 255, 0.10), rgba(255, 119, 189, 0.045)); }
+.discord-player__favorite-cover { position: relative; display: grid; width: 42px; height: 42px; place-items: center; overflow: hidden; border-radius: 9px; background: radial-gradient(circle at 30% 20%, rgba(255, 119, 189, 0.46), transparent 46%), #27213f; color: rgba(255, 255, 255, 0.72); font-size: 14px; }
+.discord-player__favorite-cover img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.discord-player__favorite-copy { display: grid; min-width: 0; gap: 3px; }
+.discord-player__favorite-copy a { overflow: hidden; color: rgba(255, 255, 255, 0.90); font-size: 11px; font-weight: 600; line-height: 1.25; text-decoration: none; text-overflow: ellipsis; white-space: nowrap; }
+.discord-player__favorite-copy a:hover { color: #ff9bce; text-decoration: underline; text-underline-offset: 2px; }
+.discord-player__favorite-copy small { overflow: hidden; color: rgba(235, 229, 245, 0.38); text-overflow: ellipsis; white-space: nowrap; }
+.discord-player__favorite-meta { display: flex; align-items: center; justify-content: space-between; color: rgba(235, 229, 245, 0.36); font-size: 8px; letter-spacing: 0.03em; }
+.discord-player__favorite-meta span { color: rgba(204, 198, 255, 0.72); font-weight: 700; text-transform: uppercase; }
+.discord-player__favorite.is-spotify .discord-player__favorite-meta span { color: #69e798; }
+.discord-player__favorite.is-bilibili .discord-player__favorite-meta span { color: #ff91b0; }
+.discord-player__favorite.is-youtube .discord-player__favorite-meta span { color: #ff8e95; }
+.discord-player__favorite-open { display: grid; width: 28px; height: 28px; place-items: center; border-radius: 8px; color: rgba(235, 229, 245, 0.45); font-size: 13px; text-decoration: none; }
+.discord-player__favorite-open:hover,
+.discord-player__favorite-open:focus-visible { outline: none; color: #fff; background: rgba(105, 117, 255, 0.18); }
+.discord-player__queue li.discord-player__favorites-empty { padding: 20px 12px; line-height: 1.6; }
+@media (prefers-reduced-motion: reduce) { .discord-player__record.is-playing { animation: none; } }
+.discord-connection-divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 22px 0 12px;
+  color: rgba(235, 229, 245, 0.46);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+}
+.discord-connection-divider::after { height: 1px; flex: 1; content: ""; background: rgba(255, 182, 220, 0.11); }
 .channels-card--bilibili { --channel-brand: #fb7299; }
 .channels-card--google-cloud { --channel-brand: #7aa2ff; }
 
@@ -4524,4 +4944,293 @@ html[data-embedded="true"] .settings-content {
 }
 .music-search-row__play {
   margin: 0;
+}
+
+/* ==========================================================================
+   Cyrene Studio settings layout
+   Keeps dense service configuration readable inside the workspace iframe.
+   ========================================================================== */
+.settings-shell {
+  grid-template-columns: 174px minmax(0, 1fr);
+}
+
+.settings-nav {
+  padding: 16px 10px 12px;
+  background: color-mix(in srgb, var(--rb-bg-1) 90%, transparent);
+}
+
+.settings-nav__header {
+  padding: 2px 8px 13px;
+}
+
+.settings-nav__brand {
+  font-size: 16px;
+  letter-spacing: 0.02em;
+  text-shadow: none;
+}
+
+.settings-nav__sub {
+  margin-top: 3px;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+}
+
+.settings-nav__list {
+  gap: 3px;
+}
+
+.nav-item {
+  position: relative;
+  min-height: 36px;
+  padding: 8px 10px;
+  border-radius: 9px;
+  font-size: 12px;
+}
+
+.nav-item:hover {
+  transform: none;
+}
+
+.nav-item.is-active {
+  background: linear-gradient(90deg, color-mix(in srgb, var(--rb-pink-500) 15%, transparent), color-mix(in srgb, var(--rb-violet-500) 8%, transparent));
+  border-color: color-mix(in srgb, var(--rb-pink-500) 22%, transparent);
+  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--rb-pink-500) 84%, #ffffff);
+}
+
+.settings-titlebar {
+  min-height: 54px;
+  padding-inline: 22px 14px;
+  background: color-mix(in srgb, var(--rb-bg-1) 94%, transparent);
+}
+
+.settings-titlebar__title {
+  text-shadow: none;
+}
+
+.settings-content {
+  padding: clamp(16px, 2vw, 24px);
+  background:
+    radial-gradient(circle at 92% 4%, color-mix(in srgb, var(--rb-pink-500) 6%, transparent), transparent 28%),
+    color-mix(in srgb, var(--rb-bg-0) 78%, var(--rb-bg-1));
+}
+
+html[data-embedded="true"] .settings-content {
+  padding-top: clamp(16px, 2vw, 24px);
+}
+
+.settings-panel {
+  width: min(100%, 1080px);
+  margin-inline: auto;
+  padding: clamp(18px, 2.2vw, 26px);
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--rb-card-bg) 96%, transparent);
+  border-color: var(--rb-border-soft);
+  box-shadow: var(--rb-shadow-card);
+}
+
+.panel-heading {
+  gap: 12px;
+  margin-bottom: 20px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--rb-border-faint);
+}
+
+.panel-heading__icon,
+.placeholder-card__icon {
+  width: 42px;
+  height: 42px;
+  border-radius: 13px;
+  font-size: 20px;
+  filter: none;
+}
+
+.panel-heading h1,
+.placeholder-card h1 {
+  font-size: 18px;
+  line-height: 1.35;
+}
+
+.panel-heading p,
+.placeholder-card p {
+  max-width: 68ch;
+  line-height: 1.65;
+}
+
+.form-grid {
+  gap: 16px;
+}
+
+.field,
+.memory-field,
+.tts-field {
+  gap: 6px;
+}
+
+.field input,
+.field select,
+.field textarea {
+  min-height: 40px;
+  border-radius: 10px;
+}
+
+.channels-card {
+  margin-top: 12px;
+  padding: 17px 18px;
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--rb-card-bg) 86%, var(--rb-bg-2));
+  box-shadow: none;
+}
+
+.channels-card--service::before {
+  inset-block: 17px;
+  width: 2px;
+}
+
+.channels-card__header {
+  min-height: 38px;
+  margin-bottom: 12px;
+}
+
+.channels-card__header h2 {
+  font-size: 15px;
+  line-height: 1.35;
+}
+
+.channels-card__hint,
+.channels-card__body,
+.bilibili-session__copy span,
+.gcloud-safety small,
+.cloud-safety small {
+  line-height: 1.65;
+}
+
+.channels-card__actions {
+  margin-top: 12px;
+}
+
+.btn-secondary,
+.btn-reveal {
+  min-height: 30px;
+  padding-inline: 12px;
+  border-radius: 9px;
+}
+
+.bilibili-session {
+  grid-template-columns: 132px minmax(0, 1fr);
+  gap: 16px;
+  padding: 15px;
+  border-radius: 13px;
+}
+
+.gcloud-route {
+  gap: 12px;
+  margin-block: 14px;
+  padding: 14px;
+  border-radius: 14px;
+}
+
+.gcloud-facts article,
+.cloud-handoff__node {
+  padding: 11px 12px;
+  border-radius: 11px;
+}
+
+html[data-ui-theme="cyrene-night"] .settings-shell {
+  background:
+    radial-gradient(circle at 10% -8%, rgba(211, 78, 144, 0.10), transparent 30%),
+    #0f0b15;
+  border-color: var(--rb-border-soft);
+}
+
+html[data-ui-theme="cyrene-night"] .settings-shell::before {
+  opacity: 0.14;
+}
+
+html[data-ui-theme="cyrene-night"] .settings-panel {
+  background: rgba(25, 18, 33, 0.92);
+}
+
+html[data-ui-theme="cyrene-night"] .channels-card {
+  background: rgba(255, 255, 255, 0.028);
+}
+
+html[data-ui-theme="pearl-white"] .settings-content {
+  background:
+    radial-gradient(circle at 92% 4%, rgba(216, 94, 145, 0.055), transparent 28%),
+    #f4f0f5;
+}
+
+html[data-ui-theme="pearl-white"] .settings-panel,
+html[data-ui-theme="pearl-white"] .channels-card {
+  background: rgba(255, 255, 255, 0.94);
+}
+
+html[data-ui-theme="pearl-white"] :is(
+  .bilibili-session__copy strong,
+  .gcloud-route__node strong,
+  .gcloud-facts strong,
+  .gcloud-safety strong
+) {
+  color: var(--rb-text-strong);
+}
+
+html[data-ui-theme="pearl-white"] :is(
+  .bilibili-session__copy span,
+  .bilibili-privacy small,
+  .gcloud-heading small,
+  .gcloud-route__node small,
+  .gcloud-facts small,
+  .gcloud-facts span,
+  .gcloud-safety small,
+  .gcloud-connection-settings summary
+) {
+  color: var(--rb-text-muted);
+}
+
+html[data-ui-theme="pearl-white"] :is(.bilibili-session, .gcloud-route) {
+  background: #f8f5f9;
+  border-color: var(--rb-border-soft);
+}
+
+html[data-ui-theme="pearl-white"] .gcloud-route__line span {
+  color: #4f4260;
+  background: #ffffff;
+}
+
+@media (max-width: 980px) {
+  .settings-shell {
+    grid-template-columns: 158px minmax(0, 1fr);
+  }
+
+  .settings-content {
+    padding: 14px;
+  }
+
+  .settings-panel {
+    padding: 18px;
+  }
+
+  .gcloud-route,
+  .cloud-handoff {
+    grid-template-columns: 1fr;
+  }
+
+  .gcloud-route__node--cloud {
+    justify-content: flex-start;
+    text-align: left;
+  }
+
+  .gcloud-route__line,
+  .cloud-handoff__line {
+    display: none;
+  }
+}
+
+@media (max-width: 720px) {
+  .form-grid,
+  .security-grid,
+  .cloud-settings-grid,
+  .gcloud-facts {
+    grid-template-columns: 1fr;
+  }
 }
