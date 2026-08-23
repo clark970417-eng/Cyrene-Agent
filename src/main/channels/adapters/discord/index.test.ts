@@ -336,6 +336,14 @@ describe("DiscordAdapter natural-language image requests", () => {
     )).toBe("我想看你穿黑絲");
   });
 
+  it("accepts a natural full-body photo request from the image owner", () => {
+    expect(extractOwnerCodexImageRequest(
+      "我想看你的全身照",
+      config,
+      "798893182883463179",
+    )).toBe("我想看你的全身照");
+  });
+
   it("accepts an implied Cyrene outfit request without requiring 你穿", () => {
     expect(extractOwnerCodexImageRequest(
       "我想看白絲",
