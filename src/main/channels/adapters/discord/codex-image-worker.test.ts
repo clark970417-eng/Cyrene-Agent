@@ -5,6 +5,7 @@ import * as path from "path";
 import {
   buildCodexImageWorkerArgs,
   buildOnDemandCodexImagePrompt,
+  resolveCodexCli,
   resolveCodexImageWorkingDirectory,
   shouldUseCyreneAnimeStyleReference,
 } from "./codex-image-worker";
@@ -65,6 +66,23 @@ describe("on-demand Codex image worker", () => {
     fs.writeFileSync(asarPath, "archive");
     fs.mkdirSync(userDataPath);
 
-    expect(resolveCodexImageWorkingDirectory(asarPath, userDataPath)).toBe(userDataPath);
+    expect(resolveCodexImageWorkingDirectory(asarPath, userDataPath)).toBe(fs.realpathSync(userDataPath));
+  });
+
+  it("不會把目錄或 app.asar 內的虛擬路徑當成 Codex 執行檔", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "cyrene-codex-cli-"));
+    temporaryDirectories.push(root);
+    const executable = path.join(root, "codex");
+    const asarExecutable = path.join(root, "app.asar", "codex");
+    fs.writeFileSync(executable, "#!/bin/sh\nexit 0\n", { mode: 0o700 });
+
+    expect(resolveCodexCli([root, asarExecutable, executable])).toBe(fs.realpathSync(executable));
+  });
+
+  it("沒有實體可執行檔時回報清楚錯誤", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "cyrene-codex-cli-missing-"));
+    temporaryDirectories.push(root);
+    expect(() => resolveCodexCli([root, path.join(root, "app.asar", "codex")]))
+      .toThrow(/找不到本機 Codex/);
   });
 });

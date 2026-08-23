@@ -11,32 +11,56 @@ import {
 } from "./codex-image-queue";
 
 const OWNER_ID = "798893182883463179";
-const CODEX_CLI_CANDIDATES = [
-  process.env.CYRENE_CODEX_CLI,
-  "/Applications/ChatGPT.app/Contents/Resources/codex",
-].filter((value): value is string => Boolean(value));
-
 export function shouldUseCyreneAnimeStyleReference(prompt: string): boolean {
   return /(?:黑絲|白絲|絲襪|褲襪|網襪|過膝襪|長襪|black\s*(?:tights|pantyhose|stockings)|white\s*(?:tights|pantyhose|stockings))/i.test(prompt);
 }
 
-function resolveCodexCli(): string {
-  const cli = CODEX_CLI_CANDIDATES.find((candidate) => fs.existsSync(candidate));
+export function resolveCodexCli(candidates: Array<string | undefined> = [
+  process.env.CYRENE_CODEX_CLI,
+  path.join(process.resourcesPath, "codex"),
+  "/Applications/ChatGPT.app/Contents/Resources/codex",
+  "/Applications/Codex.app/Contents/Resources/codex",
+]): string {
+  const cli = candidates.find((candidate): candidate is string => {
+    if (!candidate || /\.asar(?:[/\\]|$)/i.test(candidate)) return false;
+    try {
+      const resolved = fs.realpathSync(candidate);
+      if (!fs.statSync(resolved).isFile()) return false;
+      fs.accessSync(resolved, fs.constants.X_OK);
+      return true;
+    } catch {
+      return false;
+    }
+  });
   if (!cli) throw new Error("找不到本機 Codex 執行程式。");
-  return cli;
+  return fs.realpathSync(cli);
 }
 
 export function resolveCodexImageWorkingDirectory(appPath: string, userDataPath: string): string {
   const configured = process.env.CYRENE_CODEX_WORKSPACE;
   for (const candidate of [configured, appPath, userDataPath]) {
-    if (!candidate) continue;
+    if (!candidate || /\.asar(?:[/\\]|$)/i.test(candidate)) continue;
     try {
-      if (fs.statSync(candidate).isDirectory()) return candidate;
+      const resolved = fs.realpathSync(candidate);
+      if (fs.statSync(resolved).isDirectory()) return resolved;
     } catch {
       // 繼續嘗試下一個可寫目錄。
     }
   }
   throw new Error("找不到 Codex 圖片工作目錄。");
+}
+
+function materializeStyleReference(sourcePath: string, bridgeRoot: string): string {
+  const referenceDirectory = path.join(bridgeRoot, "references");
+  const targetPath = path.join(referenceDirectory, "cyrene-anime-style.png");
+  fs.mkdirSync(referenceDirectory, { recursive: true, mode: 0o700 });
+  const source = fs.readFileSync(sourcePath);
+  if (!fs.existsSync(targetPath) || !fs.readFileSync(targetPath).equals(source)) {
+    const temporary = `${targetPath}.${process.pid}.tmp`;
+    fs.writeFileSync(temporary, source, { mode: 0o600 });
+    fs.renameSync(temporary, targetPath);
+  }
+  return targetPath;
 }
 
 function safeCodexEnvironment(): NodeJS.ProcessEnv {
@@ -123,9 +147,14 @@ async function runCodexImageWorker(job: CodexImageJob, bridgeRoot: string): Prom
   // 打包版 getAppPath() 是 app.asar 檔案，不能當 spawn cwd，否則會 ENOTDIR。
   const workingDirectory = resolveCodexImageWorkingDirectory(appPath, app.getPath("userData"));
   const cyreneAnimeStyleReference = path.join(appPath, "assets", "image-references", "cyrene-black-tights-style.png");
-  const styleReferencePath = shouldUseCyreneAnimeStyleReference(job.prompt)
+  const packagedStyleReferencePath = shouldUseCyreneAnimeStyleReference(job.prompt)
     && fs.existsSync(cyreneAnimeStyleReference)
     ? cyreneAnimeStyleReference
+    : undefined;
+  // app.asar 內的資產可由 Electron 讀取，但外部 Codex CLI 無法直接開啟；
+  // 先實體化到 bridge 目錄，避免 CLI 收到虛擬封裝路徑。
+  const styleReferencePath = packagedStyleReferencePath
+    ? materializeStyleReference(packagedStyleReferencePath, bridgeRoot)
     : undefined;
   const prompt = buildOnDemandCodexImagePrompt(job.id, bridgeRoot, styleReferencePath);
   await new Promise<void>((resolve, reject) => {
