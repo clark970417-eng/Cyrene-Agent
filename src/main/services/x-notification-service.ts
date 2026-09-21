@@ -461,6 +461,13 @@ export class XNotificationService {
     }
 
     try {
+      const recent = await targetChannel.messages.fetch({ limit: 50 }).catch(() => null);
+      if (recent?.some((message) =>
+        message.content.includes(tweet.url)
+        || message.embeds.some((item) => item.url === tweet.url || item.description?.includes(tweet.url)))) {
+        console.log(LOG, `Tweet ${tweet.id} already exists in #${targetChannel.name}; marking it delivered.`);
+        return true;
+      }
       await targetChannel.send({
         content: `📢 **@${tweet.authorUsername}** 發布了新的 X 動態：\n${tweet.url}`,
         embeds: [embed],

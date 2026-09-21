@@ -112,6 +112,7 @@ const config: CloudBotConfig = {
   ttsModel: "gemini-3.1-flash-tts-preview",
   ttsVoiceName: "Leda",
   ttsMaxChars: 900,
+  imageModel: "gemini-3.1-flash-image",
   allowedUserIds: new Set(["owner"]),
   allowedGuildIds: new Set(),
   allowedChannelIds: new Set(),

@@ -32,6 +32,9 @@ import { createXiaoAiChatRoute } from "./xiaoai-chat.js";
 import { createVoiceSampleUploadRoute, createXiaoAiSpeechRoute } from "./xiaoai-voice.js";
 import { HsrCloudDailyService, isHsrDailyCommand, startHsrDailyScheduler, type HsrDailyResult } from "./hsr-daily.js";
 import { buildCloudCommandFallbackPrompt } from "./cloud-command-fallback.js";
+import { generateCloudImage } from "./cloud-image.js";
+import { buildAchievementsEmbed, buildChessEmbed, buildTarotEmbed, CompanionFeatureStore } from "./companion-features.js";
+import { CloudNotificationService } from "./cloud-notifications.js";
 
 const config = loadConfig();
 const memory = new MemoryStore(config.dataDir, config.historyMessages);
@@ -40,6 +43,7 @@ const favorites = new FavoriteStore(`${config.dataDir}/music-favorites.json`);
 const music = new CloudMusicPlayer(config.dataDir);
 const musicUsage = new MusicUsageStore(`${config.dataDir}/cloud-music-usage.json`, config.musicMonthlyMinutes);
 const checkins = new CloudCheckinStore(`${config.dataDir}/checkin.json`);
+const companionFeatures = new CompanionFeatureStore(`${config.dataDir}/companion-features.json`);
 const hsrDaily = new HsrCloudDailyService({
   enabled: config.hsrDailyEnabled,
   uid: config.hsrDailyUid,
@@ -64,6 +68,7 @@ const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildVoiceStates, GatewayIntentBits.GuildMessages, GatewayIntentBits.DirectMessages, GatewayIntentBits.MessageContent],
   partials: [Partials.Channel],
 });
+const notifications = new CloudNotificationService(client, config.dataDir);
 
 async function refreshCompanionPresence(force = false): Promise<void> {
   if (!client.isReady()) return;
@@ -94,7 +99,21 @@ function decorateCloudReply(message: Message, text: string, userText = ""): stri
   const emojiName = selectCloudDiscordEmojiName(userText, normalized);
   if (!emojiName || !message.guild) return normalized;
   const emoji = message.guild.emojis.cache.find((candidate) => candidate.name === emojiName);
+  if (emoji) companionFeatures.recordEmoji(emojiName);
   return emoji ? `${normalized}\n${emoji}` : normalized;
+}
+
+async function replyInteractionWithVoice(interaction: ChatInputCommandInteraction, text: string): Promise<void> {
+  try {
+    const speech = await synthesizeGeminiSpeech(config, text);
+    await interaction.editReply({
+      content: text,
+      files: [new AttachmentBuilder(speech.audio, { name: speech.fileName, description: "昔漣的繁體中文語音回覆" })],
+    });
+  } catch (error) {
+    console.error("[CloudTTS] Slash 語音產生失敗", error);
+    await interaction.editReply(`${text}\n\n（語音暫時沒有成功產生，我先用文字陪你。）`);
+  }
 }
 
 async function replyToMessage(message: Message, text: string, userText = ""): Promise<void> {
@@ -304,6 +323,7 @@ client.on("messageCreate", (message) => {
 
       // 問候只在背景簽到，之後仍走一般 AI 對話。
       if (isCloudCheckinGreeting(input)) checkins.record();
+      companionFeatures.record("message");
 
       if (wavesUidCommand) {
         await handleWavesUidMessage(message, input, client.user?.id ?? "");
@@ -379,6 +399,7 @@ async function handleSlash(interaction: ChatInputCommandInteraction): Promise<vo
     }
     if (interaction.commandName === "checkin") {
       const stats = checkins.record();
+      companionFeatures.syncCheckins(stats.total);
       const charms = [
         "🌸【平安御守】願夥伴今天事事順心，心情如春花般燦爛♪",
         "✨【幸運御守】今天會有意想不到的小美好降臨在夥伴身上喔～",
@@ -416,6 +437,7 @@ async function handleSlash(interaction: ChatInputCommandInteraction): Promise<vo
         await fastInteractionReply(interaction, "正在準備 Discord 語音串流…", false);
         try {
           const track = await music.playUrl(channel, value);
+          companionFeatures.record("music");
           await editInteractionReply(interaction, `▶️ 正在 **${channel.name}** 播放 **${track.title}**。\n${musicLimitMessage()}`);
         } catch (error) {
           await editInteractionReply(interaction, `Discord 語音播放失敗：${error instanceof Error ? error.message : String(error)}`);
@@ -491,6 +513,7 @@ async function handleSlash(interaction: ChatInputCommandInteraction): Promise<vo
           }
           await fastInteractionReply(interaction, "正在播放既有收藏…", false);
           const first = await music.playFavorites(channel, entries);
+          companionFeatures.record("music");
           await editInteractionReply(interaction, `▶️ 從 **${first.title}** 開始播放 ${entries.length} 首收藏。\n${musicLimitMessage()}`);
         }
       } catch (error) {
@@ -527,6 +550,20 @@ async function handleSlash(interaction: ChatInputCommandInteraction): Promise<vo
       await fastInteractionReply(interaction, lines.join(""), false);
       return;
     }
+    if (interaction.commandName === "nowplaying") {
+      const snapshot = music.snapshot();
+      await fastInteractionReply(interaction, snapshot.current
+        ? `🎵 正在播放：**${snapshot.current.title}**\n狀態：${snapshot.status} · 音量 ${snapshot.volumePercent}%`
+        : "目前沒有正在播放的音樂，請先使用 `/play`。", false);
+      return;
+    }
+    if (interaction.commandName === "history") {
+      const tracks = music.snapshot().history.slice(0, 25);
+      await fastInteractionReply(interaction, tracks.length
+        ? `🕘 **最近播放**\n${tracks.map((track, index) => `${index + 1}. ${track.title}`).join("\n")}`
+        : "目前還沒有雲端播放紀錄。", false);
+      return;
+    }
     if (interaction.commandName === "volume") {
       const percent = music.setVolume(interaction.options.getInteger("percent", true));
       await fastInteractionReply(interaction, `🔊 Discord 語音音量已設為 ${percent}%。`);
@@ -558,18 +595,72 @@ async function handleSlash(interaction: ChatInputCommandInteraction): Promise<vo
       return;
     }
     if (interaction.commandName === "help") {
-      await fastInteractionReply(interaction, "昔漣雲端模式已開放聊天、附圖理解、語音附件、Spotify 裝置控制、Discord 語音網址播放、雲端收藏、簽到、鳴潮查詢與陪伴互動。使用 `/like` 收藏 YT/Bili 等直接網址，再用 `/list` 播放；只有需要 Mac 畫面、桌面程式或即時麥克風的功能會等本機上線。", false);
+      await fastInteractionReply(interaction, "昔漣雲端模式已開放聊天、附圖理解、語音附件、Gemini 畫圖、Spotify 裝置控制、Discord 語音網址播放、雲端收藏、通知、簽到、鳴潮查詢與陪伴互動。使用 `/like` 收藏 YT/Bili 等直接網址，再用 `/list` 播放；需要 Mac 畫面或即時麥克風輸入的操作會使用雲端替代流程。", false);
       return;
     }
-    if (["emojis", "sleep", "dj", "photo", "achievements", "tarot", "chess", "guesssong", "whisper"].includes(interaction.commandName)) {
-      const detail = interaction.commandName === "whisper"
-        ? interaction.options.getString("content")?.trim()
-        : "";
+    if (interaction.commandName === "emojis") {
+      const usage = Object.entries(companionFeatures.load().emojiUsage).sort((a, b) => b[1] - a[1]).slice(0, 10);
+      await fastInteractionReply(interaction, usage.length
+        ? `📊 **昔漣的表情符號使用頻率 (Top 10)**\n\n${usage.map(([name, count]) => `\`${name}\`: **${count}** 次`).join("\n")}`
+        : "昔漣目前還沒有記錄使用過任何表情符號喔！");
+      return;
+    }
+    if (interaction.commandName === "achievements") {
+      await interaction.reply({ embeds: [buildAchievementsEmbed(interaction.user.displayName || interaction.user.username, companionFeatures.load())] });
+      return;
+    }
+    if (interaction.commandName === "tarot") {
+      await interaction.reply({ embeds: [buildTarotEmbed(interaction.user.displayName || interaction.user.username)] });
+      return;
+    }
+    if (interaction.commandName === "chess") {
+      await interaction.reply({ embeds: [buildChessEmbed(interaction.user.displayName || interaction.user.username)] });
+      return;
+    }
+    if (interaction.commandName === "sleep") {
+      await interaction.reply("🌙 **昔漣助眠白噪音模式已啟動**\n昔漣正在為你開導柔和的海浪與篝火聲，放輕鬆，祝夥伴今晚有個甜美的夢～✨");
+      return;
+    }
+    if (interaction.commandName === "dj") {
+      await interaction.reply("🎙️ **昔漣聲優 DJ 導播模式已啟用**\n接下來點歌或切歌時，昔漣會在音訊播放前用語音為你溫柔導播曲目～♪");
+      return;
+    }
+    if (interaction.commandName === "guesssong") {
+      await interaction.reply("🎵 **聽歌猜曲名互動小遊戲**\n請播放一首歌曲，並在頻道輸入歌詞或曲名猜猜看！昔漣會為你計分喔～✨");
+      return;
+    }
+    if (interaction.commandName === "whisper") {
+      const content = interaction.options.getString("content", true).trim();
+      companionFeatures.whisper(content);
+      await interaction.reply(`💖 **悄悄話已珍藏**\n「已幫你把這段心事收進《昔漣與夥伴的共享筆記本》囉：『${content}』～✨」`);
+      return;
+    }
+    if (interaction.commandName === "asmr" || interaction.commandName === "sing") {
       await interaction.deferReply();
-      const prompt = `使用者在 Discord 使用 /${interaction.commandName}${detail ? `，內容：${detail}` : ""}。請以昔漣的人格直接完成這個陪伴互動；若它需要桌面硬體，提供最接近且誠實的雲端版本，不要只說功能不支援。`;
-      const chunks = splitDiscordText(await runConversation(sessionId, prompt, [], `discord-interaction:${interaction.id}`));
-      await interaction.editReply(chunks[0]);
-      for (const chunk of chunks.slice(1)) await interaction.followUp(chunk);
+      const prompt = interaction.commandName === "asmr"
+        ? "請用繁體中文寫一段短而自然的睡前耳語 ASMR，直接對夥伴說，約 120 字。"
+        : "請用繁體中文寫一段可以甜美哼唱的短歌，直接唱給夥伴聽，約 100 字，加入自然的♪符號。";
+      const reply = await runConversation(sessionId, prompt, [], `discord-interaction:${interaction.id}`);
+      await replyInteractionWithVoice(interaction, reply);
+      return;
+    }
+    if (interaction.commandName === "draw" || interaction.commandName === "photo") {
+      await interaction.deferReply();
+      const prompt = interaction.commandName === "draw"
+        ? interaction.options.getString("prompt", true)
+        : "生成一張昔漣當下陪伴夥伴的精緻拍立得風格手繪快照，粉色長髮、溫柔笑容、自然日常光線，畫面包含手寫簽名 Cyrene。";
+      try {
+        const generated = await generateCloudImage(config, prompt);
+        await interaction.editReply({ content: "畫好啦♪ 這是昔漣在雲端替你留下的模樣。", files: [new AttachmentBuilder(generated.image, { name: generated.fileName })] });
+      } catch (error) {
+        await interaction.editReply(`雲端畫圖暫時失敗：${error instanceof Error ? error.message : String(error)}`);
+      }
+      return;
+    }
+    if (interaction.commandName === "game") {
+      const launchable = interaction as ChatInputCommandInteraction & { launchActivity?: () => Promise<unknown> };
+      if (typeof launchable.launchActivity === "function") await launchable.launchActivity();
+      else await interaction.reply({ content: "這個 Discord 應用尚未開啟 Activity Entry Point。", ephemeral: true });
       return;
     }
     if (interaction.commandName !== "chat") {
@@ -671,6 +762,7 @@ client.once("ready", async (readyClient) => {
   const companionPresenceTimer = setInterval(() => void refreshCompanionPresence(true), COMPANION_PRESENCE_REFRESH_MS);
   companionPresenceTimer.unref();
   console.log(`[Cyrene Cloud] Discord 已連線：${readyClient.user.tag}`);
+  notifications.start();
   if (config.hsrDailyEnabled) {
     hsrDailyScheduler = startHsrDailyScheduler(hsrDaily, async (result) => {
       try { await deliverHsrDailyResult(result); }
@@ -703,6 +795,8 @@ client.once("ready", async (readyClient) => {
     new SlashCommandBuilder().setName("skip").setDescription("跳到下一首雲端收藏"),
     new SlashCommandBuilder().setName("previous").setDescription("回到上一首雲端收藏"),
     new SlashCommandBuilder().setName("queue").setDescription("查看目前歌曲與待播清單"),
+    new SlashCommandBuilder().setName("nowplaying").setDescription("顯示目前正在播放的歌曲"),
+    new SlashCommandBuilder().setName("history").setDescription("顯示最近播放紀錄"),
     new SlashCommandBuilder().setName("volume").setDescription("調整 Discord 語音播放音量")
       .addIntegerOption((option) => option.setName("percent").setDescription("0 到 150").setMinValue(0).setMaxValue(150).setRequired(true)),
     new SlashCommandBuilder().setName("clear").setDescription("清空待播清單但保留目前歌曲"),
@@ -727,6 +821,8 @@ client.once("ready", async (readyClient) => {
     new SlashCommandBuilder().setName("tarot").setDescription("抽一張昔漣每日幸運塔羅靈感卡"),
     new SlashCommandBuilder().setName("chess").setDescription("與昔漣開始一局西洋棋對弈對戰"),
     new SlashCommandBuilder().setName("guesssong").setDescription("開啟聽歌猜曲名小遊戲"),
+    new SlashCommandBuilder().setName("asmr").setDescription("讓昔漣為你進行睡前耳語 ASMR 陪伴"),
+    new SlashCommandBuilder().setName("sing").setDescription("讓昔漣為你甜美哼唱動聽的歌曲旋律"),
     new SlashCommandBuilder()
       .setName("whisper")
       .setDescription("將你對昔漣的悄悄話收進共享筆記本珍藏")
@@ -779,6 +875,7 @@ async function shutdown(signal: string) {
   healthServer.close();
   clearInterval(musicUsageTimer);
   hsrDailyScheduler?.stop();
+  notifications.stop();
   music.stop();
   client.destroy();
   process.exit(0);

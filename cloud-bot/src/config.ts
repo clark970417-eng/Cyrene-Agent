@@ -14,6 +14,8 @@ export type CloudBotConfig = {
   ttsModel: string;
   ttsVoiceName: string;
   ttsMaxChars: number;
+  /** Gemini 原生圖片生成，讓 /draw 與 /photo 在雲端可用。 */
+  imageModel: string;
   spotifyClientId?: string;
   spotifyClientSecret?: string;
   spotifyRefreshToken?: string;
@@ -111,6 +113,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): CloudBotConfig
     ttsModel: env.CLOUD_TTS_MODEL?.trim() || "gemini-3.1-flash-tts-preview",
     ttsVoiceName: env.CLOUD_TTS_VOICE?.trim() || "Leda",
     ttsMaxChars: parseIntInRange(env.CLOUD_TTS_MAX_CHARS, 900, 80, 1_500),
+    imageModel: env.CLOUD_IMAGE_MODEL?.trim() || "gemini-3.1-flash-image",
     spotifyClientId: env.SPOTIFY_CLIENT_ID?.trim() || undefined,
     spotifyClientSecret: env.SPOTIFY_CLIENT_SECRET?.trim() || undefined,
     spotifyRefreshToken: env.SPOTIFY_REFRESH_TOKEN?.trim() || undefined,

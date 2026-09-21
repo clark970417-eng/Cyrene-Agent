@@ -664,6 +664,8 @@ const commands = [
       option.setName("muted").setDescription("設置為 true 可讓昔漣閉麥安靜陪伴（預設 false 開麥通話）").setRequired(false)
     ),
   new SlashCommandBuilder().setName("leave").setDescription("讓 Cyrene 離開目前的語音頻道"),
+  new SlashCommandBuilder().setName("nowplaying").setDescription("顯示目前正在播放的歌曲與控制器"),
+  new SlashCommandBuilder().setName("history").setDescription("顯示最近播放紀錄"),
   new SlashCommandBuilder().setName("status").setDescription("查看 Bot、延遲、伺服器與語音狀態"),
   new SlashCommandBuilder().setName("help").setDescription("顯示 Cyrene 的 Discord 功能與指令"),
   new SlashCommandBuilder().setName("emojis").setDescription("查看昔漣使用不同表情符號的統計次數"),

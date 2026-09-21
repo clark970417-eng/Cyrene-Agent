@@ -1658,6 +1658,11 @@ export class DiscordAdapter implements ChannelAdapter {
       return;
     }
 
+    if (interaction.commandName === "sing") {
+      await this.handleSlashChat(interaction, "/sing 昔漣，請用甜美自然的方式唱一小段歌給我聽");
+      return;
+    }
+
     if (interaction.commandName === "guesssong") {
       await interaction.reply({
         content:

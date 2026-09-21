@@ -33,6 +33,10 @@ CLOUD_TTS_MAX_CHARS=900
 
 No second API key is required. If synthesis fails, the bot preserves the response as Traditional Chinese text and reports that the audio fallback was unavailable.
 
+`/draw` and `/photo` use Gemini native image generation through the same key. Set `CLOUD_IMAGE_MODEL=gemini-3.1-flash-image` to override the default.
+
+X and AniList announcements read `DATA_DIR/x-notifications.json` and `DATA_DIR/anilist-notifications.json`. They call the public source APIs directly and do not consume LLM tokens. AniList cloud polling uses the configured public username, so no desktop-encrypted access token has to be copied to the VM.
+
 ## Local verification
 
 ```bash

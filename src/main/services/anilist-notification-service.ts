@@ -295,6 +295,13 @@ export class AniListNotificationService {
     if (!targetChannel) return false;
 
     try {
+      const recent = await targetChannel.messages.fetch({ limit: 50 }).catch(() => null);
+      const episodeMarker = `**${notif.episode}**`;
+      if (recent?.some((message) => message.embeds.some((item) =>
+        item.url === animeUrl && Boolean(item.description?.includes(episodeMarker))))) {
+        console.log(LOG, `Notification already exists for "${title}" EP ${notif.episode}; marking it delivered.`);
+        return true;
+      }
       await targetChannel.send({ embeds: [embed] });
       console.log(LOG, `Broadcasted: "${title}" EP ${notif.episode} → #${targetChannel.name}`);
       return true;
