@@ -45,6 +45,11 @@ vi.mock("./gemini-dom-adapter", () => ({
   ensureConversationNamed: mocks.ensureConversationNamed,
 }));
 
+vi.mock("./gemini-brain", () => ({
+  getGeminiBrainPromptVersion: () => "cyrene-brain-test",
+  composeGeminiInitialPrompt: (prompt: string) => `BRAIN_SEED\n\n${prompt}`,
+}));
+
 vi.mock("./gemini-session", () => ({ hasGoogleLoginCookies: vi.fn() }));
 
 describe("runGeminiPrompt", () => {
@@ -195,7 +200,7 @@ describe("runGeminiPrompt", () => {
   it("reuses the bound Gemini conversation and sends only the newest user turn", async () => {
     mocks.readGeminiConversationBinding.mockResolvedValue({
       url: "https://gemini.google.com/app/new-chat",
-      promptVersion: "cyrene-shared-v1",
+      promptVersion: "cyrene-brain-test",
     });
     mocks.pollLatestReply
       .mockResolvedValueOnce({ text: "還在呀", isGenerating: false, hasNewResponse: true, quotaLimited: false })
@@ -214,7 +219,7 @@ describe("runGeminiPrompt", () => {
     );
     expect(mocks.rememberGeminiConversation).toHaveBeenCalledWith(
       expect.anything(),
-      "cyrene-shared-v1",
+      "cyrene-brain-test",
     );
     expect(mocks.ensureConversationNamed).toHaveBeenCalledWith(expect.anything(), "Cyrene-Agent");
   });
@@ -255,8 +260,8 @@ describe("primeGeminiConversation", () => {
     await expect(promise).resolves.toBe("https://gemini.google.com/app/fresh-call");
     const win = await mocks.getOrCreateBackgroundWindow.mock.results[0].value;
     expect(win.loadURL).toHaveBeenCalledWith("https://gemini.google.com/u/2/app");
-    expect(mocks.sendMessage).toHaveBeenCalledWith(win.webContents, "完整昔漣人設");
-    expect(mocks.rememberGeminiConversation).toHaveBeenCalledWith(win.webContents, "cyrene-shared-v1");
+    expect(mocks.sendMessage).toHaveBeenCalledWith(win.webContents, "BRAIN_SEED\n\n完整昔漣人設");
+    expect(mocks.rememberGeminiConversation).toHaveBeenCalledWith(win.webContents, "cyrene-brain-test");
   });
 
   it("does not bind an unfinished prompt when initialization times out", async () => {

@@ -3,6 +3,7 @@ import { IPC } from "../../../shared/ipc-channels";
 import { openGeminiLoginWindow, focusLoginWindowIfOpen } from "./gemini-window";
 import { getGeminiLoginState, testGeminiConnection } from "./gemini-bridge";
 import { clearGeminiSession } from "./gemini-session";
+import { loadGeminiBrain, saveGeminiBrain } from "./gemini-brain";
 
 let registered = false;
 
@@ -25,6 +26,12 @@ export function registerGeminiIpc(): void {
   ipcMain.handle(IPC.GEMINI_TEST_CONNECTION, async () => {
     return testGeminiConnection();
   });
+
+  ipcMain.handle(IPC.GEMINI_BRAIN_GET, () => loadGeminiBrain());
+
+  ipcMain.handle(IPC.GEMINI_BRAIN_SAVE, (_event, patch: unknown) =>
+    saveGeminiBrain((patch && typeof patch === "object" ? patch : {}) as Parameters<typeof saveGeminiBrain>[0]),
+  );
 
   ipcMain.handle(IPC.GEMINI_LOGOUT, async () => {
     await clearGeminiSession();

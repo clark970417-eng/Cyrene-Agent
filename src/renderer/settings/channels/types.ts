@@ -48,6 +48,13 @@ export interface DiscordCloudControlStatus {
   mode: "local" | "cloud" | "transition";
 }
 
+export interface DiscordAnnouncementMedia {
+  path: string;
+  name: string;
+  kind: "image" | "video";
+  previewUrl: string;
+}
+
 export interface DiscordMusicControlInput {
   command:
     | "previous"

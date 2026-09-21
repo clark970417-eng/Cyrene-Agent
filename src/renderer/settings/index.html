@@ -105,6 +105,28 @@
                 <button type="button" class="save-btn save-btn--ghost" id="gemini-logout-btn" style="padding: 8px 14px; border-radius: 8px; font-size: 12px;">登出 Gemini</button>
               </div>
             </div>
+            <section class="gemini-brain" aria-labelledby="gemini-brain-title">
+              <div class="gemini-brain__heading">
+                <div>
+                  <span>CYRENE BRAIN</span>
+                  <h2 id="gemini-brain-title">昔漣專屬人格與長期記憶規則</h2>
+                  <p>每個 Gemini 對話只初始化一次；後續不會重複貼整份人設。</p>
+                </div>
+                <label class="switch" title="啟用 Brain Seed"><input id="gemini-brain-enabled" type="checkbox" checked /><span class="switch__track"><span class="switch__thumb"></span></span></label>
+              </div>
+              <label class="field field--full"><span>專用帳號標記</span><input id="gemini-brain-account" type="text" maxlength="160" placeholder="昔漣專用 Gemini Pro 帳號" /></label>
+              <div class="gemini-brain__grid">
+                <label class="field"><span>身份</span><textarea id="gemini-brain-identity" rows="4" maxlength="2000"></textarea></label>
+                <label class="field"><span>性格</span><textarea id="gemini-brain-personality" rows="4" maxlength="2000"></textarea></label>
+                <label class="field"><span>與夥伴的關係</span><textarea id="gemini-brain-relationship" rows="4" maxlength="2000"></textarea></label>
+                <label class="field"><span>說話方式</span><textarea id="gemini-brain-response-style" rows="4" maxlength="2000"></textarea></label>
+              </div>
+              <label class="field field--full"><span>記憶規則與界線</span><textarea id="gemini-brain-memory-policy" rows="4" maxlength="2000"></textarea></label>
+              <div class="gemini-brain__actions">
+                <span id="gemini-brain-feedback" aria-live="polite"></span>
+                <button type="button" class="save-btn save-btn--ghost" id="gemini-brain-save"><span class="cy-icon" data-icon="save"></span>儲存 Brain Seed</button>
+              </div>
+            </section>
           </div>
 
           <section class="api-source-switcher" aria-labelledby="api-source-title">
@@ -1443,6 +1465,49 @@
                   </div>
                   <p class="channels-feedback" id="channels-discord-music-feedback" aria-live="polite"></p>
                 </section>
+              </section>
+
+              <section class="discord-announcement" aria-labelledby="discord-announcement-title">
+                <div class="discord-announcement__heading">
+                  <div>
+                    <span class="discord-identity__eyebrow">ANNOUNCEMENT STUDIO</span>
+                    <h3 id="discord-announcement-title">公告發布器</h3>
+                    <p>組合文字、圖片與影片，發布成帶有昔漣風格的 Discord 公告。</p>
+                  </div>
+                  <input id="channels-discord-announcement-color" type="color" value="#66c8ff" title="公告側邊色" aria-label="公告側邊色" />
+                </div>
+                <div class="discord-announcement__workspace">
+                  <div class="discord-announcement__editor">
+                    <label class="field field--full"><span>公告頻道 ID</span><input id="channels-discord-announcement-channel" type="text" inputmode="numeric" placeholder="Discord Announcement Channel ID" /></label>
+                    <label class="field field--full"><span>標題</span><input id="channels-discord-announcement-title-input" type="text" maxlength="256" placeholder="例如：昔漣的新消息" /></label>
+                    <label class="field field--full"><span>內容</span><textarea id="channels-discord-announcement-content" rows="6" maxlength="4096" placeholder="輸入公告內容，可使用 Discord Markdown"></textarea></label>
+                    <div class="discord-announcement__meta-grid">
+                      <label class="field"><span>作者／來源</span><input id="channels-discord-announcement-author" type="text" maxlength="256" placeholder="昔漣 · Cyrene" /></label>
+                      <label class="field"><span>Footer</span><input id="channels-discord-announcement-footer" type="text" maxlength="2048" placeholder="Cyrene Announcement" /></label>
+                    </div>
+                    <label class="field field--full"><span>連結（可選）</span><input id="channels-discord-announcement-link" type="url" placeholder="https://..." /></label>
+                    <div class="discord-announcement__media-actions">
+                      <button type="button" class="btn-secondary" id="channels-discord-announcement-add-media"><span class="cy-icon" data-icon="photo"></span>加入圖片／影片</button>
+                      <span>最多 10 個檔案，每個 10 MB</span>
+                    </div>
+                    <ul class="discord-announcement__media-list" id="channels-discord-announcement-media-list"></ul>
+                  </div>
+                  <div class="discord-announcement__preview" aria-label="Discord 公告預覽">
+                    <span class="discord-announcement__preview-label">DISCORD PREVIEW</span>
+                    <article class="discord-embed-preview" id="channels-discord-announcement-preview">
+                      <i id="channels-discord-announcement-preview-color"></i>
+                      <div>
+                        <strong id="channels-discord-announcement-preview-author">昔漣 · Cyrene</strong>
+                        <h4 id="channels-discord-announcement-preview-title">公告標題</h4>
+                        <p id="channels-discord-announcement-preview-content">公告內容會顯示在這裡。</p>
+                        <div class="discord-embed-preview__media" id="channels-discord-announcement-preview-media"></div>
+                        <small id="channels-discord-announcement-preview-footer">Cyrene Announcement · 現在</small>
+                      </div>
+                    </article>
+                    <button type="button" class="btn-secondary btn-discord discord-announcement__publish" id="channels-discord-announcement-publish"><span class="cy-icon" data-icon="send"></span>發布公告</button>
+                    <p class="channels-feedback" id="channels-discord-announcement-feedback" aria-live="polite"></p>
+                  </div>
+                </div>
               </section>
 
               <div class="discord-connection-divider"><span>連線與回覆規則</span></div>

@@ -34,4 +34,20 @@ describe("settings feature layouts", () => {
     expect(css).toMatch(/\.discord-identity__editor \.form-input\s*\{[^}]*width:\s*100%/s);
     expect(css).toMatch(/@media \(max-width:\s*880px\)[\s\S]*?\.discord-identity__editor\s*\{[^}]*grid-template-columns:\s*1fr/s);
   });
+
+  it("includes the Gemini brain editor and Discord announcement studio", () => {
+    for (const id of [
+      "gemini-brain-enabled",
+      "gemini-brain-identity",
+      "gemini-brain-memory-policy",
+      "gemini-brain-save",
+      "channels-discord-announcement-channel",
+      "channels-discord-announcement-content",
+      "channels-discord-announcement-add-media",
+      "channels-discord-announcement-preview",
+      "channels-discord-announcement-publish",
+    ]) expect(html).toContain(`id="${id}"`);
+    expect(css).toMatch(/\.discord-announcement__workspace\s*\{[^}]*grid-template-columns:/s);
+    expect(css).toMatch(/\.gemini-brain__grid\s*\{[^}]*grid-template-columns:/s);
+  });
 });

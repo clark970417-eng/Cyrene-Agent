@@ -7,6 +7,8 @@
 // 注意：initChannels 必须晚于 initRAG / initMcpManager / loadModelSettings。
 import { app, BrowserWindow, dialog, ipcMain } from "electron";
 import { readFile, stat } from "node:fs/promises";
+import { pathToFileURL } from "node:url";
+import { extname, basename } from "node:path";
 import { IPC } from "../../shared/ipc-channels";
 import { loadChannelsSettings, saveChannelsSettings } from "./settings-store";
 import { channelManager } from "./manager";
@@ -397,6 +399,27 @@ function registerChannelsIpc(): void {
       ],
     });
     return result.canceled ? null : (result.filePaths[0] ?? null);
+  });
+  ipcMain.handle(IPC.CHANNELS_DISCORD_ANNOUNCEMENT_PICK_MEDIA, async () => {
+    const result = await dialog.showOpenDialog({
+      title: "選擇公告圖片或影片",
+      buttonLabel: "加入公告",
+      properties: ["openFile", "multiSelections"],
+      filters: [
+        { name: "圖片與影片", extensions: ["png", "jpg", "jpeg", "webp", "gif", "mp4", "mov", "webm", "m4v"] },
+      ],
+    });
+    return result.canceled ? [] : result.filePaths.map((filePath) => ({
+      path: filePath,
+      name: basename(filePath),
+      kind: [".mp4", ".mov", ".webm", ".m4v"].includes(extname(filePath).toLowerCase()) ? "video" : "image",
+      previewUrl: pathToFileURL(filePath).href,
+    }));
+  });
+  ipcMain.handle(IPC.CHANNELS_DISCORD_ANNOUNCEMENT_PUBLISH, async (_event, input: unknown) => {
+    const adapter = channelManager.getAdapter("discord") as DiscordAdapter | undefined;
+    if (!adapter) return { ok: false, error: "Discord adapter 未註冊" };
+    return adapter.publishAnnouncement((input && typeof input === "object" ? input : {}) as Parameters<DiscordAdapter["publishAnnouncement"]>[0]);
   });
   ipcMain.handle(IPC.CHANNELS_DISCORD_PICK_CLOUD_KEY, async () => {
     const result = await dialog.showOpenDialog({

@@ -15,6 +15,7 @@ import {
   MessageFlags,
   Partials,
   Routes,
+  REST,
   type ButtonInteraction,
   type ChatInputCommandInteraction,
   type GuildMember,
@@ -90,6 +91,10 @@ import {
 import { handleWavesUidInteraction, handleWavesUidMessage, isWavesUidCommand } from "./wavesuid";
 import { discordEmojiNameForStickerId } from "./emoji-fallback";
 import { DiscordMusicController } from "./music-controller";
+import {
+  validateDiscordAnnouncement,
+  type DiscordAnnouncementInput,
+} from "./announcement";
 
 const LOG = "[DiscordAdapter]";
 const COMPANION_PRESENCE_REFRESH_MS = 5 * 60 * 1_000;
@@ -2101,6 +2106,57 @@ export class DiscordAdapter implements ChannelAdapter {
       },
     });
     return this.getProfile();
+  }
+
+  async publishAnnouncement(raw: DiscordAnnouncementInput): Promise<{ ok: boolean; message?: string; error?: string }> {
+    try {
+      const announcement = await validateDiscordAnnouncement(raw);
+      const settings = loadChannelsSettings();
+      if (!settings.discord.botToken) throw new Error("尚未設定 Discord Bot Token");
+
+      const files = await Promise.all(announcement.media.map(async (item) => ({
+        attachment: await fs.promises.readFile(item.path),
+        name: item.name,
+      })));
+      const firstImage = announcement.media.find((item) => item.kind === "image");
+      const embed = new EmbedBuilder().setColor(announcement.color).setTimestamp();
+      if (announcement.title) embed.setTitle(announcement.title);
+      if (announcement.content) embed.setDescription(announcement.content);
+      if (announcement.author) embed.setAuthor({ name: announcement.author });
+      if (announcement.footer) embed.setFooter({ text: announcement.footer });
+      if (announcement.link) embed.setURL(announcement.link);
+      if (firstImage) embed.setImage(`attachment://${firstImage.name}`);
+
+      const hasEmbed = Boolean(
+        announcement.title
+        || announcement.content
+        || announcement.author
+        || announcement.footer
+        || announcement.link
+        || firstImage,
+      );
+      const embeds = hasEmbed ? [embed] : [];
+      const body = { embeds: embeds.map((item) => item.toJSON()) };
+      if (this.client?.isReady()) {
+        const channel = await this.client.channels.fetch(announcement.channelId);
+        if (!channel?.isSendable()) throw new Error("目標頻道不存在，或 Bot 沒有發送訊息權限");
+        await channel.send({ embeds, files });
+      } else {
+        const rest = new REST({ version: "10" }).setToken(settings.discord.botToken);
+        await rest.post(Routes.channelMessages(announcement.channelId), {
+          body,
+          files: files.map((file) => ({ data: file.attachment, name: file.name })),
+        });
+      }
+      return { ok: true, message: "公告已發布到 Discord" };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (/Missing Access|Missing Permissions|50001|50013/i.test(message)) {
+        return { ok: false, error: "Bot 沒有查看或發送到這個頻道的權限" };
+      }
+      if (/Unknown Channel|10003/i.test(message)) return { ok: false, error: "找不到指定的 Discord 頻道" };
+      return { ok: false, error: message };
+    }
   }
 
   async send(message: OutgoingMessage): Promise<{ ok: boolean; error?: string }> {

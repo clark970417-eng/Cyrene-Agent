@@ -34,6 +34,8 @@ export const IPC = {
   GEMINI_GET_STATUS: "gemini:get-status",
   GEMINI_TEST_CONNECTION: "gemini:test-connection",
   GEMINI_LOGOUT: "gemini:logout",
+  GEMINI_BRAIN_GET: "gemini:brain:get",
+  GEMINI_BRAIN_SAVE: "gemini:brain:save",
 
   // chat window
   CHAT_MINIMIZE: "chat:minimize",
@@ -413,6 +415,8 @@ export const IPC = {
   CHANNELS_DISCORD_PICK_CLOUD_KEY: "channels:discord:pick-cloud-key",
   CHANNELS_DISCORD_CLOUD_STATUS: "channels:discord:cloud-status",
   CHANNELS_DISCORD_CLOUD_CONTROL: "channels:discord:cloud-control",
+  CHANNELS_DISCORD_ANNOUNCEMENT_PICK_MEDIA: "channels:discord:announcement:pick-media",
+  CHANNELS_DISCORD_ANNOUNCEMENT_PUBLISH: "channels:discord:announcement:publish",
   CHANNELS_SPOTIFY_AUTHORIZE: "channels:spotify:authorize",
   CHANNELS_SPOTIFY_GET_STATUS: "channels:spotify:get-status",
   CHANNELS_SPOTIFY_CONTROL: "channels:spotify:control",

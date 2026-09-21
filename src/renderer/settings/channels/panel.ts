@@ -7,6 +7,7 @@ import type {
   DiscordMusicState,
   DiscordCloudControlStatus,
   DiscordMusicControlInput,
+  DiscordAnnouncementMedia,
   SpotifyPlaybackStatus,
   BilibiliConnectionStatus,
   LogEntry,
@@ -237,6 +238,23 @@ const channelsWechatRestartBtn = document.getElementById("channels-wechat-restar
 const channelsWechatFeedbackEl = document.getElementById("channels-wechat-feedback");
 const channelsFeishuFeedbackEl = document.getElementById("channels-feishu-feedback");
 const channelsDiscordFeedbackEl = document.getElementById("channels-discord-feedback");
+const announcementChannelEl = document.getElementById("channels-discord-announcement-channel") as HTMLInputElement | null;
+const announcementTitleEl = document.getElementById("channels-discord-announcement-title-input") as HTMLInputElement | null;
+const announcementContentEl = document.getElementById("channels-discord-announcement-content") as HTMLTextAreaElement | null;
+const announcementAuthorEl = document.getElementById("channels-discord-announcement-author") as HTMLInputElement | null;
+const announcementFooterEl = document.getElementById("channels-discord-announcement-footer") as HTMLInputElement | null;
+const announcementLinkEl = document.getElementById("channels-discord-announcement-link") as HTMLInputElement | null;
+const announcementColorEl = document.getElementById("channels-discord-announcement-color") as HTMLInputElement | null;
+const announcementAddMediaBtn = document.getElementById("channels-discord-announcement-add-media") as HTMLButtonElement | null;
+const announcementPublishBtn = document.getElementById("channels-discord-announcement-publish") as HTMLButtonElement | null;
+const announcementMediaListEl = document.getElementById("channels-discord-announcement-media-list");
+const announcementPreviewColorEl = document.getElementById("channels-discord-announcement-preview-color");
+const announcementPreviewAuthorEl = document.getElementById("channels-discord-announcement-preview-author");
+const announcementPreviewTitleEl = document.getElementById("channels-discord-announcement-preview-title");
+const announcementPreviewContentEl = document.getElementById("channels-discord-announcement-preview-content");
+const announcementPreviewFooterEl = document.getElementById("channels-discord-announcement-preview-footer");
+const announcementPreviewMediaEl = document.getElementById("channels-discord-announcement-preview-media");
+const announcementFeedbackEl = document.getElementById("channels-discord-announcement-feedback");
 
 // Google Cloud 備援控制台 DOM 元素
 const channelsCloudStatusEl = document.getElementById("channels-cloud-status");
@@ -281,6 +299,7 @@ let channelsInitialized = false;
 let channelsSaveTimer: number | null = null;
 let pendingDiscordAvatarPath: string | undefined;
 let pendingDiscordBannerPath: string | undefined;
+let announcementMedia: DiscordAnnouncementMedia[] = [];
 let discordMusicState: DiscordMusicState = {
   active: false,
   paused: false,
@@ -297,6 +316,51 @@ let discordMusicRefreshTimer: number | null = null;
 let discordMusicVolumeTimer: number | null = null;
 let spotifyStatus: SpotifyPlaybackStatus = { configured: false, connected: false, devices: [] };
 let spotifyRefreshTimer: number | null = null;
+
+function setAnnouncementFeedback(kind: "info" | "ok" | "err", message: string): void {
+  if (!announcementFeedbackEl) return;
+  announcementFeedbackEl.textContent = message;
+  announcementFeedbackEl.className = `channels-feedback channels-feedback--${kind}`;
+}
+
+function renderAnnouncement(): void {
+  if (announcementPreviewColorEl) announcementPreviewColorEl.style.background = announcementColorEl?.value || "#66c8ff";
+  if (announcementPreviewAuthorEl) announcementPreviewAuthorEl.textContent = announcementAuthorEl?.value.trim() || "昔漣 · Cyrene";
+  if (announcementPreviewTitleEl) announcementPreviewTitleEl.textContent = announcementTitleEl?.value.trim() || "公告標題";
+  if (announcementPreviewContentEl) announcementPreviewContentEl.textContent = announcementContentEl?.value.trim() || "公告內容會顯示在這裡。";
+  if (announcementPreviewFooterEl) announcementPreviewFooterEl.textContent = `${announcementFooterEl?.value.trim() || "Cyrene Announcement"} · 現在`;
+
+  announcementPreviewMediaEl?.replaceChildren(...announcementMedia.map((media) => {
+    const element = document.createElement(media.kind === "video" ? "video" : "img");
+    element.setAttribute("src", media.previewUrl);
+    if (element instanceof HTMLVideoElement) {
+      element.muted = true;
+      element.controls = true;
+    } else {
+      element.alt = media.name;
+    }
+    return element;
+  }));
+  announcementMediaListEl?.replaceChildren(...announcementMedia.map((media, index) => {
+    const item = document.createElement("li");
+    const thumb = document.createElement(media.kind === "video" ? "video" : "img");
+    thumb.setAttribute("src", media.previewUrl);
+    if (thumb instanceof HTMLVideoElement) thumb.muted = true;
+    else thumb.alt = "";
+    const name = document.createElement("span");
+    name.textContent = media.name;
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.title = `移除 ${media.name}`;
+    remove.textContent = "×";
+    remove.addEventListener("click", () => {
+      announcementMedia.splice(index, 1);
+      renderAnnouncement();
+    });
+    item.append(thumb, name, remove);
+    return item;
+  }));
+}
 
 export function setChannelsPolling(active: boolean): void {
   if (discordMusicRefreshTimer != null) {
@@ -988,6 +1052,8 @@ export async function loadChannelsPanel(): Promise<void> {
       channelsDiscordGuildIdsEl.value = (cfg?.discord?.allowedGuildIds ?? []).join(", ");
     if (channelsDiscordChannelIdsEl)
       channelsDiscordChannelIdsEl.value = (cfg?.discord?.allowedChannelIds ?? []).join(", ");
+    if (announcementChannelEl && !announcementChannelEl.value)
+      announcementChannelEl.value = cfg?.discord?.allowedChannelIds?.[0] ?? "";
     if (channelsDiscordUserIdsEl)
       channelsDiscordUserIdsEl.value = (cfg?.discord?.allowedUserIds ?? []).join(", ");
     if (channelsDiscordCodexOwnerIdEl)
@@ -1557,6 +1623,47 @@ export async function loadChannelsPanel(): Promise<void> {
       setDiscordFeedback("err", err instanceof Error ? err.message : String(err));
     }
   });
+
+  for (const element of [
+    announcementTitleEl,
+    announcementContentEl,
+    announcementAuthorEl,
+    announcementFooterEl,
+    announcementLinkEl,
+    announcementColorEl,
+  ]) element?.addEventListener("input", renderAnnouncement);
+
+  announcementAddMediaBtn?.addEventListener("click", async () => {
+    const picked = await window.settings.channelsDiscordAnnouncementPickMedia();
+    const known = new Set(announcementMedia.map((item) => item.path));
+    announcementMedia.push(...picked.filter((item) => !known.has(item.path)));
+    announcementMedia = announcementMedia.slice(0, 10);
+    renderAnnouncement();
+  });
+
+  announcementPublishBtn?.addEventListener("click", async () => {
+    if (!announcementPublishBtn) return;
+    announcementPublishBtn.disabled = true;
+    setAnnouncementFeedback("info", "正在發布公告…");
+    try {
+      const result = await window.settings.channelsDiscordAnnouncementPublish({
+        channelId: announcementChannelEl?.value.trim() ?? "",
+        title: announcementTitleEl?.value ?? "",
+        content: announcementContentEl?.value ?? "",
+        author: announcementAuthorEl?.value ?? "",
+        footer: announcementFooterEl?.value ?? "",
+        link: announcementLinkEl?.value ?? "",
+        color: announcementColorEl?.value ?? "#66c8ff",
+        mediaPaths: announcementMedia.map((item) => item.path),
+      });
+      setAnnouncementFeedback(result.ok ? "ok" : "err", result.message || result.error || "公告發布失敗");
+    } catch (error) {
+      setAnnouncementFeedback("err", error instanceof Error ? error.message : String(error));
+    } finally {
+      announcementPublishBtn.disabled = false;
+    }
+  });
+  renderAnnouncement();
 
   channelsCloudPickKeyBtn?.addEventListener("click", async () => {
     const picked = await window.settings.channelsDiscordPickCloudKey();

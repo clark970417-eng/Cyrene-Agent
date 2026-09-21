@@ -4,10 +4,13 @@ import {
   readGeminiConversationBinding,
   rememberGeminiConversation,
   SHARED_GEMINI_CONVERSATION_NAME,
-  SHARED_GEMINI_PROMPT_VERSION,
   isSameGeminiConversation,
   GEMINI_NEW_CHAT_URL,
 } from "./gemini-window";
+import {
+  composeGeminiInitialPrompt,
+  getGeminiBrainPromptVersion,
+} from "./gemini-brain";
 import {
   detectPageState,
   sendMessage,
@@ -154,7 +157,9 @@ export async function primeGeminiConversation(
   }
 
   const baseline = await getLatestReplySnapshot(win.webContents);
-  const sendResult = await sendMessage(win.webContents, personaPrompt);
+  const promptVersion = getGeminiBrainPromptVersion();
+  const initialPrompt = composeGeminiInitialPrompt(personaPrompt);
+  const sendResult = await sendMessage(win.webContents, initialPrompt);
   if ("error" in sendResult) {
     console.warn("[Gemini] 開場注入送出失敗：", sendResult.error);
     return null;
@@ -197,11 +202,11 @@ export async function primeGeminiConversation(
   }
 
   const url = win.webContents.getURL();
-  await rememberGeminiConversation(win.webContents, SHARED_GEMINI_PROMPT_VERSION).catch(() => undefined);
+  await rememberGeminiConversation(win.webContents, promptVersion).catch(() => undefined);
   await ensureConversationNamed(win.webContents, SHARED_GEMINI_CONVERSATION_NAME).catch(() => undefined);
   console.log(
     `[Gemini] 開場注入完成 ${Date.now() - startedAt}ms`
-    + ` | personaChars=${personaPrompt.length} 丟棄回話 ${seen.length} 字`,
+    + ` | personaChars=${personaPrompt.length} seedChars=${initialPrompt.length - personaPrompt.length} 丟棄回話 ${seen.length} 字`,
   );
   return url;
 }
@@ -273,13 +278,14 @@ async function runGeminiPromptUnlocked(
   ]);
   mark("snapshot");
   const currentUrl = win.webContents.getURL();
+  const promptVersion = getGeminiBrainPromptVersion();
   // 比對話 ID，不比整串網址——見 isSameGeminiConversation 的說明。
   const sharedConversationReady = isSameGeminiConversation(binding?.url, currentUrl)
-    && binding?.promptVersion === SHARED_GEMINI_PROMPT_VERSION
+    && binding?.promptVersion === promptVersion
     && baseline.count > 0;
   const outgoingPrompt = sharedConversationReady
     ? compactSharedConversationPrompt(promptText)
-    : promptText;
+    : composeGeminiInitialPrompt(promptText);
   const sendResult = await sendMessage(win.webContents, outgoingPrompt);
   if ("error" in sendResult) {
     throw new GeminiDomChangedError(sendResult.error);
@@ -292,7 +298,7 @@ async function runGeminiPromptUnlocked(
   //   - 頁面上已渲染的回覆數（載入未完成時會是 0，那是競態）
   const reuseDetail = `url_match=${isSameGeminiConversation(binding?.url, currentUrl) ? "y" : "n"}`
     + ` replies=${baseline.count}`
-    + ` ver=${binding?.promptVersion === SHARED_GEMINI_PROMPT_VERSION ? "y" : "n"}`;
+    + ` ver=${binding?.promptVersion === promptVersion ? "y" : "n"}`;
 
   let accumulated = "";
   let stableTicks = 0;
@@ -398,8 +404,8 @@ async function runGeminiPromptUnlocked(
       stableTicks++;
       if (stableTicks >= STABLE_TICKS_TO_FINISH) {
         await (options.conversationKey
-          ? rememberGeminiConversation(win.webContents, SHARED_GEMINI_PROMPT_VERSION, options.conversationKey)
-          : rememberGeminiConversation(win.webContents, SHARED_GEMINI_PROMPT_VERSION));
+          ? rememberGeminiConversation(win.webContents, promptVersion, options.conversationKey)
+          : rememberGeminiConversation(win.webContents, promptVersion));
         await ensureConversationNamed(
           win.webContents,
           options.conversationName ? `昔漣 · ${options.conversationName}` : SHARED_GEMINI_CONVERSATION_NAME,
@@ -412,8 +418,8 @@ async function runGeminiPromptUnlocked(
   if (accumulated) {
     // 已經拿到部分內容但一直没稳定收尾，仍然把已经生成的內容視為結果，避免白白丟棄。
     await (options.conversationKey
-      ? rememberGeminiConversation(win.webContents, SHARED_GEMINI_PROMPT_VERSION, options.conversationKey)
-      : rememberGeminiConversation(win.webContents, SHARED_GEMINI_PROMPT_VERSION));
+      ? rememberGeminiConversation(win.webContents, promptVersion, options.conversationKey)
+      : rememberGeminiConversation(win.webContents, promptVersion));
     await ensureConversationNamed(
       win.webContents,
       options.conversationName ? `昔漣 · ${options.conversationName}` : SHARED_GEMINI_CONVERSATION_NAME,

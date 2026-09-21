@@ -764,6 +764,15 @@ const geminiTestConnectionBtn = document.getElementById(
   "gemini-test-connection-btn",
 ) as HTMLButtonElement | null;
 const geminiLogoutBtn = document.getElementById("gemini-logout-btn") as HTMLButtonElement | null;
+const geminiBrainEnabledEl = document.getElementById("gemini-brain-enabled") as HTMLInputElement | null;
+const geminiBrainAccountEl = document.getElementById("gemini-brain-account") as HTMLInputElement | null;
+const geminiBrainIdentityEl = document.getElementById("gemini-brain-identity") as HTMLTextAreaElement | null;
+const geminiBrainPersonalityEl = document.getElementById("gemini-brain-personality") as HTMLTextAreaElement | null;
+const geminiBrainRelationshipEl = document.getElementById("gemini-brain-relationship") as HTMLTextAreaElement | null;
+const geminiBrainResponseStyleEl = document.getElementById("gemini-brain-response-style") as HTMLTextAreaElement | null;
+const geminiBrainMemoryPolicyEl = document.getElementById("gemini-brain-memory-policy") as HTMLTextAreaElement | null;
+const geminiBrainSaveBtn = document.getElementById("gemini-brain-save") as HTMLButtonElement | null;
+const geminiBrainFeedbackEl = document.getElementById("gemini-brain-feedback");
 const testConnectionBtn = document.getElementById(
   "test-connection-btn",
 ) as HTMLButtonElement | null;
@@ -1898,6 +1907,17 @@ interface GeminiWebLlmApi {
   getStatus: () => Promise<{ isLoggedIn: boolean; state: "login" | "captcha" | "app" | "unknown" }>;
   testConnection: () => Promise<{ ok: boolean; message: string }>;
   logout: () => Promise<{ ok: boolean }>;
+  getBrain: () => Promise<GeminiBrainSettings>;
+  saveBrain: (patch: Partial<GeminiBrainSettings>) => Promise<GeminiBrainSettings>;
+}
+interface GeminiBrainSettings {
+  enabled: boolean;
+  accountLabel: string;
+  identity: string;
+  personality: string;
+  relationship: string;
+  responseStyle: string;
+  memoryPolicy: string;
 }
 function geminiApi(): GeminiWebLlmApi | undefined {
   return (window as any).geminiWebLlm as GeminiWebLlmApi | undefined;
@@ -1925,6 +1945,44 @@ async function refreshGeminiStatus(): Promise<void> {
     geminiStatusText.textContent = "狀態檢查失敗";
   }
 }
+
+async function loadGeminiBrainSettings(): Promise<void> {
+  try {
+    const brain = await geminiApi()?.getBrain();
+    if (!brain) return;
+    if (geminiBrainEnabledEl) geminiBrainEnabledEl.checked = brain.enabled;
+    if (geminiBrainAccountEl) geminiBrainAccountEl.value = brain.accountLabel;
+    if (geminiBrainIdentityEl) geminiBrainIdentityEl.value = brain.identity;
+    if (geminiBrainPersonalityEl) geminiBrainPersonalityEl.value = brain.personality;
+    if (geminiBrainRelationshipEl) geminiBrainRelationshipEl.value = brain.relationship;
+    if (geminiBrainResponseStyleEl) geminiBrainResponseStyleEl.value = brain.responseStyle;
+    if (geminiBrainMemoryPolicyEl) geminiBrainMemoryPolicyEl.value = brain.memoryPolicy;
+  } catch {
+    if (geminiBrainFeedbackEl) geminiBrainFeedbackEl.textContent = "讀取 Brain Seed 失敗";
+  }
+}
+
+geminiBrainSaveBtn?.addEventListener("click", async () => {
+  if (!geminiBrainSaveBtn) return;
+  geminiBrainSaveBtn.disabled = true;
+  if (geminiBrainFeedbackEl) geminiBrainFeedbackEl.textContent = "儲存中…";
+  try {
+    await geminiApi()?.saveBrain({
+      enabled: geminiBrainEnabledEl?.checked ?? true,
+      accountLabel: geminiBrainAccountEl?.value ?? "",
+      identity: geminiBrainIdentityEl?.value ?? "",
+      personality: geminiBrainPersonalityEl?.value ?? "",
+      relationship: geminiBrainRelationshipEl?.value ?? "",
+      responseStyle: geminiBrainResponseStyleEl?.value ?? "",
+      memoryPolicy: geminiBrainMemoryPolicyEl?.value ?? "",
+    });
+    if (geminiBrainFeedbackEl) geminiBrainFeedbackEl.textContent = "已儲存，下次訊息會自動更新 Gemini 對話";
+  } catch {
+    if (geminiBrainFeedbackEl) geminiBrainFeedbackEl.textContent = "儲存失敗";
+  } finally {
+    geminiBrainSaveBtn.disabled = false;
+  }
+});
 
 loginGeminiBtn?.addEventListener("click", () => {
   void geminiApi()
@@ -1954,6 +2012,7 @@ geminiLogoutBtn?.addEventListener("click", async () => {
 });
 
 void refreshGeminiStatus();
+void loadGeminiBrainSettings();
 
 function switchSection(section: string): void {
   const label = NAV_LABELS[section] ?? NAV_LABELS.api;

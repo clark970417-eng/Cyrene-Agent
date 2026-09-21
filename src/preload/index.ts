@@ -290,6 +290,8 @@ contextBridge.exposeInMainWorld("geminiWebLlm", {
   getStatus: () => ipcRenderer.invoke(IPC.GEMINI_GET_STATUS),
   testConnection: () => ipcRenderer.invoke(IPC.GEMINI_TEST_CONNECTION),
   logout: () => ipcRenderer.invoke(IPC.GEMINI_LOGOUT),
+  getBrain: () => ipcRenderer.invoke(IPC.GEMINI_BRAIN_GET),
+  saveBrain: (patch: unknown) => ipcRenderer.invoke(IPC.GEMINI_BRAIN_SAVE, patch),
 });
 
 const workspaceApi = {
@@ -515,6 +517,8 @@ const settingsApi = {
   channelsDiscordPickCloudKey: () => ipcRenderer.invoke(IPC.CHANNELS_DISCORD_PICK_CLOUD_KEY),
   channelsDiscordCloudStatus: () => ipcRenderer.invoke(IPC.CHANNELS_DISCORD_CLOUD_STATUS),
   channelsDiscordCloudControl: (action: "local" | "cloud" | "restart-cloud") => ipcRenderer.invoke(IPC.CHANNELS_DISCORD_CLOUD_CONTROL, action),
+  channelsDiscordAnnouncementPickMedia: () => ipcRenderer.invoke(IPC.CHANNELS_DISCORD_ANNOUNCEMENT_PICK_MEDIA),
+  channelsDiscordAnnouncementPublish: (input: unknown) => ipcRenderer.invoke(IPC.CHANNELS_DISCORD_ANNOUNCEMENT_PUBLISH, input),
   channelsSpotifyAuthorize: (input: { clientId?: string; clientSecret?: string }) => ipcRenderer.invoke(IPC.CHANNELS_SPOTIFY_AUTHORIZE, input),
   channelsSpotifyGetStatus: () => ipcRenderer.invoke(IPC.CHANNELS_SPOTIFY_GET_STATUS),
   channelsSpotifyControl: (input: { command: string; value?: number; deviceId?: string; query?: string }) => ipcRenderer.invoke(IPC.CHANNELS_SPOTIFY_CONTROL, input),
