@@ -78,6 +78,21 @@ function writeJson(file: string, value: unknown): void {
   fs.renameSync(temp, file);
 }
 
+export function migrateLegacyNotificationFiles(dataDir: string, legacyDir = path.join(process.cwd(), "data")): string[] {
+  const migrated: string[] = [];
+  if (path.resolve(dataDir) === path.resolve(legacyDir)) return migrated;
+  for (const fileName of ["x-notifications.json", "anilist-notifications.json"] as const) {
+    const target = path.join(dataDir, fileName);
+    const legacy = path.join(legacyDir, fileName);
+    if (fs.existsSync(target) || !fs.existsSync(legacy)) continue;
+    const value = readJson<unknown>(legacy);
+    if (value === null) continue;
+    writeJson(target, value);
+    migrated.push(fileName);
+  }
+  return migrated;
+}
+
 export function parseFxTwitterTimeline(data: unknown, requestedUsername: string): Tweet[] {
   const results = Array.isArray((data as { results?: unknown[] })?.results) ? (data as { results: unknown[] }).results : [];
   const tweets: Tweet[] = [];
@@ -146,6 +161,8 @@ export class CloudNotificationService {
   private readonly aniListFile: string;
 
   constructor(private readonly client: Client, dataDir: string, private readonly fetchImpl: typeof fetch = fetch) {
+    const migrated = migrateLegacyNotificationFiles(dataDir);
+    if (migrated.length) console.log(`[Cloud Notifications] 已從舊資料夾搬移：${migrated.join(", ")}`);
     this.xFile = path.join(dataDir, "x-notifications.json");
     this.aniListFile = path.join(dataDir, "anilist-notifications.json");
   }
@@ -153,12 +170,14 @@ export class CloudNotificationService {
   start(): void {
     this.stop();
     const x = readJson<XConfig>(this.xFile);
+    console.log(`[Cloud Notifications] X ${x?.enabled ? `啟用（${x.accounts.filter((account) => account.enabled).length} 個帳號）` : "停用或未設定"}`);
     if (x?.enabled) {
       const timer = setInterval(() => void this.checkX(), Math.max(1, x.checkIntervalMinutes) * 60_000);
       timer.unref(); this.timers.push(timer);
       setTimeout(() => void this.checkX(), 10_000).unref();
     }
     const ani = readJson<AniListConfig>(this.aniListFile);
+    console.log(`[Cloud Notifications] AniList ${ani?.enabled && ani.username ? `啟用（${ani.username}）` : "停用或未設定"}`);
     if (ani?.enabled && ani.username) {
       const timer = setInterval(() => void this.checkAniList(), Math.max(1, ani.checkIntervalMinutes) * 60_000);
       timer.unref(); this.timers.push(timer);

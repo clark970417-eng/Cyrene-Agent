@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { homedir } from "node:os";
 import * as path from "node:path";
 import type { DiscordChannelConfig } from "../../settings-store";
@@ -13,6 +13,17 @@ export type CloudStandbyStatus = {
   watchdog: "active" | "inactive" | "failed" | "unknown";
   heartbeatAge: number | null;
 };
+
+export type CloudNotificationFiles = {
+  x?: unknown;
+  aniList?: unknown;
+};
+
+export function sanitizeCloudAniListConfig(value: unknown): unknown {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+  const { accessToken: _accessToken, ...safe } = value as Record<string, unknown>;
+  return safe;
+}
 
 export function isCloudStandbyConfigured(config: DiscordChannelConfig): boolean {
   return Boolean(
@@ -49,6 +60,43 @@ export function cloudStandbySshArgs(config: DiscordChannelConfig, action: CloudS
     `${user}@${host}`,
     ...(action === "status" ? [script] : ["sudo", script]),
   ];
+}
+
+function cloudStandbyConnectionArgs(config: DiscordChannelConfig): string[] {
+  return cloudStandbySshArgs(config, "status").slice(0, -1);
+}
+
+async function uploadCloudNotificationFile(
+  config: DiscordChannelConfig,
+  fileName: "x-notifications.json" | "anilist-notifications.json",
+  value: unknown,
+): Promise<void> {
+  const remoteCommand = `umask 077; mkdir -p "$HOME/cyrene-data"; cat > "$HOME/cyrene-data/${fileName}.tmp" && mv "$HOME/cyrene-data/${fileName}.tmp" "$HOME/cyrene-data/${fileName}"`;
+  const args = [...cloudStandbyConnectionArgs(config), remoteCommand];
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn("ssh", args, { stdio: ["pipe", "ignore", "pipe"] });
+    let stderr = "";
+    const timer = setTimeout(() => child.kill(), 12_000);
+    child.stderr.on("data", (chunk) => { stderr += String(chunk); });
+    child.once("error", (error) => { clearTimeout(timer); reject(error); });
+    child.once("close", (code) => {
+      clearTimeout(timer);
+      if (code === 0) resolve();
+      else reject(new Error(stderr.trim() || `雲端通知設定同步失敗（exit ${code ?? "unknown"}）`));
+    });
+    child.stdin.end(`${JSON.stringify(value, null, 2)}\n`);
+  });
+}
+
+export async function syncCloudNotificationFiles(
+  config: DiscordChannelConfig,
+  files: CloudNotificationFiles,
+): Promise<void> {
+  if (!isCloudStandbyConfigured(config)) return;
+  if (files.x !== undefined) await uploadCloudNotificationFile(config, "x-notifications.json", files.x);
+  if (files.aniList !== undefined) {
+    await uploadCloudNotificationFile(config, "anilist-notifications.json", sanitizeCloudAniListConfig(files.aniList));
+  }
 }
 
 async function runCloudStandby(config: DiscordChannelConfig, action: CloudStandbyAction): Promise<string> {

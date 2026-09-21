@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { parseFxTwitterTimeline } from "./cloud-notifications.js";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { migrateLegacyNotificationFiles, parseFxTwitterTimeline } from "./cloud-notifications.js";
 
 test("parseFxTwitterTimeline sorts newest and preserves media", () => {
   const tweets = parseFxTwitterTimeline({ results: [
@@ -9,4 +12,16 @@ test("parseFxTwitterTimeline sorts newest and preserves media", () => {
   ] }, "cyrene");
   assert.equal(tweets[0]?.id, "11");
   assert.deepEqual(tweets[0]?.mediaUrls, ["https://image.test/a.png"]);
+});
+
+test("migrateLegacyNotificationFiles moves only missing notification settings", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cyrene-cloud-notifications-"));
+  const dataDir = path.join(root, "live");
+  const legacyDir = path.join(root, "legacy");
+  fs.mkdirSync(legacyDir, { recursive: true });
+  fs.writeFileSync(path.join(legacyDir, "x-notifications.json"), JSON.stringify({ enabled: true }));
+  assert.deepEqual(migrateLegacyNotificationFiles(dataDir, legacyDir), ["x-notifications.json"]);
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(dataDir, "x-notifications.json"), "utf8")), { enabled: true });
+  assert.deepEqual(migrateLegacyNotificationFiles(dataDir, legacyDir), []);
+  fs.rmSync(root, { recursive: true, force: true });
 });

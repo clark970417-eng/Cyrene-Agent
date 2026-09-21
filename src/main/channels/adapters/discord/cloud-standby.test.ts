@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cloudStandbySshArgs, isCloudStandbyConfigured } from "./cloud-standby";
+import { cloudStandbySshArgs, isCloudStandbyConfigured, sanitizeCloudAniListConfig } from "./cloud-standby";
 
 describe("Discord local-primary cloud standby", () => {
   const config = {
@@ -35,5 +35,12 @@ describe("Discord local-primary cloud standby", () => {
   it("reads status without sudo and only restarts through the fixed privileged script", () => {
     expect(cloudStandbySshArgs(config, "status").slice(-1)).toEqual(["/usr/local/sbin/cyrene-cloud-status"]);
     expect(cloudStandbySshArgs(config, "restart").slice(-2)).toEqual(["sudo", "/usr/local/sbin/cyrene-cloud-restart"]);
+  });
+
+  it("never uploads the private AniList token to the cloud bot", () => {
+    expect(sanitizeCloudAniListConfig({ enabled: true, username: "Fushou", accessToken: "secret" })).toEqual({
+      enabled: true,
+      username: "Fushou",
+    });
   });
 });

@@ -20,6 +20,7 @@ import {
   loadCredentials,
 } from "./adapters/wechat/ilink-bot-adapter";
 import { DiscordAdapter } from "./adapters/discord";
+import { isCloudStandbyConfigured, signalCloudStandby, syncCloudNotificationFiles } from "./adapters/discord/cloud-standby";
 import { loadDiscordMusicHistory } from "./adapters/discord/music-history";
 import { loadDiscordMusicFavorites } from "./adapters/discord/music-favorites";
 import {
@@ -49,6 +50,13 @@ import {
 } from "../services/anilist-notification-store";
 
 const LOG = "[ChannelsInit]";
+
+async function syncCloudNotifications(files: { x?: unknown; aniList?: unknown }): Promise<void> {
+  const config = loadChannelsSettings().discord;
+  if (!isCloudStandbyConfigured(config)) return;
+  await syncCloudNotificationFiles(config, files);
+  if (config.cloudPrimary !== false) await signalCloudStandby(config, "restart");
+}
 
 let initialized = false;
 let conversationLifecycle: {
@@ -548,7 +556,7 @@ function registerChannelsIpc(): void {
 
   // X (Twitter) Notifications
   ipcMain.handle(IPC.X_NOTIFICATIONS_GET_CONFIG, () => loadXNotificationConfig());
-  ipcMain.handle(IPC.X_NOTIFICATIONS_SAVE_CONFIG, (_e, patch: unknown) => {
+  ipcMain.handle(IPC.X_NOTIFICATIONS_SAVE_CONFIG, async (_e, patch: unknown) => {
     const current = loadXNotificationConfig();
     const input = (patch && typeof patch === "object" ? patch : {}) as Partial<XNotificationConfig>;
     const updated: XNotificationConfig = {
@@ -557,7 +565,13 @@ function registerChannelsIpc(): void {
     };
     saveXNotificationConfig(updated);
     xNotificationService.start();
-    return { ok: true, config: updated };
+    try {
+      await syncCloudNotifications({ x: updated });
+      return { ok: true, config: updated, cloudSynced: true };
+    } catch (error) {
+      console.warn(LOG, "X 通知設定已儲存，但雲端同步失敗:", error);
+      return { ok: true, config: updated, cloudSynced: false, cloudError: error instanceof Error ? error.message : String(error) };
+    }
   });
   ipcMain.handle(IPC.X_NOTIFICATIONS_CHECK_NOW, async () => {
     const res = await xNotificationService.checkAllAccounts();
@@ -621,7 +635,7 @@ function registerChannelsIpc(): void {
 
   // AniList Airing Notifications
   ipcMain.handle(IPC.ANILIST_NOTIFICATIONS_GET_CONFIG, () => loadAniListNotificationConfig());
-  ipcMain.handle(IPC.ANILIST_NOTIFICATIONS_SAVE_CONFIG, (_e, patch: unknown) => {
+  ipcMain.handle(IPC.ANILIST_NOTIFICATIONS_SAVE_CONFIG, async (_e, patch: unknown) => {
     const current = loadAniListNotificationConfig();
     const input = (patch && typeof patch === "object" ? patch : {}) as Partial<AniListNotificationConfig>;
     const updated: AniListNotificationConfig = {
@@ -630,7 +644,13 @@ function registerChannelsIpc(): void {
     };
     saveAniListNotificationConfig(updated);
     aniListNotificationService.start();
-    return { ok: true, config: updated };
+    try {
+      await syncCloudNotifications({ aniList: updated });
+      return { ok: true, config: updated, cloudSynced: true };
+    } catch (error) {
+      console.warn(LOG, "AniList 通知設定已儲存，但雲端同步失敗:", error);
+      return { ok: true, config: updated, cloudSynced: false, cloudError: error instanceof Error ? error.message : String(error) };
+    }
   });
   ipcMain.handle(IPC.ANILIST_NOTIFICATIONS_VERIFY_ACCOUNT, async (_e, input: unknown) => {
     const data = (input && typeof input === "object" ? input : {}) as { username?: string; token?: string };

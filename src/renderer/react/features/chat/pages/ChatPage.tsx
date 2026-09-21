@@ -43,6 +43,7 @@ import { SkillModePanel } from "../components/SkillModePanel";
 import { ToolModePanel } from "../components/ToolModePanel";
 import { applyTaskDelegationEvent, normalizeTaskDelegationEvent } from "../components/task-delegations";
 import { RightInspector } from "../components/RightInspector";
+import { WorkspaceContextBar } from "../components/WorkspaceContextBar";
 import { useFeedback } from "../../../components/feedback/FeedbackProvider";
 import { ReviewDiffContent } from "../components/ReviewInspector";
 import { shouldRunModelForMode, shouldUseCyreneAutoTts } from "./conversation-run-policy";
@@ -2221,6 +2222,14 @@ export function ChatPage() {
             <span>鬆開即可新增到當前對話</span>
           </div>
         )}
+        <WorkspaceContextBar
+          mode={mode}
+          workspaceName={workspaceNames[mode]}
+          sessionTitle={activeSessionId ? sessionsByMode[mode]?.find((session) => session.id === activeSessionId)?.title : undefined}
+          running={isCurrentScopeRunning}
+          queuedCount={currentPendingQueue.length}
+          onChooseWorkspace={() => void chooseWorkspace()}
+        />
         {utilityPanel ? (
           utilityPanel === "model" ? <ModelModePanel />
             : utilityPanel === "skill" ? <SkillModePanel />

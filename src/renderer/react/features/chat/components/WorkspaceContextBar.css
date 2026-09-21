@@ -1,0 +1,90 @@
+.cy-workspace-context {
+  flex: 0 0 38px;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--cy-border);
+  background: color-mix(in srgb, var(--cy-bg-workspace) 94%, var(--cy-accent) 6%);
+  color: var(--cy-text-muted);
+  font-size: 12px;
+}
+
+.cy-workspace-context__identity,
+.cy-workspace-context__actions,
+.cy-workspace-context button,
+.cy-workspace-context__state {
+  display: flex;
+  align-items: center;
+}
+
+.cy-workspace-context__identity,
+.cy-workspace-context__actions {
+  min-width: 0;
+  gap: 8px;
+}
+
+.cy-workspace-context__identity strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--cy-text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cy-workspace-context__identity > span,
+.cy-workspace-context__queue,
+.cy-workspace-context__state {
+  white-space: nowrap;
+}
+
+.cy-workspace-context__state {
+  gap: 4px;
+}
+
+.cy-workspace-context__state.is-running {
+  color: var(--cy-accent);
+}
+
+.cy-workspace-context__state.is-running svg {
+  animation: cy-context-spin 900ms linear infinite;
+}
+
+.cy-workspace-context button {
+  min-width: 0;
+  max-width: 190px;
+  gap: 6px;
+  padding: 4px 7px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--cy-text-muted);
+  cursor: pointer;
+}
+
+.cy-workspace-context button:hover {
+  border-color: var(--cy-border);
+  background: var(--cy-bg-hover);
+  color: var(--cy-text);
+}
+
+.cy-workspace-context button span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@keyframes cy-context-spin { to { transform: rotate(360deg); } }
+
+@media (max-width: 760px) {
+  .cy-workspace-context { padding: 0 10px; }
+  .cy-workspace-context__identity > span,
+  .cy-workspace-context__queue { display: none; }
+  .cy-workspace-context button { max-width: 128px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cy-workspace-context__state.is-running svg { animation: none; }
+}
