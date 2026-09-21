@@ -52,4 +52,23 @@ describe("relationship log", () => {
     expect(context).toContain("疲惫")
     expect(context).toContain("下次回应提示")
   })
+
+  it("does not treat ordinary negation as a conversation boundary", async () => {
+    const { RelationshipLogStore } = await import("./relationship-log")
+    const store = new RelationshipLogStore(filePath)
+
+    for (const text of ["我今天不想吃火鍋", "我想吃點別的", "先不管這個錯誤，幫我看程式碼"]) {
+      await store.recordTurn({
+        userText: text,
+        assistantText: "好呀。",
+        cyreneFeeling: "平穩",
+        channel: "desktop",
+      })
+    }
+
+    const data = JSON.parse(fs.readFileSync(filePath, "utf8")) as {
+      entries: Array<{ userMood: string }>
+    }
+    expect(data.entries.every((entry) => entry.userMood === "未知")).toBe(true)
+  })
 })

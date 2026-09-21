@@ -13,10 +13,21 @@ vi.mock("electron", () => ({
   },
 }))
 
+const ragMock = vi.hoisted(() => ({
+  addL2MemoryVector: vi.fn(async (_text: string, l2Id: string) => `rag_new_${l2Id}`),
+  deleteUserMemoryVectors: vi.fn(() => 1),
+}))
+
+vi.mock("../rag/index", () => ({
+  addL2MemoryVector: ragMock.addL2MemoryVector,
+  deleteUserMemoryVectors: ragMock.deleteUserMemoryVectors,
+}))
+
 describe("parseL2Markdown", () => {
   beforeEach(() => {
     electronMock.userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), "obsidian-import-"))
     vi.resetModules()
+    vi.clearAllMocks()
   })
 
   it("extracts id from frontmatter and content body (with 关联 section)", async () => {
@@ -111,6 +122,7 @@ describe("importL2File / importL2Markdown (round-trip)", () => {
     electronMock.userDataDir = userDataDir
     vaultDir = fs.mkdtempSync(path.join(os.tmpdir(), "vault-"))
     vi.resetModules()
+    vi.clearAllMocks()
   })
 
   it("exports then re-imports an edited vault md, updating PMRS content", async () => {
@@ -153,6 +165,14 @@ describe("importL2File / importL2Markdown (round-trip)", () => {
     const all = await memoryStore.getAllL2()
     const updated = all.find((m) => m.id === l2.id)!
     expect(updated.content).toBe("用户改成了每周游泳三次")
+    expect(ragMock.addL2MemoryVector).toHaveBeenCalledWith(
+      "用户改成了每周游泳三次",
+      l2.id,
+      expect.any(Object),
+    )
+    expect(ragMock.deleteUserMemoryVectors).toHaveBeenCalledWith(["rag_1"])
+    expect(updated.syncStatus).toBe("synced")
+    expect(updated.ragId).toBe(`rag_new_${l2.id}`)
   })
 
   it("does not write when vault content is unchanged (changed=false)", async () => {
@@ -196,7 +216,7 @@ describe("importL2File / importL2Markdown (round-trip)", () => {
     expect(result.changed).toBe(false)
   })
 
-  it("updateL2Content only touches content, not status/weight/createdAt", async () => {
+  it("updateL2Content refreshes keywords and sync status without changing runtime fields", async () => {
     const { memoryStore } = await import("./memory-store")
     const l2 = await memoryStore.addL2Memory({
       content: "原始",
@@ -205,6 +225,7 @@ describe("importL2File / importL2Markdown (round-trip)", () => {
       isPinned: false,
     })
     const before = (await memoryStore.getAllL2()).find((m) => m.id === l2.id)!
+    const beforeKeywords = [...(before.keywords ?? [])]
     await memoryStore.updateL2Content(l2.id, "新内容")
     const after = (await memoryStore.getAllL2()).find((m) => m.id === l2.id)!
 
@@ -215,5 +236,31 @@ describe("importL2File / importL2Markdown (round-trip)", () => {
     expect(after.createdAt).toBe(before.createdAt)
     expect(after.accessCount).toBe(before.accessCount)
     expect(after.ragId).toBe(before.ragId)
+    expect(after.syncStatus).toBe("pending_sync")
+    expect(after.keywords).not.toEqual(beforeKeywords)
+    expect(after.keywords).toEqual(expect.arrayContaining(["新", "内", "容"]))
+  })
+
+  it("keeps the content but marks sync_failed when vector rebuilding fails", async () => {
+    const { memoryStore } = await import("./memory-store")
+    const { importL2Markdown } = await import("./obsidian-importer")
+    const l2 = await memoryStore.addL2Memory({
+      content: "舊內容",
+      triggerText: "t",
+      sourceConversationId: "c",
+      ragId: "rag_old",
+      isPinned: false,
+    })
+    ragMock.addL2MemoryVector.mockRejectedValueOnce(new Error("embedding failed"))
+
+    const md = ["---", `id: ${l2.id}`, "---", "", "# t", "", "新內容", ""].join("\n")
+    const result = await importL2Markdown(md)
+    const after = (await memoryStore.getAllL2()).find((m) => m.id === l2.id)!
+
+    expect(result.changed).toBe(true)
+    expect(after.content).toBe("新內容")
+    expect(after.syncStatus).toBe("sync_failed")
+    expect(after.ragId).toBe("rag_old")
+    expect(ragMock.deleteUserMemoryVectors).not.toHaveBeenCalled()
   })
 })

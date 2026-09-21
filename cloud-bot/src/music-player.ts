@@ -131,6 +131,10 @@ export class CloudMusicPlayer {
     return entry;
   }
 
+  async inspectUrl(value: string): Promise<CloudFavorite> {
+    return await this.resolveTrack(extractPlayableUrl(value));
+  }
+
   snapshot(): CloudMusicSnapshot {
     const state = this.player.state.status;
     return {

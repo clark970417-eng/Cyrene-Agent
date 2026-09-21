@@ -578,13 +578,20 @@ describe("build-options", () => {
       recordRelationshipTurn: async () => {},
     }
 
-    const effects = await onAgentRunFinished({ reply: "来，抱抱你", toolResults: [] }, "今天好累", deps)
+    const effects = await onAgentRunFinished(
+      { reply: "来，抱抱你", toolResults: [] },
+      "今天好累",
+      deps,
+      "desktop",
+      "sticker-index-test",
+    )
 
     expect(matchSticker).toHaveBeenCalledWith(
       "来，抱抱你\n今天好累",
       expect.anything(),
       latestIndex,
       0.55,
+      { excludeIds: [] },
     )
     expect(effects).toEqual({ sticker: "hugtight" })
   })
@@ -623,14 +630,25 @@ describe("build-options", () => {
       recordRelationshipTurn: async () => {},
     }
 
-    await onAgentRunFinished({ reply: "总结好了", toolResults: [] }, latestUserText, deps)
+    await onAgentRunFinished(
+      { reply: "总结好了", toolResults: [] },
+      latestUserText,
+      deps,
+      "desktop",
+      "document-side-effects-test",
+    )
 
-    expect(scheduleMemoryWrite).toHaveBeenCalledWith("帮我总结这个 md", "总结好了", undefined)
+    expect(scheduleMemoryWrite).toHaveBeenCalledWith(
+      "帮我总结这个 md",
+      "总结好了",
+      "document-side-effects-test",
+    )
     expect(matchSticker).toHaveBeenCalledWith(
       "总结好了\n帮我总结这个 md",
       expect.anything(),
       latestIndex,
       0.55,
+      { excludeIds: [] },
     )
   })
 

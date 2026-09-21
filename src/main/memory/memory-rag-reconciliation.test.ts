@@ -88,6 +88,31 @@ describe("memory/RAG reconciliation", () => {
     expect(deps.deleteVectors).not.toHaveBeenCalled();
   });
 
+  it("rebuilds a vector whose stored text no longer matches the memory", async () => {
+    const memories = [memory({
+      id: "l2_stale",
+      content: "使用者改成每週游泳三次",
+      ragId: "rag_stale",
+    })];
+    const vectors = [{
+      id: "rag_stale",
+      text: "使用者喜歡跑步",
+      metadata: { l2Id: "l2_stale" },
+    }];
+    const deps = createDeps(memories, vectors);
+
+    const report = await reconcileMemoryRag(deps);
+
+    expect(deps.addVector).toHaveBeenCalledWith(
+      "使用者改成每週游泳三次",
+      "l2_stale",
+      expect.any(Object),
+    );
+    expect(deps.markSynced).toHaveBeenCalledWith("l2_stale", "rag_rebuilt_l2_stale");
+    expect(deps.deleteVectors).toHaveBeenCalledWith(["rag_stale"]);
+    expect(report).toMatchObject({ rebuilt: 1, deleted: 1, failed: 0, changed: true });
+  });
+
   it("marks a memory sync_failed without blocking other repairs", async () => {
     const memories = [
       memory({ id: "l2_fail", content: "fail", ragId: "rag_gone" }),

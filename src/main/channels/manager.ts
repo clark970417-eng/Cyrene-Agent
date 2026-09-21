@@ -10,6 +10,7 @@ import type { ChannelAdapter } from "./adapters/base";
 import type { ChannelId, ChannelStatus, IncomingMessage, OutgoingMessage } from "./types";
 import { setAdapterHandler } from "./adapters/base";
 import { logger, LogTag } from "../logger";
+import { commitDeliveredMessage } from "./delivery-commit";
 
 const LOG = "[ChannelManager]";
 
@@ -84,7 +85,9 @@ export class ChannelManager {
       console.warn(LOG, `收到入站消息但 dispatcher 未註冊 [${msg.channel}]`);
       return null;
     }
-    return this.dispatchFn(msg);
+    const outgoing = await this.dispatchFn(msg);
+    if (outgoing) commitDeliveredMessage(outgoing);
+    return outgoing;
   }
 
   /** 给 UI 用：所有渠道的实时状态 */
@@ -118,6 +121,8 @@ export class ChannelManager {
             const result = await adapter.send(outgoing);
             if (!result.ok) {
               console.warn(LOG, `adapter.send 失败 [${channel}]:`, result.error);
+            } else {
+              commitDeliveredMessage(outgoing);
             }
           } catch (err) {
             console.error(LOG, `adapter.send 抛错 [${channel}]:`, err);

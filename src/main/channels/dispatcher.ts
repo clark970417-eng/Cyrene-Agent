@@ -40,6 +40,9 @@ import { rememberProactiveChannelRecipient } from "./proactive-delivery";
 import { toTraditionalTaiwan } from "../utils/opencc";
 import { collapseExactRepeatedReply } from "./reply-deduplication";
 import { shouldUseSmartChannelTts } from "./smart-tts-policy";
+import { createChannelRateLimiter } from "./channel-rate-limiter";
+import { createKeyedTaskQueue, type KeyedTaskQueue } from "./keyed-task-queue";
+import { registerDeliveryCommit } from "./delivery-commit";
 
 /** Phase A：用于拼接历史对话的轻量 ChatMessage 形状（与 orchestrator ChatMessage 兼容）。 */
 interface ChatMessage {
@@ -64,45 +67,6 @@ const LOG = "[ChannelDispatcher]";
 
 /** sessionId 缓存（用于查重 / 调试 / 上限管理） */
 const sessionIndex = new Map<string, { channel: ChannelId; senderId: string; lastAt: number }>();
-
-/** 限速：单用户每分钟最多 N 条 */
-class RateLimiter {
-  private buckets = new Map<string, number[]>(); // key = channel:senderId → timestamp[]
-  constructor(private settings: ChannelsSettings) {}
-
-  /** 检查并记录一次命中。返回 true = 通过；false = 超限。 */
-  hit(channel: ChannelId, senderId: string): boolean {
-    const key = `${channel}:${senderId}`;
-    const now = Date.now();
-    const arr = this.buckets.get(key) ?? [];
-    // 砍掉 60s 之外的
-    const fresh = arr.filter((t) => now - t < 60_000);
-    if (fresh.length >= this.settings.rateLimitPerUser) {
-      this.buckets.set(key, fresh);
-      return false;
-    }
-    fresh.push(now);
-    this.buckets.set(key, fresh);
-
-    // 渠道级全局限速
-    const chKey = `__channel__:${channel}`;
-    const chArr = this.buckets.get(chKey) ?? [];
-    const chFresh = chArr.filter((t) => now - t < 60_000);
-    if (chFresh.length >= this.settings.rateLimitPerChannel) {
-      this.buckets.set(chKey, chFresh);
-      return false;
-    }
-    chFresh.push(now);
-    this.buckets.set(chKey, chFresh);
-
-    return true;
-  }
-
-  /** 测试用：重置所有桶 */
-  reset(): void {
-    this.buckets.clear();
-  }
-}
 
 /** 计算一个稳定、匿名的 sessionId。 */
 export function makeSessionId(channel: ChannelId, senderId: string): string {
@@ -214,7 +178,8 @@ export function shouldAppendChannelTtsAudio(
 
 export class ChannelDispatcher {
   private settings: ChannelsSettings;
-  private limiter: RateLimiter;
+  private limiter: ReturnType<typeof createChannelRateLimiter>;
+  private readonly queue: KeyedTaskQueue;
   deps: DispatcherDeps;
 
   constructor(deps: DispatcherDeps) {
@@ -222,14 +187,15 @@ export class ChannelDispatcher {
     // 此單例在 Electron ready 前就會建構；先用無 I/O 預設值，真正啟動
     // adapter 時 reloadSettings() 才讀 Keychain，避免 Discord 等憑證假性遺失。
     this.settings = getDefaultChannelsSettings();
-    this.limiter = new RateLimiter(this.settings);
+    this.limiter = createChannelRateLimiter(this.settings);
+    this.queue = createKeyedTaskQueue(20);
     reloadLogFromDisk();
   }
 
   /** 重新加载 settings（UI 改了限速配置时调） */
   reloadSettings(): void {
     this.settings = loadChannelsSettings();
-    this.limiter = new RateLimiter(this.settings);
+    this.limiter = createChannelRateLimiter(this.settings);
   }
 
   /**
@@ -239,7 +205,20 @@ export class ChannelDispatcher {
    * 如果没注入 buildAndRunAgent，返回 echo 作为占位（仅 Phase 0 用于联调）。
    */
   async handleIncoming(msg: IncomingMessage): Promise<OutgoingMessage | null> {
-    if (!this.limiter.hit(msg.channel, msg.senderId)) {
+    const queueKey = `${msg.channel}:${msg.chatId}`;
+    try {
+      return await this.queue.run(queueKey, () => this.processIncoming(msg));
+    } catch (error) {
+      if (error instanceof Error && error.message.startsWith("channel_queue_full:")) {
+        console.warn(LOG, `佇列已滿: ${queueKey}`);
+        return null;
+      }
+      throw error;
+    }
+  }
+
+  private async processIncoming(msg: IncomingMessage): Promise<OutgoingMessage | null> {
+    if (!this.limiter.tryConsume(msg.channel, msg.senderId)) {
       console.warn(LOG, `限速: ${msg.channel}:${msg.senderId}`);
       return null;
     }
@@ -401,13 +380,6 @@ export class ChannelDispatcher {
       console.warn(LOG, "appendLog (outgoing) 失败:", err);
     }
 
-    // Phase A2：出站消息落对话历史（assistant 角色）
-    try {
-      appendChannelHistory(sessionId, "assistant", replyText);
-    } catch (err) {
-      console.warn(LOG, "appendHistory (outgoing) 失败:", err);
-    }
-
     // 构造 OutgoingMessage，capability 降级
     const outgoing: OutgoingMessage = {
       channel: msg.channel,
@@ -415,7 +387,18 @@ export class ChannelDispatcher {
       threadId: msg.threadId,
       parts,
     };
-    return this.downgradeToCapability(outgoing, this.deps.manager.getAdapter(msg.channel)?.capability);
+    const deliverable = this.downgradeToCapability(
+      outgoing,
+      this.deps.manager.getAdapter(msg.channel)?.capability,
+    );
+    registerDeliveryCommit(deliverable, () => {
+      try {
+        appendChannelHistory(sessionId, "assistant", replyText);
+      } catch (err) {
+        console.warn(LOG, "appendHistory (outgoing) 失敗:", err);
+      }
+    });
+    return deliverable;
   }
 
   /** 按目标渠道 cap 做降级。返回新对象不修改原对象。 */

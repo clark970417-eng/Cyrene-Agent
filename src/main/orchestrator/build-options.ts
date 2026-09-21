@@ -155,6 +155,7 @@ export interface OnRunFinishedDeps {
     provider: unknown,
     index: unknown,
     threshold: number,
+    options?: { excludeIds?: readonly string[] },
   ) => Promise<{ id: string } | null | undefined>;
   loadStickerSettings: () => Record<string, boolean>;
   broadcastRuntimeStateChanged: () => void;
@@ -165,6 +166,21 @@ export interface OnRunFinishedDeps {
     reply: string,
   ) => Promise<void>;
   recordRelationshipTurn: (input: RelationshipTurnInput) => Promise<unknown> | unknown;
+}
+
+const RECENT_STICKER_LIMIT = 3;
+const recentStickersByConversation = new Map<string, string[]>();
+
+function stickerConversationKey(channel?: RelationshipChannel, conversationId?: string): string {
+  return conversationId?.trim() || `channel:${channel ?? "desktop"}`;
+}
+
+function rememberSticker(key: string, stickerId: string): void {
+  const recent = recentStickersByConversation.get(key) ?? [];
+  recentStickersByConversation.set(
+    key,
+    [stickerId, ...recent.filter((id) => id !== stickerId)].slice(0, RECENT_STICKER_LIMIT),
+  );
 }
 
 export interface ModelSettingsLite {
@@ -781,6 +797,12 @@ export async function onAgentRunFinished(
 
   const stickerIndex = deps.getStickerEmbeddingIndex?.() ?? deps.stickerEmbeddingIndex;
   const stickerQuery = buildStickerEmbeddingQuery(chatContent, sideEffectUserText);
+  const stickerSettings = deps.loadStickerSettings();
+  const stickerKey = stickerConversationKey(channel, conversationId);
+  const recentlyUsed = recentStickersByConversation.get(stickerKey) ?? [];
+  const disabled = Object.entries(stickerSettings)
+    .filter(([, enabled]) => enabled === false)
+    .map(([id]) => id);
   let stickerCandidate: string | null = null;
   // 只有代码/公式时 stickerQuery 为空：不请求 embedding，避免技术内容误触发表情。
   if (settings.stickerEnabled && stickerIndex && stickerQuery) {
@@ -790,12 +812,13 @@ export async function onAgentRunFinished(
         deps.getEmbeddingProvider(),
         stickerIndex,
         settings.stickerSimilarityThreshold ?? 0.55,
+        { excludeIds: [...recentlyUsed, ...disabled] },
       ),
     );
     stickerCandidate = matched?.id ?? null;
   }
-  const stickerSettings = deps.loadStickerSettings();
   const sticker = stickerCandidate && stickerSettings[stickerCandidate] !== false ? stickerCandidate : null;
+  if (sticker) rememberSticker(stickerKey, sticker);
 
   if (settings.runtimeSync === "local") {
     deps.broadcastRuntimeStateChanged();

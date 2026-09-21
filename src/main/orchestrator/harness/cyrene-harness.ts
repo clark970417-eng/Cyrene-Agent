@@ -118,7 +118,7 @@ export async function runCyreneHarness(input: HarnessInput): Promise<HarnessResu
   let cache: HarnessCacheState = input.initialCache
     ? { ...input.initialCache }
     : { ...INITIAL_HARNESS_CACHE_STATE };
-  let toolOutputs: ToolOutputRef[] = [];
+  const toolOutputs: ToolOutputRef[] = [];
   let checkpointFailure: string | undefined;
 
   // 每轮临时拼接 runtimeContext 会使上一请求不再是下一请求的前缀。

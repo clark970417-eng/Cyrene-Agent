@@ -15,7 +15,21 @@ describe("Discord announcement", () => {
       color: "#42b9ff",
     });
     expect(result.media.map((item) => item.kind)).toEqual(["image", "video"]);
+    expect(result.media.map((item) => item.name)).toEqual([
+      "announcement-1.png",
+      "announcement-2.mp4",
+    ]);
     expect(result.color).toBe(0x42b9ff);
+  });
+
+  it("uses embed-safe attachment names for screenshots with spaces or unicode", async () => {
+    const result = await validateDiscordAnnouncement({
+      channelId: "123456789012345678",
+      title: "新表情更新",
+      mediaPaths: ["/tmp/Screenshot 2026-09-21 at 10.34.44 AM 昔漣.png"],
+    });
+
+    expect(result.media[0]?.name).toBe("announcement-1.png");
   });
 
   it("rejects empty announcements and unsafe links", async () => {

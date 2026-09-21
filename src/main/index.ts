@@ -3,6 +3,7 @@ import * as path from "path";
 
 import { logger, LogTag } from "./logger";
 import { installMainLogFile } from "./main-log-file";
+import { installProcessStreamErrorGuards } from "./process-stream-guard";
 import { renderBanner } from "../shared/banner";
 import { createHash, randomUUID } from "crypto";
 import { IPC } from "../shared/ipc-channels";
@@ -192,6 +193,8 @@ import { registerWavesUidIpc } from "./wavesuid-ipc";
 import { registerPaintIpc } from "./paint-ipc";
 import { registerSongIpc, startAutomaticSongPractice } from "./song/song-ipc";
 import { startDesktopWindows } from "./desktop-window-startup";
+
+installProcessStreamErrorGuards();
 
 // Electron 的 safeStorage 在 macOS 以應用名稱選擇 Keychain 金鑰。
 // 開發版由 `electron .` 啟動時若沒有先固定名稱，會以 "Electron" 嘗試解密，
@@ -652,4 +655,3 @@ app.on("activate", () => {
   windowManager?.createReactChatWindow();
   windowManager?.createMainWindow();
 });
-

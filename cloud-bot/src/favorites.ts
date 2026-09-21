@@ -33,13 +33,19 @@ export class FavoriteStore {
     return this.entries.slice(-Math.max(1, limit)).reverse();
   }
 
-  async save(url: string, title?: string): Promise<{ added: boolean; entry: CloudFavorite }> {
+  async save(
+    url: string,
+    title?: string,
+    metadata: Pick<CloudFavorite, "thumbnail" | "duration"> = {},
+  ): Promise<{ added: boolean; entry: CloudFavorite }> {
     const existing = this.entries.find((entry) => entry.url === url);
     if (existing) return { added: false, entry: existing };
     const entry: CloudFavorite = {
       id: randomUUID(),
       title: title?.trim() || readableTitle(url),
       url,
+      ...(metadata.thumbnail ? { thumbnail: metadata.thumbnail } : {}),
+      ...(typeof metadata.duration === "number" ? { duration: metadata.duration } : {}),
       savedAt: new Date().toISOString(),
     };
     this.entries.push(entry);

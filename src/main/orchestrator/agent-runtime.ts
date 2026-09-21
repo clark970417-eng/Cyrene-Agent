@@ -230,8 +230,8 @@ export function createAgentRuntime(rawDeps: AgentRuntimeDeps): AgentRuntime {
         runtimeStateService.setStateWithoutNotify(next as any)) as OnRunFinishedDeps["setRuntimeState"],
       stickerEmbeddingIndex: rawDeps.getStickerEmbeddingIndex(),
       getEmbeddingProvider: (() => rawDeps.getEmbeddingProvider() as unknown) as OnRunFinishedDeps["getEmbeddingProvider"],
-      matchSticker: ((text, provider, index, threshold) =>
-        matchSticker(text, provider as any, index as any, threshold) as Promise<{
+      matchSticker: ((text, provider, index, threshold, options) =>
+        matchSticker(text, provider as any, index as any, threshold, options) as Promise<{
           id: string;
         } | null | undefined>) as OnRunFinishedDeps["matchSticker"],
       loadStickerSettings,
@@ -308,6 +308,8 @@ export function createAgentRuntime(rawDeps: AgentRuntimeDeps): AgentRuntime {
           baseUrl: settings.baseUrl,
           model: settings.model,
           apiKey: settings.apiKey,
+          explicitTransport: settings.explicitTransport,
+          reasoning: settings.reasoning,
           contextWindowTokens: settings.contextWindowTokens,
         },
         messages: [{ role: "system" as const, content: systemContent }, ...messages],

@@ -12,6 +12,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { memoryStore } from "./memory-store";
 import { setImportingMemory } from "./obsidian-sync-flag";
+import { addL2MemoryVector, deleteUserMemoryVectors } from "../rag/index";
 import { logger, LogTag } from "../logger";
 import type { L2Memory } from "./memory-types";
 
@@ -142,10 +143,11 @@ export async function importL2Markdown(md: string): Promise<ImportResult> {
   if (!id) return { id: null, ok: false, reason: "no-frontmatter-id", changed: false };
   if (content === null) return { id, ok: false, reason: "no-content", changed: false };
 
+  let existing: L2Memory | undefined;
   setImportingMemory(true);
   try {
     const before = await memoryStore.getAllL2();
-    const existing = before.find((m: L2Memory) => m.id === id);
+    existing = before.find((m: L2Memory) => m.id === id);
     if (!existing) {
       return { id, ok: false, reason: "not-found", changed: false };
     }
@@ -153,10 +155,34 @@ export async function importL2Markdown(md: string): Promise<ImportResult> {
       return { id, ok: true, changed: false }; // 内容未变，不写
     }
     await memoryStore.updateL2Content(id, content);
-    return { id, ok: true, changed: true };
   } finally {
     setImportingMemory(false);
   }
+
+  const oldRagId = existing.ragId;
+  try {
+    const newRagId = await addL2MemoryVector(content, id, {
+      triggerText: existing.triggerText,
+    });
+    await memoryStore.markL2SyncStatus(id, "synced", newRagId);
+    if (oldRagId && oldRagId !== newRagId) {
+      try {
+        deleteUserMemoryVectors([oldRagId]);
+      } catch (err) {
+        logger.warn(
+          LogTag.Cyrene,
+          `[obsidian-import] failed to delete stale vector for ${id}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+  } catch (err) {
+    await memoryStore.markL2SyncStatus(id, "sync_failed", undefined, err);
+    logger.warn(
+      LogTag.Cyrene,
+      `[obsidian-import] vector rebuild failed for ${id}: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+  return { id, ok: true, changed: true };
 }
 
 /** 读取单个 vault md 文件并回流。文件不存在（被删除）时静默跳过。 */

@@ -61,7 +61,7 @@ export async function validateDiscordAnnouncement(raw: DiscordAnnouncementInput)
   if (!title && !content && uniquePaths.length === 0) throw new Error("請至少加入標題、內容、圖片或影片其中一項");
 
   const media: ValidatedDiscordAnnouncement["media"] = [];
-  for (const filePath of uniquePaths) {
+  for (const [index, filePath] of uniquePaths.entries()) {
     const ext = path.extname(filePath).toLowerCase();
     const kind = IMAGE_EXTENSIONS.has(ext) ? "image" : VIDEO_EXTENSIONS.has(ext) ? "video" : null;
     if (!kind) throw new Error(`不支援的媒體格式：${path.basename(filePath)}`);
@@ -70,7 +70,16 @@ export async function validateDiscordAnnouncement(raw: DiscordAnnouncementInput)
     if (info.size > DISCORD_ANNOUNCEMENT_FILE_LIMIT) {
       throw new Error(`${path.basename(filePath)} 超過公告發布器 10 MB 上限`);
     }
-    media.push({ path: filePath, name: path.basename(filePath), kind, size: info.size });
+    // attachment:// URLs are stricter than normal Discord filenames. A local
+    // screenshot name can contain spaces or non-ASCII characters and make
+    // EmbedBuilder throw a generic "Received one or more errors" validation
+    // failure before the request is sent.
+    media.push({
+      path: filePath,
+      name: `announcement-${index + 1}${ext}`,
+      kind,
+      size: info.size,
+    });
   }
 
   return {

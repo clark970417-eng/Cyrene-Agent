@@ -79,15 +79,18 @@ export async function matchSticker(
   provider: EmbeddingProvider,
   index: StickerEmbeddingEntry[],
   threshold: number,
+  options: { excludeIds?: readonly string[] } = {},
 ): Promise<{ id: string; score: number } | null> {
   if (index.length === 0) return null;
 
   const queryEmbedding = await provider.embed(query);
+  const excluded = new Set(options.excludeIds ?? []);
 
   let bestId: string | null = null;
   let bestScore = -1;
 
   for (const entry of index) {
+    if (excluded.has(entry.id)) continue;
     const score = cosineSimilarity(queryEmbedding, entry.embedding);
     if (score > bestScore) {
       bestScore = score;

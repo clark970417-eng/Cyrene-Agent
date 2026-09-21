@@ -146,11 +146,21 @@ export function createLocalEmbeddingProvider(modelKey?: string): EmbeddingProvid
     },
 
     async embedBatch(texts: string[]): Promise<number[][]> {
+      if (texts.length === 0) return [];
       const pipe = await getLocalPipeline(key);
+      const result: any = await pipe(texts, { pooling: "mean", normalize: true });
+      const shape = result.dims as number[];
+      const data = result.data as Float32Array;
+      if (shape.length !== 2 || shape[0] !== texts.length) {
+        throw new Error(
+          `Unexpected batch embedding output shape ${JSON.stringify(shape)} for ${texts.length} inputs`,
+        );
+      }
+
+      const dimensions = shape[1];
       const results: number[][] = [];
-      for (const text of texts) {
-        const result: any = await pipe(text, { pooling: "mean", normalize: true });
-        results.push(Array.from(result.data as Float32Array));
+      for (let index = 0; index < texts.length; index += 1) {
+        results.push(Array.from(data.subarray(index * dimensions, (index + 1) * dimensions)));
       }
       return results;
     },

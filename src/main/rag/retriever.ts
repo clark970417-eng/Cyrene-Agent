@@ -55,16 +55,20 @@ export interface RetrieveOptions {
 // @node-rs/jieba 没有运行时 insertWord()，改用「后处理重组」方案：
 // jieba 切完后，把被切散的自定义词（如"昔涟"→"昔","涟"）重新合并。
 const customWords = new Set<string>();
+let customWordsVersion = 0;
 
 /** 注册一个自定义词（让分词时不被切散） */
 export function registerJiebaCustomWord(word: string): void {
-  if (word.length >= 2) customWords.add(word);
+  if (word.length >= 2 && !customWords.has(word)) {
+    customWords.add(word);
+    customWordsVersion += 1;
+  }
 }
 
 /** 批量注册自定义词 */
 export function registerJiebaCustomWords(words: Iterable<string>): void {
   for (const w of words) {
-    if (w.length >= 2) customWords.add(w);
+    registerJiebaCustomWord(w);
   }
 }
 
@@ -152,6 +156,16 @@ function tokenize(text: string): TokenInfo[] {
     }
     return tokens;
   }
+}
+
+const documentTokenCache = new WeakMap<object, { version: number; tokens: TokenInfo[] }>();
+
+function getDocumentTokens(entry: object & { text: string }): TokenInfo[] {
+  const cached = documentTokenCache.get(entry);
+  if (cached?.version === customWordsVersion) return cached.tokens;
+  const tokens = tokenize(entry.text);
+  documentTokenCache.set(entry, { version: customWordsVersion, tokens });
+  return tokens;
 }
 
 function bm25Score(
@@ -303,7 +317,7 @@ export class HybridRetriever {
     if (docs.length === 0) return [];
 
     const queryTokenInfo = tokenize(query);
-    const docTokensList = docs.map((d) => tokenize(d.text));
+    const docTokensList = docs.map((d) => getDocumentTokens(d));
     const totalDocs = docs.length;
     const avgDocLen = docTokensList.reduce((sum, t) => sum + t.length, 0) / totalDocs;
 

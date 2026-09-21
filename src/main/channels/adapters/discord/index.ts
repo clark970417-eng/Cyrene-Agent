@@ -2151,6 +2151,7 @@ export class DiscordAdapter implements ChannelAdapter {
       return { ok: true, message: "公告已發布到 Discord" };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      console.error("[DiscordAdapter] 公告發布失敗:", error);
       if (/Missing Access|Missing Permissions|50001|50013/i.test(message)) {
         return { ok: false, error: "Bot 沒有查看或發送到這個頻道的權限" };
       }

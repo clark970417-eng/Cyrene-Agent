@@ -65,7 +65,8 @@ export async function reconcileMemoryRag(
     if (!isSemanticallyRecallable(memory)) continue;
     const vector = memory.ragId ? vectorsById.get(memory.ragId) : undefined;
     const mappingMatches = vector?.metadata?.l2Id === memory.id;
-    if (vector && mappingMatches) {
+    const contentMatches = vector?.text === memory.content;
+    if (vector && mappingMatches && contentMatches) {
       validVectorIds.add(vector.id);
       if (memory.syncStatus !== "synced") relink.push({ l2Id: memory.id, ragId: vector.id });
     } else {
