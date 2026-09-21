@@ -9,6 +9,7 @@ Cyrene Cloud is the headless failover service for Cyrene Agent. It keeps the Dis
 - Natural-language voice request detection, including requests such as “你能說句笑話嗎”
 - Discord WAV voice attachments generated with Gemini TTS when the desktop GPT-SoVITS service is unavailable
 - Image understanding for Discord attachments
+- Muted Discord voice-channel presence through `/join` (cloud microphone and receive audio remain off)
 - Append-only permanent conversation and image-description memory
 - Relevant-memory recall across sessions; `/forget` clears only short-term channel context
 - `/chat`, `/status`, `/forget`, WutheringWavesUID, check-in, and cloud music commands

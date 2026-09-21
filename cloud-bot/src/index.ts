@@ -367,14 +367,14 @@ async function handleSlash(interaction: ChatInputCommandInteraction): Promise<vo
       return;
     }
 
-    const unsupportedCommands = ["draw", "game", "join"];
+    const unsupportedCommands = ["draw", "game"];
     if (unsupportedCommands.includes(interaction.commandName)) {
       await fastInteractionReply(interaction, `昔漣目前在本機處於離線狀態，此功能（/${interaction.commandName}）需要本機啟動後才能使用喔！`);
       return;
     }
 
     const cloudCommands = [
-      "chat", "forget", "status", "play", "list", "leave", "checkin", "help", "emojis",
+      "chat", "forget", "status", "play", "list", "join", "leave", "checkin", "help", "emojis",
       "sleep", "dj", "photo", "achievements", "tarot", "chess", "guesssong", "whisper",
     ];
     if (!cloudCommands.includes(interaction.commandName)) {
@@ -479,6 +479,21 @@ async function handleSlash(interaction: ChatInputCommandInteraction): Promise<vo
       await fastInteractionReply(interaction, "👋");
       return;
     }
+    if (interaction.commandName === "join") {
+      const channel = await voiceChannelFor(interaction);
+      if (!channel) {
+        await fastInteractionReply(interaction, "請先加入一個 Discord 語音頻道。");
+        return;
+      }
+      await fastInteractionReply(interaction, "正在加入語音頻道…", false);
+      try {
+        await music.joinMuted(channel);
+        await editInteractionReply(interaction, `🌸 已加入 **${channel.name}** 安靜陪伴；雲端麥克風與收音都保持關閉。`);
+      } catch (error) {
+        await editInteractionReply(interaction, `加入語音頻道失敗：${error instanceof Error ? error.message : String(error)}`);
+      }
+      return;
+    }
     if (interaction.commandName === "help") {
       await fastInteractionReply(interaction, "昔漣雲端模式已開放聊天、附圖理解、語音附件、Spotify、收藏播放、簽到、鳴潮查詢與陪伴互動。只有需要 Mac 畫面、桌面程式或即時麥克風的功能會等本機上線。", false);
       return;
@@ -581,9 +596,9 @@ client.once("ready", async (readyClient) => {
     new SlashCommandBuilder().setName("game").setDescription("由昔漣在 Discord 內開啟《繩結同行》"),
     new SlashCommandBuilder()
       .setName("join")
-      .setDescription("讓 Cyrene 加入你的語音頻道進行 AI 通話")
+      .setDescription("讓 Cyrene 靜音加入你的語音頻道陪伴")
       .addBooleanOption((option) =>
-        option.setName("muted").setDescription("設置為 true 可讓昔漣閉麥安靜陪伴（預設 false 開麥通話）").setRequired(false)
+        option.setName("muted").setDescription("雲端永遠保持關麥；此選項留作與桌面端相容").setRequired(false)
       ),
     new SlashCommandBuilder().setName("help").setDescription("顯示 Cyrene 的 Discord 功能與指令"),
     new SlashCommandBuilder().setName("emojis").setDescription("查看昔漣使用不同表情符號的統計次數"),

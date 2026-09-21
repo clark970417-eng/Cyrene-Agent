@@ -50,6 +50,11 @@ export type CloudMusicSnapshot = {
   elapsedMs?: number;
 };
 
+export const MUTED_COMPANION_VOICE_FLAGS = {
+  selfDeaf: true,
+  selfMute: true,
+} as const;
+
 export class CloudMusicPlayer {
   private readonly player = createAudioPlayer({ behaviors: { noSubscriber: NoSubscriberBehavior.Pause } });
   private connection: VoiceConnection | null = null;
@@ -67,6 +72,27 @@ export class CloudMusicPlayer {
       console.error("[CloudMusic] 播放器錯誤", error);
       void this.advance();
     });
+  }
+
+  async joinMuted(channel: VoiceBasedChannel): Promise<void> {
+    if (!channel.joinable) throw new Error("我無法加入你的語音頻道，請檢查 Connect 權限。");
+
+    this.stopProcesses();
+    this.player.stop(true);
+    this.connection?.destroy();
+    this.connection = joinVoiceChannel({
+      channelId: channel.id,
+      guildId: channel.guild.id,
+      adapterCreator: channel.guild.voiceAdapterCreator as DiscordGatewayAdapterCreator,
+      ...MUTED_COMPANION_VOICE_FLAGS,
+    });
+    this.connection.on(VoiceConnectionStatus.Disconnected, () => {
+      void Promise.race([
+        entersState(this.connection!, VoiceConnectionStatus.Signalling, 5_000),
+        entersState(this.connection!, VoiceConnectionStatus.Connecting, 5_000),
+      ]).catch(() => this.stop());
+    });
+    await entersState(this.connection, VoiceConnectionStatus.Ready, 20_000);
   }
 
   async playFavorites(channel: VoiceBasedChannel, entries: CloudFavorite[]): Promise<CloudFavorite> {
