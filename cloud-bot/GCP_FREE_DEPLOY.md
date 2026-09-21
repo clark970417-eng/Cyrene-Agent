@@ -10,10 +10,12 @@
 - 不使用 GPU、TPU、快照、額外磁碟、負載平衡器或保留靜態外部 IP
 - 雲端程式提供 Discord 上線、文字聊天、直接網址／既有收藏播放與固定播放器控制
 - 音樂功能不呼叫 AI：不接受歌名搜尋，也不搜尋、推薦、分析或辨識歌曲
-- `CLOUD_MUSIC_MONTHLY_MINUTES=300`：每月最多播放 300 分鐘，達到上限後自動停止，預留免費層網路流量
+- `CLOUD_MUSIC_MONTHLY_MINUTES=0`：不限制每月雲端音樂播放分鐘數
+- `CLOUD_ALLOW_MUSIC_AI_REQUESTS=true`：允許雲端聊天回應音樂搜尋、推薦與分析請求
 - AI 語音、Spotify/Bilibili 搜尋與其他媒體處理不會載入；Discord 圖片附件直接交由 OpenRouter 視覺模型辨識，不佔 VM 本機推論資源
 - `DISCORD_ALLOWED_USER_IDS=798893182883463179`：雲端版只接受擁有者的訊息；未設定時程式會拒絕啟動
-- `HISTORY_MESSAGES=8`、`MAX_OUTPUT_TOKENS=500`：限制每次聊天帶入的短期記憶與最大回覆長度
+- 選配 `HSR_DAILY_ENABLED=true`：桌面 App 關閉、雲端接管時，仍會在台北時間 08:00 執行崩鐵 HoYoLAB 每日簽到
+- `HISTORY_MESSAGES=8`、`MAX_OUTPUT_TOKENS=8000`：帶入近期對話並允許完整長回覆
 - `DATA_DIR` 必須位於 VM persistent disk；`discord-history.jsonl` 會 append-only 保存永久原文，`HISTORY_MESSAGES` 不會刪除舊記憶
 - 設定 `GEMINI_API_KEY` 後，附圖會直接使用 `GEMINI_MODEL`；一般文字仍走 OpenRouter。未設定 Gemini Key 時才沿用 `LLM_VISION_MODEL=openrouter/free`
 
@@ -36,6 +38,8 @@ cp .env.example .env
 ```
 
 接著由使用者本人用 `nano .env` 填入 `DISCORD_BOT_TOKEN` 與 `OPENROUTER_API_KEY`。不要把 `.env` 上傳、貼進聊天或提交到 Git。
+
+若啟用崩鐵雲端簽到，`HSR_DAILY_COOKIE` 也是登入憑證；只能透過受保護的部署流程寫入 VM `.env`，寫入後執行 `chmod 600 .env`，不可出現在 shell history、Discord 或 Git。
 
 首次驗證：
 

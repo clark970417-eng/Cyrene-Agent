@@ -28,6 +28,7 @@ export class MusicUsageStore {
   }
 
   remaining(): number {
+    if (this.monthlyLimit <= 0) return Number.POSITIVE_INFINITY;
     return Math.max(0, this.monthlyLimit - this.used());
   }
 

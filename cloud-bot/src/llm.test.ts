@@ -121,7 +121,11 @@ const config: CloudBotConfig = {
   historyMessages: 8,
   maxOutputTokens: 500,
   musicMonthlyMinutes: 300,
+  allowMusicAiRequests: false,
   activity: "test",
+  hsrDailyEnabled: false,
+  hsrDailyHour: 8,
+  hsrDailyTimeZone: "Asia/Taipei",
 };
 
 test("辨識 OpenRouter 的 402、429 與額度錯誤文字", () => {

@@ -26,8 +26,17 @@ export type CloudBotConfig = {
   historyMessages: number;
   maxOutputTokens: number;
   musicMonthlyMinutes: number;
+  allowMusicAiRequests: boolean;
   activity: string;
   systemPromptFile?: string;
+  /** App 離線時由雲端代為執行的崩鐵 HoYoLAB 每日簽到。 */
+  hsrDailyEnabled: boolean;
+  hsrDailyUid?: string;
+  hsrDailyCookie?: string;
+  hsrDailyUserId?: string;
+  hsrDailyChannelId?: string;
+  hsrDailyHour: number;
+  hsrDailyTimeZone: string;
   /** 小愛音箱（xiaogpt）接入用的共用密鑰；未設定則該端點整組停用。 */
   xiaoaiDeviceToken?: string;
   /** MiMo 聲音克隆金鑰；未設定則 /v1/audio/speech 停用。 */
@@ -55,6 +64,13 @@ function requiredAny(env: NodeJS.ProcessEnv, keys: string[]): string {
 function parseIntInRange(value: string | undefined, fallback: number, min: number, max: number): number {
   const parsed = Number.parseInt(value ?? "", 10);
   return Number.isFinite(parsed) ? Math.max(min, Math.min(max, parsed)) : fallback;
+}
+
+function parseOptionalInt(value: string | undefined): number | undefined {
+  const trimmed = value?.trim();
+  if (!trimmed) return undefined;
+  const parsed = Number.parseInt(trimmed, 10);
+  return Number.isFinite(parsed) ? parsed : undefined;
 }
 
 function parseBoolean(value: string | undefined, fallback: boolean): boolean {
@@ -105,11 +121,19 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): CloudBotConfig
     dataDir: env.DATA_DIR?.trim() || "./data",
     port: parseIntInRange(env.PORT, 3000, 1, 65_535),
     historyMessages: parseIntInRange(env.HISTORY_MESSAGES, 8, 4, 20),
-    maxOutputTokens: parseIntInRange(env.MAX_OUTPUT_TOKENS, 1000, 64, 2_000),
+    maxOutputTokens: parseIntInRange(env.MAX_OUTPUT_TOKENS, 1000, 64, 8_000),
 
-    musicMonthlyMinutes: parseIntInRange(env.CLOUD_MUSIC_MONTHLY_MINUTES, 300, 30, 600),
+    musicMonthlyMinutes: Math.max(0, parseOptionalInt(env.CLOUD_MUSIC_MONTHLY_MINUTES) ?? 0),
+    allowMusicAiRequests: parseBoolean(env.CLOUD_ALLOW_MUSIC_AI_REQUESTS, true),
     activity: formatCloudActivity(env.BOT_ACTIVITY?.trim() || "在家裡陪夥伴玩 🌸💗✨"),
     systemPromptFile: env.BOT_SYSTEM_PROMPT_FILE?.trim() || undefined,
+    hsrDailyEnabled: parseBoolean(env.HSR_DAILY_ENABLED, false),
+    hsrDailyUid: env.HSR_DAILY_UID?.trim() || undefined,
+    hsrDailyCookie: env.HSR_DAILY_COOKIE?.trim() || undefined,
+    hsrDailyUserId: env.HSR_DAILY_USER_ID?.trim() || undefined,
+    hsrDailyChannelId: env.HSR_DAILY_CHANNEL_ID?.trim() || undefined,
+    hsrDailyHour: parseIntInRange(env.HSR_DAILY_HOUR, 8, 0, 23),
+    hsrDailyTimeZone: env.HSR_DAILY_TIME_ZONE?.trim() || "Asia/Taipei",
     xiaoaiDeviceToken: env.XIAOAI_DEVICE_TOKEN?.trim() || undefined,
     mimoApiKey: env.MIMO_API_KEY?.trim() || undefined,
   };

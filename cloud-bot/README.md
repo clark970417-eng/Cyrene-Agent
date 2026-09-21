@@ -12,10 +12,12 @@ Cyrene Cloud is the headless failover service for Cyrene Agent. It keeps the Dis
 - Append-only permanent conversation and image-description memory
 - Relevant-memory recall across sessions; `/forget` clears only short-term channel context
 - `/chat`, `/status`, `/forget`, WutheringWavesUID, check-in, and cloud music commands
+- App 離線時仍可執行《崩壞：星穹鐵道》HoYoLAB 每日簽到，並支援 `!daily` 手動補簽
 - OpenRouter chat with automatic Gemini fallback
-- Health checks and user, guild, and channel allowlists
+- Health checks and optional user, guild, and channel allowlists
+- No artificial cloud music minute cap or AI music-request block by default
 
-Desktop-only capabilities remain disabled whenever they require access to the user's Mac. Cloud voice attachments are not Discord voice calls: `/join` still requires the desktop application.
+Capabilities that physically require the user's Mac screen, local files, Live2D window, microphone, or Codex image worker still hand off to the desktop application. Cloud-native chat, memory, image understanding, voice attachments, music, check-in, game-data queries, and companion interactions remain available without an artificial usage cap.
 
 ## Voice fallback
 
@@ -46,6 +48,7 @@ Copy `.env.example` to `.env`, then add the required Discord and model credentia
 - `OPENROUTER_API_KEY` or `LLM_API_KEY`
 - `GEMINI_API_KEY` for image, chat fallback, and cloud TTS
 - Optional Spotify credentials for Spotify Connect commands
+- Optional HSR daily check-in credentials (`HSR_DAILY_*`); the HoYoLAB Cookie must only exist in the VM's protected `.env`
 
 OpenRouter is used for ordinary text chat. Image requests can be sent directly to the configured Gemini model, and explicit quota failures from OpenRouter automatically fall back to Gemini.
 
@@ -54,3 +57,9 @@ OpenRouter is used for ordinary text chat. Image requests can be sent directly t
 Conversation history, image descriptions, favorites, check-in state, and usage records must live on persistent storage. Set `DATA_DIR` to a persistent disk path such as `/data`; do not rely on an ephemeral container filesystem.
 
 The production service exposes `/health`. Keep secrets in the platform environment or the protected VM `.env` file, and restrict Discord access with the provided allowlists.
+
+## HSR cloud daily check-in
+
+Set `HSR_DAILY_ENABLED=true`, then provide the bound HSR UID and HoYoLAB Cookie in the VM `.env`. The scheduler uses `HSR_DAILY_TIME_ZONE=Asia/Taipei` and `HSR_DAILY_HOUR=8` by default. It checks on cloud startup and every 15 minutes, catches up after the configured hour, and stores only non-secret completion state under `DATA_DIR/hsr-daily-state.json`.
+
+Successful, already-completed, and first daily failure results are sent to `HSR_DAILY_CHANNEL_ID`; when that is empty, the bot sends a DM to `HSR_DAILY_USER_ID`. The Cookie is never written to state or logs. Keep the `.env` permission at `0600`.

@@ -11,6 +11,7 @@ import {
   type ChatInputCommandInteraction,
   type Message,
 } from "discord.js";
+import * as path from "node:path";
 import { buildCloudCompanionActivity, loadConfig } from "./config.js";
 import { mentionsBot, normalizeCompanionAddress, normalizeInvocation, sessionIdFor, shouldHandleMessage, splitDiscordText } from "./core.js";
 import { startHealthServer } from "./health.js";
@@ -29,6 +30,7 @@ import { extractDiscordExactVoiceText, extractDiscordVoiceRequestTopic } from ".
 import { selectCloudDiscordEmojiName } from "./discord-emoji.js";
 import { createXiaoAiChatRoute } from "./xiaoai-chat.js";
 import { createVoiceSampleUploadRoute, createXiaoAiSpeechRoute } from "./xiaoai-voice.js";
+import { HsrCloudDailyService, isHsrDailyCommand, startHsrDailyScheduler, type HsrDailyResult } from "./hsr-daily.js";
 
 const config = loadConfig();
 const memory = new MemoryStore(config.dataDir, config.historyMessages);
@@ -37,6 +39,14 @@ const favorites = new FavoriteStore(`${config.dataDir}/music-favorites.json`);
 const music = new CloudMusicPlayer(config.dataDir);
 const musicUsage = new MusicUsageStore(`${config.dataDir}/cloud-music-usage.json`, config.musicMonthlyMinutes);
 const checkins = new CloudCheckinStore(`${config.dataDir}/checkin.json`);
+const hsrDaily = new HsrCloudDailyService({
+  enabled: config.hsrDailyEnabled,
+  uid: config.hsrDailyUid,
+  cookie: config.hsrDailyCookie,
+  hour: config.hsrDailyHour,
+  timeZone: config.hsrDailyTimeZone,
+}, path.join(config.dataDir, "hsr-daily-state.json"));
+let hsrDailyScheduler: ReturnType<typeof startHsrDailyScheduler> | null = null;
 eventClaims.prune();
 const systemPrompt = await loadSystemPrompt(config);
 const startedAt = Date.now();
@@ -90,6 +100,20 @@ async function replyToMessage(message: Message, text: string, userText = ""): Pr
   for (const chunk of splitDiscordText(decorateCloudReply(message, text, userText))) {
     await message.reply({ content: chunk, allowedMentions: { repliedUser: false } });
   }
+}
+
+async function deliverHsrDailyResult(result: HsrDailyResult): Promise<void> {
+  if (!config.hsrDailyEnabled) return;
+  if (config.hsrDailyChannelId) {
+    const channel = await client.channels.fetch(config.hsrDailyChannelId).catch(() => null);
+    if (channel && "send" in channel) {
+      await channel.send({ content: result.message, allowedMentions: { parse: [] } });
+      return;
+    }
+  }
+  const userId = config.hsrDailyUserId || companionOwnerId;
+  const user = await client.users.fetch(userId);
+  await user.send({ content: result.message });
 }
 
 async function replyToMessageWithVoice(message: Message, text: string, speechText = text, userText = ""): Promise<void> {
@@ -189,10 +213,12 @@ async function runConversation(
 }
 
 function isBlockedMusicAiRequest(input: string): boolean {
+  if (config.allowMusicAiRequests) return false;
   return /(?:搜尋|找|推薦|分析|辨識).{0,12}(?:歌|音樂|歌曲|歌手)|(?:歌|音樂|歌曲|歌手).{0,12}(?:搜尋|推薦|分析)/iu.test(input);
 }
 
 function musicLimitMessage(): string {
+  if (config.musicMonthlyMinutes <= 0) return `本月雲端音樂已使用 ${musicUsage.used()} 分鐘；目前未設定每月上限。`;
   return `本月雲端音樂已使用 ${musicUsage.used()}/${config.musicMonthlyMinutes} 分鐘；達到限制後會停止播放，以預留 Google Cloud 免費流量。`;
 }
 
@@ -243,16 +269,16 @@ client.on("messageCreate", (message) => {
   const input = images.length && normalizedInput === "嗨" ? "請看看我附上的圖片。" : normalizedInput;
   const command = input.trim().toLowerCase().replace(/^[!/]/, "");
   const knownCommand = command === "status" || command === "forget";
-  const disabledCommand = /^(?:spotify|bilibili|history|shuffle|repeat|join)$/i.test(command);
   const explicitTextCommand = /^!(status|forget)$/i.test(message.content.trim());
   const wavesUidCommand = isWavesUidCommand(input);
+  const hsrCommand = isHsrDailyCommand(input);
   console.log(`[Discord] 收到訊息：guild=${message.guildId ?? "dm"} channel=${message.channelId} mentioned=${mentioned} command=${knownCommand ? command : "chat"}`);
   const canHandle = shouldHandleMessage({
     userId: message.author.id,
     guildId: message.guildId,
     channelId: message.channelId,
     isDm: !message.guildId,
-    mentioned: mentioned || explicitTextCommand || wavesUidCommand,
+    mentioned: mentioned || explicitTextCommand || wavesUidCommand || hsrCommand,
   }, config);
   if (!canHandle) {
     console.log("[Discord] 已忽略訊息：未通過提及或白名單設定");
@@ -283,12 +309,14 @@ client.on("messageCreate", (message) => {
         return;
       }
 
-      if (command === "status") {
-        await replyToMessage(message, `雲端文字聊天已連線，已守望 ${Math.floor((Date.now() - startedAt) / 60_000)} 分鐘；永久記憶 ${memory.archiveCount()} 則。`);
+      if (hsrCommand) {
+        const result = await hsrDaily.run({ force: true });
+        await replyToMessage(message, result.message);
         return;
       }
-      if (disabledCommand) {
-        await replyToMessage(message, "雲端版不使用 AI 搜尋、推薦或分析音樂。請使用 `/play` 貼直接網址，或播放既有收藏。");
+
+      if (command === "status") {
+        await replyToMessage(message, `雲端文字聊天已連線，已守望 ${Math.floor((Date.now() - startedAt) / 60_000)} 分鐘；永久記憶 ${memory.archiveCount()} 則。`);
         return;
       }
       if (command === "forget") {
@@ -339,13 +367,16 @@ async function handleSlash(interaction: ChatInputCommandInteraction): Promise<vo
       return;
     }
 
-    const unsupportedCommands = ["draw", "game", "join", "help", "emojis"];
+    const unsupportedCommands = ["draw", "game", "join"];
     if (unsupportedCommands.includes(interaction.commandName)) {
       await fastInteractionReply(interaction, `昔漣目前在本機處於離線狀態，此功能（/${interaction.commandName}）需要本機啟動後才能使用喔！`);
       return;
     }
 
-    const cloudCommands = ["chat", "forget", "status", "play", "list", "leave", "checkin"];
+    const cloudCommands = [
+      "chat", "forget", "status", "play", "list", "leave", "checkin", "help", "emojis",
+      "sleep", "dj", "photo", "achievements", "tarot", "chess", "guesssong", "whisper",
+    ];
     if (!cloudCommands.includes(interaction.commandName)) {
       await fastInteractionReply(interaction, "本指令目前未在雲端版提供。");
       return;
@@ -448,6 +479,21 @@ async function handleSlash(interaction: ChatInputCommandInteraction): Promise<vo
       await fastInteractionReply(interaction, "👋");
       return;
     }
+    if (interaction.commandName === "help") {
+      await fastInteractionReply(interaction, "昔漣雲端模式已開放聊天、附圖理解、語音附件、Spotify、收藏播放、簽到、鳴潮查詢與陪伴互動。只有需要 Mac 畫面、桌面程式或即時麥克風的功能會等本機上線。", false);
+      return;
+    }
+    if (["emojis", "sleep", "dj", "photo", "achievements", "tarot", "chess", "guesssong", "whisper"].includes(interaction.commandName)) {
+      const detail = interaction.commandName === "whisper"
+        ? interaction.options.getString("content")?.trim()
+        : "";
+      await interaction.deferReply();
+      const prompt = `使用者在 Discord 使用 /${interaction.commandName}${detail ? `，內容：${detail}` : ""}。請以昔漣的人格直接完成這個陪伴互動；若它需要桌面硬體，提供最接近且誠實的雲端版本，不要只說功能不支援。`;
+      const chunks = splitDiscordText(await runConversation(sessionId, prompt, [], `discord-interaction:${interaction.id}`));
+      await interaction.editReply(chunks[0]);
+      for (const chunk of chunks.slice(1)) await interaction.followUp(chunk);
+      return;
+    }
     const image = interaction.options.getAttachment("image");
     if (image && (image.size > MAX_IMAGE_BYTES || !isSupportedImage(image.name, image.contentType))) {
       await fastInteractionReply(interaction, "圖片需為 PNG、JPEG、WebP 或 GIF，且不可超過 10 MB。");
@@ -504,6 +550,13 @@ client.once("ready", async (readyClient) => {
   const companionPresenceTimer = setInterval(() => void refreshCompanionPresence(true), COMPANION_PRESENCE_REFRESH_MS);
   companionPresenceTimer.unref();
   console.log(`[Cyrene Cloud] Discord 已連線：${readyClient.user.tag}`);
+  if (config.hsrDailyEnabled) {
+    hsrDailyScheduler = startHsrDailyScheduler(hsrDaily, async (result) => {
+      try { await deliverHsrDailyResult(result); }
+      catch (error) { console.error("[HSR Daily] Discord 通知傳送失敗", error); }
+    });
+    console.log(`[HSR Daily] 雲端自動簽到已啟用：${config.hsrDailyTimeZone} ${String(config.hsrDailyHour).padStart(2, "0")}:00`);
+  }
   const commands = [
     new SlashCommandBuilder().setName("chat").setDescription("和雲端昔漣說話，可直接附圖")
       .addStringOption((option) => option.setName("message").setDescription("想說的話（附圖時可留空）").setRequired(false))
@@ -593,6 +646,7 @@ async function shutdown(signal: string) {
   console.log(`[Cyrene Cloud] 收到 ${signal}，安全停止`);
   healthServer.close();
   clearInterval(musicUsageTimer);
+  hsrDailyScheduler?.stop();
   music.stop();
   client.destroy();
   process.exit(0);
