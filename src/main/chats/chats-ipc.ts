@@ -22,6 +22,53 @@ import * as path from "path";
 import { ensureVaultStructure, isEmptyDirectory } from "../learn/obsidian/vault-init";
 import { getHarnessRunStore } from "../orchestrator/harness/run-store";
 import { getRunReviewTracker } from "../orchestrator/review/run-review-tracker";
+import { randomUUID } from "node:crypto";
+import { loadModelSettings } from "../settings/model-settings";
+import { getAdapterForConfig } from "../orchestrator/vendors";
+import { callSummarizeModel } from "../orchestrator/context-manager";
+import { buildContextUsageSnapshot } from "../orchestrator/context-usage";
+import { COMPACTED_MEMORY_PREFIX } from "../../shared/chat-context";
+
+const COMPACT_MODEL_WINDOW = 16;
+const COMPACT_KEEP_RECENT = 6;
+const compactingSessions = new Set<string>();
+
+export function buildCompactedMessages(
+  messages: ChatMessage[],
+  summary: string,
+  contextWindowTokens: number,
+): ChatMessage[] {
+  const windowMessages = messages.slice(-COMPACT_MODEL_WINDOW);
+  const keepMessages = windowMessages.slice(-COMPACT_KEEP_RECENT);
+  const head = messages.slice(0, Math.max(0, messages.length - COMPACT_MODEL_WINDOW));
+  const summaryMessage: ChatMessage = {
+    id: `compact-${randomUUID().slice(0, 8)}`,
+    role: "model",
+    content: `${COMPACTED_MEMORY_PREFIX}\n${summary}`,
+    at: Date.now(),
+  };
+  const compactMessages = [summaryMessage, ...keepMessages].map((message) => ({
+    role: message.role === "user" ? ("user" as const) : ("assistant" as const),
+    content: message.content,
+  }));
+  const snapshot = buildContextUsageSnapshot({
+    phase: "terminal",
+    contextWindowTokens,
+    personaContent: "",
+    messages: compactMessages,
+  });
+  const previous = [...messages].reverse().find((message) => message.contextUsage)?.contextUsage;
+  if (previous) {
+    snapshot.categories = snapshot.categories.map((category) => (
+      category.key === "conversation"
+        ? category
+        : { ...category, tokens: previous.categories.find((item) => item.key === category.key)?.tokens ?? category.tokens }
+    ));
+    snapshot.totalTokens = snapshot.categories.reduce((total, category) => total + category.tokens, 0);
+  }
+  summaryMessage.contextUsage = snapshot;
+  return [...head, summaryMessage, ...keepMessages];
+}
 
 function broadcastChanged(senderWebContents?: WebContents | null): void {
   for (const win of BrowserWindow.getAllWindows()) {
@@ -116,6 +163,52 @@ export function registerChatsIpc(): void {
       return session;
     },
   );
+
+  ipcMain.handle(IPC.CHATS_COMPACT, async (event, payload: { sessionId?: unknown }) => {
+    const sessionId = typeof payload?.sessionId === "string" ? payload.sessionId : "";
+    if (!sessionId) return { ok: false, error: "缺少對話識別碼" };
+    if (compactingSessions.has(sessionId)) return { ok: false, error: "正在整理，請稍候" };
+    const session = chatsStore.getSession(sessionId);
+    if (!session) return { ok: false, error: "找不到這個對話" };
+
+    const windowMessages = session.messages.slice(-COMPACT_MODEL_WINDOW);
+    const history = windowMessages.slice(0, -COMPACT_KEEP_RECENT);
+    if (history.length < 2) return { ok: false, error: "目前內容還不需要整理" };
+
+    compactingSessions.add(sessionId);
+    try {
+      const base = loadModelSettings();
+      const selectedProvider = session.modelProfileId && base.perProvider[session.modelProfileId]
+        ? session.modelProfileId
+        : base.provider;
+      const selected = base.perProvider[selectedProvider];
+      const settings = {
+        provider: selectedProvider,
+        baseUrl: selected?.baseUrl ?? base.baseUrl,
+        model: selected?.model ?? base.model,
+        apiKey: selected?.apiKey ?? base.apiKey,
+        explicitTransport: selected?.explicitTransport ?? base.explicitTransport,
+        reasoning: selected?.reasoning ?? base.reasoning,
+        contextWindowTokens: base.contextWindowTokens,
+      };
+      if (!settings.baseUrl || !settings.model) return { ok: false, error: "請先完成模型設定" };
+      const adapter = getAdapterForConfig(settings);
+      const summary = await callSummarizeModel(history.map((message) => ({
+        role: message.role === "user" ? "user" : "assistant",
+        content: message.content,
+      })), adapter, settings);
+      const nextMessages = buildCompactedMessages(session.messages, summary, settings.contextWindowTokens);
+      const updated = chatsStore.replaceMessages(sessionId, nextMessages);
+      if (!updated) return { ok: false, error: "儲存整理結果失敗" };
+      broadcastChanged(event.sender);
+      return { ok: true, session: updated };
+    } catch (error) {
+      console.error("[Chats] compact conversation failed:", error);
+      return { ok: false, error: error instanceof Error ? error.message : String(error) };
+    } finally {
+      compactingSessions.delete(sessionId);
+    }
+  });
 
   ipcMain.handle(
     IPC.CHATS_RENAME,

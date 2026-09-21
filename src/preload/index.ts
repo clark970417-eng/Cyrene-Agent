@@ -726,6 +726,8 @@ const chatStoreApi = {
     ipcRenderer.invoke(IPC.CHATS_REPLACE_MESSAGES, { id, messages }),
   replaceTail: (id: string, startIndex: number, messages: unknown[]) =>
     ipcRenderer.invoke(IPC.CHATS_REPLACE_TAIL, { id, startIndex, messages }),
+  compactConversation: (sessionId: string) =>
+    ipcRenderer.invoke(IPC.CHATS_COMPACT, { sessionId }),
   rename: (id: string, title: string) =>
     ipcRenderer.invoke(IPC.CHATS_RENAME, { id, title }),
   delete: (id: string) => ipcRenderer.invoke(IPC.CHATS_DELETE, id),

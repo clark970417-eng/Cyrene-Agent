@@ -18,6 +18,7 @@ import { createSseReader } from "./vendors";
 import type { ApprovedStyleSampling } from "./vendors/style-sampling";
 import { getTimeoutSettings } from "../timeout-manager";
 import { compressConversation } from "./context-manager";
+import { buildContextUsageSnapshot } from "./context-usage";
 
 export interface ChatLoopOptions {
   settings: AgentLoopSettings;
@@ -116,6 +117,22 @@ export async function runChatLoop(options: ChatLoopOptions): Promise<TwoPhaseFcR
     onEvent: options.onEvent,
     signal: options.signal,
   });
+
+  const emitContextUsage = (phase: "preRequest" | "terminal", reply?: string) => {
+    const snapshotMessages = reply === undefined
+      ? messages
+      : [...messages, { role: "assistant" as const, content: reply }];
+    options.onEvent?.({
+      type: "context_usage",
+      contextUsage: buildContextUsageSnapshot({
+        phase,
+        contextWindowTokens: options.settings.contextWindowTokens,
+        personaContent: options.soulSystemBaseContent,
+        messages: snapshotMessages,
+      }),
+    });
+  };
+  emitContextUsage("preRequest");
 
   const timeout = getTimeoutSettings().chatRequestTimeout;
 
@@ -468,6 +485,7 @@ export async function runChatLoop(options: ChatLoopOptions): Promise<TwoPhaseFcR
       );
     }
     endText();
+    emitContextUsage("terminal", reply);
     return {
       reply,
       toolResults: [],

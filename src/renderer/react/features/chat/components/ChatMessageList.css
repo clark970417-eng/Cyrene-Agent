@@ -807,3 +807,50 @@
     animation: none;
   }
 }
+.cy-mermaid {
+  width: 100%;
+  margin: 10px 0;
+  border: 1px solid color-mix(in srgb, var(--cy-accent, #f47ac1) 18%, transparent);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--cy-accent, #f47ac1) 4%, transparent);
+}
+
+button.cy-mermaid.is-rendered {
+  display: block;
+  overflow: auto;
+  padding: 14px;
+  color: inherit;
+  cursor: zoom-in;
+  text-align: initial;
+}
+
+.cy-mermaid.is-rendered svg,
+.cy-mermaid-preview__canvas svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 560px;
+}
+
+.cy-mermaid.is-pending,
+.cy-mermaid.is-fallback {
+  padding: 12px;
+  color: var(--cy-text-muted, rgba(0, 0, 0, 0.58));
+}
+
+.cy-mermaid.is-fallback pre {
+  overflow: auto;
+  margin: 8px 0 0;
+  white-space: pre-wrap;
+}
+
+.cy-mermaid-preview .ant-modal-content {
+  background: var(--cy-surface-elevated, #fff);
+  color: var(--cy-text, #211b25);
+}
+
+.cy-mermaid-preview__canvas {
+  max-height: 72vh;
+  overflow: auto;
+  padding: 16px;
+}

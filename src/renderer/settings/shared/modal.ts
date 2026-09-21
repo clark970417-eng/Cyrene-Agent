@@ -3,6 +3,7 @@
 // Electron 禁用了 window.prompt / window.confirm，所以自建 overlay 实现。
 
 import { modalState } from "./modal-state";
+import { activateDialogFocus } from "./dialog-focus";
 
 export function _initModalOverlay(): void {
   if (modalState.cyOverlay) return;
@@ -41,7 +42,10 @@ export function showModal(options: { title: string; message: string; icon?: stri
   confirmBtn.textContent = options.confirmText || "確定";
   modalState.cyOverlay.classList.remove("is-hidden");
   return new Promise(function (resolve) {
+    const dialog = modalState.cyOverlay?.querySelector(".cy-modal") as HTMLElement;
+    let releaseFocus: (() => void) | null = null;
     const cleanup = function (result: boolean) {
+      releaseFocus?.();
       modalState.cyOverlay?.classList.add("is-hidden");
       cancelBtn.removeEventListener("click", onCancel);
       confirmBtn.removeEventListener("click", onConfirm);
@@ -51,6 +55,7 @@ export function showModal(options: { title: string; message: string; icon?: stri
     function onConfirm() { cleanup(true); }
     cancelBtn.addEventListener("click", onCancel);
     confirmBtn.addEventListener("click", onConfirm);
+    releaseFocus = activateDialogFocus(dialog, cancelBtn, onCancel);
   });
 }
 
@@ -93,13 +98,17 @@ export function showHtmlModal(options: { title: string; htmlBody: string; icon?:
   confirmBtn.textContent = options.confirmText || "知道了";
   modalState.cyHtmlOverlay.classList.remove("is-hidden");
   return new Promise((resolve) => {
+    const dialog = modalState.cyHtmlOverlay?.querySelector(".cy-modal") as HTMLElement;
+    let releaseFocus: (() => void) | null = null;
     const cleanup = () => {
+      releaseFocus?.();
       modalState.cyHtmlOverlay?.classList.add("is-hidden");
       confirmBtn.removeEventListener("click", onConfirm);
       resolve();
     };
     const onConfirm = () => cleanup();
     confirmBtn.addEventListener("click", onConfirm);
+    releaseFocus = activateDialogFocus(dialog, confirmBtn, onConfirm);
   });
 }
 
@@ -145,7 +154,11 @@ export function showInputModal(options: {
   const inputEl = modalState.cyInputOverlay.querySelector("#cy-input-field") as HTMLInputElement;
   const cancelBtn = modalState.cyInputOverlay.querySelector("#cy-input-cancel") as HTMLButtonElement;
   const confirmBtn = modalState.cyInputOverlay.querySelector("#cy-input-confirm") as HTMLButtonElement;
-  iconEl.textContent = options.icon || `<svg width="22" height="22" viewBox="0 0 48 48" fill="none" aria-hidden="true" style="display:inline;vertical-align:-2px"><path d="M5.32497 43.4996L13.81 43.4998L44.9227 12.3871L36.4374 3.90186L5.32471 35.0146L5.32497 43.4996Z" fill="none" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/><path d="M27.9521 12.3872L36.4374 20.8725" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+  if (options.icon) {
+    iconEl.textContent = options.icon;
+  } else {
+    iconEl.innerHTML = `<svg width="22" height="22" viewBox="0 0 48 48" fill="none" aria-hidden="true" style="display:inline;vertical-align:-2px"><path d="M5.32497 43.4996L13.81 43.4998L44.9227 12.3871L36.4374 3.90186L5.32471 35.0146L5.32497 43.4996Z" fill="none" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/><path d="M27.9521 12.3872L36.4374 20.8725" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+  }
   titleEl.textContent = options.title;
   msgEl.textContent = options.message;
   inputEl.value = options.defaultValue || "";
@@ -153,9 +166,11 @@ export function showInputModal(options: {
   cancelBtn.textContent = options.cancelText || "取消";
   confirmBtn.textContent = options.confirmText || "確定";
   modalState.cyInputOverlay.classList.remove("is-hidden");
-  setTimeout(() => inputEl.focus(), 30);
   return new Promise((resolve) => {
+    const dialog = modalState.cyInputOverlay?.querySelector(".cy-modal") as HTMLElement;
+    let releaseFocus: (() => void) | null = null;
     const cleanup = (result: string | null) => {
+      releaseFocus?.();
       modalState.cyInputOverlay?.classList.add("is-hidden");
       cancelBtn.removeEventListener("click", onCancel);
       confirmBtn.removeEventListener("click", onConfirm);
@@ -175,5 +190,6 @@ export function showInputModal(options: {
     cancelBtn.addEventListener("click", onCancel);
     confirmBtn.addEventListener("click", onConfirm);
     inputEl.addEventListener("keydown", onKey);
+    releaseFocus = activateDialogFocus(dialog, inputEl, onCancel);
   });
 }

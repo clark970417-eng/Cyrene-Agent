@@ -224,6 +224,8 @@ export function toAguiEvent(event: TwoPhaseEvent): BaseEvent {
       return { type: EventType.REASONING_MESSAGE_END, messageId: event.messageId };
     case "task_plan_update":
       return { type: EventType.CUSTOM, name: "cyrene.taskPlan", value: event.snapshot };
+    case "context_usage":
+      return { type: EventType.CUSTOM, name: "cyrene.context.usage", value: event.contextUsage };
     case "compressing_context":
       return { type: EventType.CUSTOM, name: "cyrene.compressingContext", value: { text: "昔涟正在压缩上下文…" } };
   }

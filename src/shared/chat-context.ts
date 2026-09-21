@@ -1,3 +1,20 @@
+import type { ChatMessage } from "./chat-types";
+
+export const COMPACTED_MEMORY_PREFIX = "[此前對話已整理為記憶摘要]";
+
+/** Preserve visible history while sending only the latest compacted context to the model. */
+export function selectModelContextMessages(messages: ChatMessage[], limit = 16): ChatMessage[] {
+  let compactedAt = -1;
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    if (messages[index]?.content.startsWith(COMPACTED_MEMORY_PREFIX)) {
+      compactedAt = index;
+      break;
+    }
+  }
+  const activeContext = compactedAt >= 0 ? messages.slice(compactedAt) : messages;
+  return activeContext.slice(-limit);
+}
+
 export interface TurnModelContextInput {
   fileHints?: string[];
   documentContextLines?: string[];

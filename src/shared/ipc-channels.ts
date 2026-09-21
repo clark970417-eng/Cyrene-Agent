@@ -156,6 +156,7 @@ export const IPC = {
   CHATS_SET_MESSAGE_TTS_CACHE: "chats:set-message-tts-cache",
   CHATS_REPLACE_MESSAGES: "chats:replace-messages",
   CHATS_REPLACE_TAIL: "chats:replace-tail",
+  CHATS_COMPACT: "chats:compact",
   CHATS_RENAME: "chats:rename",
   CHATS_DELETE: "chats:delete",
   CHATS_SET_PINNED: "chats:set-pinned",

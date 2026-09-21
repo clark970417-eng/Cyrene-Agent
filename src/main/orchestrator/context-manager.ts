@@ -124,7 +124,7 @@ export async function compressConversation(options: CompressOptions): Promise<Ch
   }
 }
 
-async function callSummarizeModel(
+export async function callSummarizeModel(
   messages: ChatMessage[],
   adapter: ChatVendorAdapter,
   settings: AgentLoopSettings,
@@ -150,6 +150,12 @@ async function callSummarizeModel(
   };
 
   const effectiveRequest = adapter.applyCacheHints?.(request, vendorConfig) ?? request;
+  if (adapter.executeWebPrompt) {
+    const promptText = adapter.buildPromptText?.(effectiveRequest)
+      ?? `${prompt}\n\n請總結上面的對話歷史。`;
+    const result = await adapter.executeWebPrompt(promptText, undefined, { signal });
+    return result.trim() || "[整理結果為空]";
+  }
   const http = adapter.buildRequest(effectiveRequest, settings);
   const controller = new AbortController();
   const abort = () => controller.abort();

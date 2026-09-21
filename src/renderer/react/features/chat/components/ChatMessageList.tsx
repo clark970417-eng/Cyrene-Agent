@@ -4,6 +4,7 @@ import Latex from "@ant-design/x-markdown/plugins/Latex";
 import { Component, useCallback, useEffect, useMemo, useRef, useState, type ErrorInfo, type KeyboardEvent, type ReactNode } from "react";
 import { resolveAsset } from "../../../../../shared/renderer-base";
 import type { ConversationMode, ReasoningBlock, RunActivityRecord, TaskDelegationDisplayRecord, ToolExecutionRecord } from "../../../../../shared/chat-types";
+import type { ContextUsageSnapshot } from "../../../../../shared/context-usage";
 import thinkingMoodUrl from "../../../assets/status-moods/思考中.png?url";
 import completedThinkingMoodUrl from "../../../assets/status-moods/提醒.png?url";
 import workingMoodUrl from "../../../assets/status-moods/工作中.png?url";
@@ -32,6 +33,8 @@ import type { WeatherData } from "./weather/weather-types";
 import { WeatherCard } from "./weather/WeatherCard";
 import { ReviewPanel } from "./ReviewPanel";
 import { TaskDelegationRow } from "./TaskDelegationRow";
+import { MermaidBlock } from "./MermaidBlock";
+import { normalizeModelMarkdown } from "./markdown-normalize";
 
 export interface ChatMessageItem {
   id: string;
@@ -56,6 +59,7 @@ export interface ChatMessageItem {
   attachments?: ChatMessageAttachment[];
   weather?: WeatherData;
   runId?: string;
+  contextUsage?: ContextUsageSnapshot;
   taskDelegations?: TaskDelegationDisplayRecord[];
 }
 
@@ -104,6 +108,9 @@ const cyreneAvatarUrl = "../avatars/cyrene-avatar.png";
 
 function MarkdownCode({ children, lang, block }: ComponentProps<{ children?: ReactNode }>) {
   if (!block) return <code>{children}</code>;
+  if ((lang ?? "").trim().toLowerCase() === "mermaid") {
+    return <MermaidBlock code={String(children ?? "").replace(/\n$/, "")} />;
+  }
   return (
     <CodeHighlighter lang={(lang ?? "text").split(/\s+/)[0]} prismLightMode={false}>
       {String(children ?? "").replace(/\n$/, "")}
@@ -141,10 +148,11 @@ class MarkdownRenderBoundary extends Component<{
 }
 
 function MarkdownContent({ content }: { content: string; streaming?: boolean }) {
+  const normalizedContent = normalizeModelMarkdown(content);
   return (
-    <MarkdownRenderBoundary content={content}>
+    <MarkdownRenderBoundary content={normalizedContent}>
       <XMarkdown
-        content={content}
+        content={normalizedContent}
         config={markdownConfig}
         components={markdownComponents}
         openLinksInNewTab

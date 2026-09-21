@@ -60,6 +60,10 @@ export async function initRAG(
   );
 }
 
+export function flushRagSync(): void {
+  store?.flushSync();
+}
+
 // ── Switch embedding model (hot-swap) ──
 export async function switchEmbeddingModel(modelKey: string): Promise<{ ok: boolean; clearedEntries: number; error?: string }> {
   try {
@@ -106,20 +110,9 @@ export async function switchEmbeddingModel(modelKey: string): Promise<{ ok: bool
         const oldDims = entries[0].embedding.length;
         if (oldDims !== newDims) {
           // Dimension mismatch — clear the vector store and metadata
-          const dataDir = getDataDir();
-          const storePath = path.join(dataDir, "memory-store.json");
-          const metaPath = path.join(dataDir, "memory-store-meta.json");
-          if (fs.existsSync(storePath)) {
-            clearedEntries = entries.length;
-            fs.writeFileSync(storePath, "[]", "utf8");
-            console.log("[RAG] dimension mismatch (" + oldDims + " → " + newDims + "), cleared " + clearedEntries + " entries");
-          }
-          // 清除旧的索引元数据，下次写入时会自动创建新的
-          if (fs.existsSync(metaPath)) {
-            fs.unlinkSync(metaPath);
-          }
-          // Reload store from the now-empty file
-          store = new JsonVectorStore(dataDir);
+          clearedEntries = entries.length;
+          store.clearForRebuild();
+          console.log("[RAG] dimension mismatch (" + oldDims + " → " + newDims + "), cleared " + clearedEntries + " entries");
         }
       }
     }

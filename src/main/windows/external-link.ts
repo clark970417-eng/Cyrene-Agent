@@ -1,4 +1,4 @@
-import { BrowserWindow, shell } from "electron";
+import { app, BrowserWindow, shell } from "electron";
 import { isDev } from "../env";
 
 /**
@@ -26,5 +26,28 @@ export function attachExternalLinkHandler(win: BrowserWindow): void {
     if (openExternalUrl(url)) {
       event.preventDefault();
     }
+  });
+}
+
+function isCyrenePage(url: string): boolean {
+  return url.startsWith("file://") ||
+    url.startsWith("cyrene-") ||
+    (isDev && (url.startsWith("http://localhost:5173") || url.startsWith("http://127.0.0.1:5173")));
+}
+
+/** Protect every current and future Cyrene renderer without breaking remote login windows. */
+export function installGlobalNavigationGuard(): void {
+  app.on("web-contents-created", (_event, contents) => {
+    contents.setWindowOpenHandler(({ url }) => {
+      if (!isCyrenePage(contents.getURL())) return { action: "allow" };
+      openExternalUrl(url);
+      return { action: "deny" };
+    });
+
+    contents.on("will-navigate", (event, url) => {
+      if (!isCyrenePage(contents.getURL())) return;
+      event.preventDefault();
+      openExternalUrl(url);
+    });
   });
 }

@@ -237,6 +237,7 @@ describe("runChatLoop", () => {
     });
 
     expect(events.map((event) => event.type)).toEqual([
+      "context_usage",
       "step_started",
       "reasoning_message_start",
       "reasoning_message_content",
@@ -245,6 +246,7 @@ describe("runChatLoop", () => {
       "text_message_start",
       "text_message_content",
       "text_message_end",
+      "context_usage",
       "step_finished",
     ]);
     expect(events.filter((event) => event.type === "reasoning_message_content").map((event) => event.delta).join(""))
@@ -271,6 +273,7 @@ describe("runChatLoop", () => {
     });
 
     expect(events.map((event) => event.type)).toEqual([
+      "context_usage",
       "step_started",
       "reasoning_message_start",
       "reasoning_message_content",
@@ -278,6 +281,7 @@ describe("runChatLoop", () => {
       "text_message_start",
       "text_message_content",
       "text_message_end",
+      "context_usage",
       "step_finished",
     ]);
   });

@@ -45,7 +45,9 @@ import {
   initRAG,
   isUserMemoryVectorStoreReady,
   switchEmbeddingModel,
+  flushRagSync,
 } from "./rag";
+import { installGlobalNavigationGuard } from "./windows/external-link";
 import { getEmbeddingProvider, getSceneEmbeddingProvider } from "./rag/embedding";
 import { configureDocumentIndexQueue } from "./rag/document-index-queue";
 import { runDocumentIndexJob } from "./rag/document-index-worker";
@@ -68,6 +70,8 @@ import { registerDailyPodcastIpc } from "./podcast/daily-podcast-ipc";
 import { registerTrpgIpc } from "./game-room/trpg-ipc";
 import { registerAffectionIpc } from "./affection/affection-ipc";
 import { registerProactiveIpc } from "./proactive/proactive-ipc";
+
+installGlobalNavigationGuard();
 
 import { getAdapterForConfig } from "./orchestrator/vendors";
 import {
@@ -644,6 +648,7 @@ app.on("before-quit", () => {
   stopScreenCompanion();
   codeRunWorker.cleanup();
   flushTokenUsage();
+  flushRagSync();
   void channelsSubsystem?.shutdown();
   void stopMobileServer();
   void screenshotService?.shutdown();

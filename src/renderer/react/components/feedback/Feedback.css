@@ -1,0 +1,42 @@
+.cy-feedback-notice .ant-message-notice-content {
+  border: 1px solid var(--cy-border, rgba(255, 255, 255, 0.12));
+  background: var(--cy-surface-elevated, rgba(31, 28, 40, 0.96));
+  color: var(--cy-text, #f8f5ff);
+  box-shadow: 0 12px 32px rgba(13, 9, 20, 0.28);
+}
+
+.cy-feedback-modal .ant-modal-content {
+  border: 1px solid var(--cy-border, rgba(255, 255, 255, 0.12));
+  background: var(--cy-surface-elevated, #211d2a);
+  color: var(--cy-text, #f8f5ff);
+}
+
+.cy-feedback-modal .ant-modal-confirm-title,
+.cy-feedback-modal .ant-modal-confirm-content {
+  color: inherit;
+}
+
+.cy-feedback-alert p {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.cy-feedback-alert details {
+  margin-top: 12px;
+}
+
+.cy-feedback-alert summary {
+  cursor: pointer;
+  color: var(--cy-text-muted, rgba(248, 245, 255, 0.68));
+}
+
+.cy-feedback-alert pre {
+  max-height: 220px;
+  overflow: auto;
+  margin: 8px 0 0;
+  padding: 10px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.22);
+  white-space: pre-wrap;
+  word-break: break-word;
+}

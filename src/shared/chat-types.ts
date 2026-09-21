@@ -139,6 +139,8 @@ export interface ChatMessage {
   toolExecutions?: ToolExecutionRecord[];
   /** 本轮处理与公开推理的展示指标。 */
   runActivity?: RunActivityRecord;
+  /** 最近一次模型請求的上下文容量快照，用於輸入區狀態顯示。 */
+  contextUsage?: import("./context-usage").ContextUsageSnapshot;
   runSnapshot?: {
     runId?: string;
     status: "running" | "waiting_user" | "interrupted" | "terminal";

@@ -8,6 +8,9 @@ import { PermissionControl } from "./PermissionControl";
 import { ClineModeSwitch, type ClineMode } from "./ClineModeSwitch";
 import { PlanModeToggle } from "./PlanModeToggle";
 import { ModelSelector } from "./ModelSelector";
+import { PendingQueueDock, type PendingQueueItem } from "./PendingQueueDock";
+import { ContextUsageRing } from "./ContextUsageRing";
+import type { ContextUsageSnapshot } from "../../../../../shared/context-usage";
 import chatWelcomeUrl from "../../../assets/welcome/chat.png?url";
 import codeWelcomeUrl from "../../../assets/welcome/code.png?url";
 import dailyWelcomeUrl from "../../../assets/welcome/daily.png?url";
@@ -24,12 +27,15 @@ interface ChatComposerProps {
   attachments: ComposerAttachment[];
   attachmentBusy?: boolean;
   modelBusy?: boolean;
-  pendingQueue?: Array<{ id: string; content: string }>;
+  contextUsage?: ContextUsageSnapshot;
+  onContextCompacted?: () => Promise<void> | void;
+  pendingQueue?: PendingQueueItem[];
   clineMode?: ClineMode;
   onChange: (value: string) => void;
   onSubmit: (value: string) => void;
   onCancel?: () => void;
   onQueueMessage?: (value: string) => void;
+  onEditQueuedMessage?: (id: string, content: string) => Promise<boolean> | boolean;
   onRemoveQueuedMessage?: (id: string) => void;
   onChooseWorkspace: () => void;
   onChooseFiles: (files: File[]) => void;
@@ -185,12 +191,15 @@ export function ChatComposer({
   attachments,
   attachmentBusy = false,
   modelBusy = false,
+  contextUsage,
+  onContextCompacted,
   pendingQueue = [],
   clineMode = "act",
   onChange,
   onSubmit,
   onCancel,
   onQueueMessage,
+  onEditQueuedMessage,
   onRemoveQueuedMessage,
   onChooseWorkspace,
   onChooseFiles,
@@ -292,16 +301,11 @@ export function ChatComposer({
         }}
         header={hasComposerHeader ? (
           <div className="cy-composer__attachments" aria-label="待發送附件">
-            {pendingQueue.length > 0 && (
-              <div className="cy-composer__queue" aria-label="待發送訊息">
-                {pendingQueue.map((item) => (
-                  <div className="cy-composer__queue-item" key={item.id}>
-                    <span className="cy-composer__queue-text" title={item.content}>{item.content.slice(0, 40)}{item.content.length > 40 ? "..." : ""}</span>
-                    <button type="button" aria-label="移除" onClick={() => onRemoveQueuedMessage?.(item.id)}>×</button>
-                  </div>
-                ))}
-              </div>
-            )}
+            <PendingQueueDock
+              items={pendingQueue}
+              onEdit={onEditQueuedMessage}
+              onRemove={onRemoveQueuedMessage}
+            />
             {attachments.map((attachment, index) => (
               <div className={`cy-composer__attachment ${attachment.kind === "image" && attachment.previewUrl ? "is-image" : ""}`} key={`${attachment.filePath ?? attachment.name}-${index}`}>
                 {attachment.kind === "image" && attachment.previewUrl ? (
@@ -360,6 +364,8 @@ export function ChatComposer({
             <ChevronIcon />
           </button>
         )}
+        <span className="cy-composer__footer-spacer" />
+        <ContextUsageRing usage={contextUsage} sessionId={conversationId} onCompacted={onContextCompacted} />
         {supportsObsidianLibrary && workspaceName && onInitVaultStructure && (
           <button type="button" className="cy-composer__footer-button" aria-label="新增 Cyrene 學習結構" onClick={onInitVaultStructure}>
             <PlusIcon />

@@ -2,8 +2,11 @@ import { describe, expect, it } from "vitest";
 import {
   USER_ANNOTATION_NOTICE,
   buildTurnModelContext,
+  COMPACTED_MEMORY_PREFIX,
+  selectModelContextMessages,
   userAnnotationNotice,
 } from "../shared/chat-context";
+import type { ChatMessage } from "../shared/chat-types";
 
 describe("buildTurnModelContext", () => {
   it("合并文档和图片上下文，不让后处理结果覆盖前处理结果", () => {
@@ -31,5 +34,35 @@ describe("buildTurnModelContext", () => {
     expect(userAnnotationNotice(true)).toBe(USER_ANNOTATION_NOTICE);
     expect(USER_ANNOTATION_NOTICE).toContain("用户主动添加");
     expect(USER_ANNOTATION_NOTICE).not.toContain("右上");
+  });
+});
+
+describe("selectModelContextMessages", () => {
+  const message = (id: string, content = id): ChatMessage => ({
+    id,
+    role: "model",
+    content,
+    at: 0,
+  });
+
+  it("uses the latest compacted summary as the start of model context", () => {
+    const messages = [
+      ...Array.from({ length: 20 }, (_, index) => message(`old-${index}`)),
+      message("summary", `${COMPACTED_MEMORY_PREFIX}\n重點`),
+      message("recent-user"),
+      message("recent-model"),
+    ];
+    expect(selectModelContextMessages(messages).map((item) => item.id)).toEqual([
+      "summary",
+      "recent-user",
+      "recent-model",
+    ]);
+  });
+
+  it("keeps the existing sixteen-message window before any compaction", () => {
+    const messages = Array.from({ length: 20 }, (_, index) => message(String(index)));
+    expect(selectModelContextMessages(messages).map((item) => item.id)).toEqual(
+      Array.from({ length: 16 }, (_, index) => String(index + 4)),
+    );
   });
 });

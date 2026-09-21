@@ -26,6 +26,8 @@ export interface VectorSearchOptions {
   allowedEntryIds?: string[];
 }
 
+const SAVE_DEBOUNCE_MS = 5000;
+
 // ── 余弦相似度（嵌入已归一化，等价于点积） ──
 export function cosineSimilarity(a: number[], b: number[]): number {
   let dot = 0;
@@ -164,6 +166,9 @@ export class JsonVectorStore {
   private metaFilePath: string;
   private entries: MemoryEntry[] = [];
   private dirty = false;
+  private saveTimer: NodeJS.Timeout | null = null;
+  private savePromise: Promise<void> | null = null;
+  private writeGeneration = 0;
   private indexMeta: EmbeddingIndexMetadata | null = null;
 
   /** IVF 索引，null = 未构建或需要重建 */
@@ -213,14 +218,104 @@ export class JsonVectorStore {
     }
   }
 
-  private save(): void {
+  private scheduleSave(): void {
+    this.dirty = true;
+    if (this.saveTimer) clearTimeout(this.saveTimer);
+    this.saveTimer = setTimeout(() => {
+      this.saveTimer = null;
+      void this.writeToDisk();
+    }, SAVE_DEBOUNCE_MS);
+    this.saveTimer.unref();
+  }
+
+  private writeToDisk(): Promise<void> {
+    if (this.savePromise) return this.savePromise;
+    const generation = this.writeGeneration;
+    const task = this.performAtomicSave(generation);
+    this.savePromise = task;
+    task.then(() => {
+      this.savePromise = null;
+      if (this.dirty && !this.saveTimer) this.scheduleSave();
+    }, () => {
+      this.savePromise = null;
+    });
+    return task;
+  }
+
+  private async performAtomicSave(generation: number): Promise<void> {
+    this.dirty = false;
+    try {
+      const dir = path.dirname(this.filePath);
+      await fs.promises.mkdir(dir, { recursive: true });
+      const tmp = this.filePath + ".tmp";
+      await fs.promises.writeFile(tmp, JSON.stringify(this.entries, null, 2), "utf8");
+      if (generation !== this.writeGeneration) {
+        await fs.promises.rm(tmp, { force: true });
+        return;
+      }
+      await fs.promises.rename(tmp, this.filePath);
+    } catch (err) {
+      this.dirty = true;
+      console.warn("[RAG] failed to save vector store:", err);
+      throw err;
+    }
+  }
+
+  async flush(): Promise<void> {
+    while (this.dirty || this.savePromise) {
+      if (this.saveTimer) {
+        clearTimeout(this.saveTimer);
+        this.saveTimer = null;
+      }
+      try {
+        await this.writeToDisk();
+      } catch {
+        break;
+      }
+    }
+    if (this.saveTimer) {
+      clearTimeout(this.saveTimer);
+      this.saveTimer = null;
+    }
+  }
+
+  flushSync(): void {
+    if (this.saveTimer) {
+      clearTimeout(this.saveTimer);
+      this.saveTimer = null;
+    }
+    if (!this.dirty) return;
     try {
       const dir = path.dirname(this.filePath);
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-      fs.writeFileSync(this.filePath, JSON.stringify(this.entries, null, 2), "utf8");
+      const tmp = this.filePath + ".tmp";
+      fs.writeFileSync(tmp, JSON.stringify(this.entries, null, 2), "utf8");
+      fs.renameSync(tmp, this.filePath);
       this.dirty = false;
     } catch (err) {
-      console.warn("[RAG] failed to save vector store:", err);
+      console.warn("[RAG] failed to flush vector store:", err);
+    }
+  }
+
+  clearForRebuild(): void {
+    const hadSaveInFlight = this.savePromise !== null;
+    this.writeGeneration += 1;
+    if (this.saveTimer) {
+      clearTimeout(this.saveTimer);
+      this.saveTimer = null;
+    }
+    this.entries = [];
+    this.dirty = false;
+    this.indexMeta = null;
+    this.ivf = null;
+    try {
+      const dir = path.dirname(this.filePath);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(this.filePath, "[]", "utf8");
+      if (fs.existsSync(this.metaFilePath)) fs.unlinkSync(this.metaFilePath);
+      if (hadSaveInFlight) this.scheduleSave();
+    } catch (err) {
+      console.warn("[RAG] failed to clear vector store:", err);
     }
   }
 
@@ -341,8 +436,7 @@ export class JsonVectorStore {
       // 更新权重和时间
       existing[0].entry.weight = Math.min(existing[0].entry.weight + 0.1, 5.0);
       existing[0].entry.lastRecalledAt = Date.now();
-      this.dirty = true;
-      this.save();
+      this.scheduleSave();
       return existing[0].entry;
     }
 
@@ -361,9 +455,8 @@ export class JsonVectorStore {
     };
 
     this.entries.push(entry);
-    this.dirty = true;
     this.markIndexDirty();
-    this.save();
+    this.scheduleSave();
     return entry;
   }
 
@@ -422,9 +515,8 @@ export class JsonVectorStore {
       results.push(entry);
     }
 
-    this.dirty = true;
     this.markIndexDirty();
-    this.save();
+    this.scheduleSave();
     return results;
   }
 
@@ -515,8 +607,7 @@ export class JsonVectorStore {
       r.entry.weight = Math.min(r.entry.weight + 0.05, 5.0);
     }
     if (top.length > 0) {
-      this.dirty = true;
-      this.save();
+      this.scheduleSave();
     }
 
     return top;
@@ -526,9 +617,8 @@ export class JsonVectorStore {
   prune(minWeight = 0.1): number {
     const before = this.entries.length;
     this.entries = this.entries.filter((e) => e.weight >= minWeight);
-    this.dirty = true;
     this.markIndexDirty();
-    this.save();
+    this.scheduleSave();
     return before - this.entries.length;
   }
 
@@ -539,9 +629,8 @@ export class JsonVectorStore {
     this.entries = this.entries.filter((entry) => !idSet.has(entry.id) || (source !== undefined && entry.source !== source));
     const deleted = before - this.entries.length;
     if (deleted > 0) {
-      this.dirty = true;
       this.markIndexDirty();
-      this.save();
+      this.scheduleSave();
     }
     return deleted;
   }
@@ -563,9 +652,8 @@ export class JsonVectorStore {
     });
     const deleted = before - this.entries.length;
     if (deleted > 0) {
-      this.dirty = true;
       this.markIndexDirty();
-      this.save();
+      this.scheduleSave();
     }
     return deleted;
   }

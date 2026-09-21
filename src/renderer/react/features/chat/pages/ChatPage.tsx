@@ -22,6 +22,8 @@ import { EarlyTtsPlaybackQueue } from "../tts/early-tts-queue";
 import { ConversationSidebar } from "../components/ConversationSidebar";
 import { StatusFloat } from "../components/StatusFloat";
 import type { ChatMessage, ChatSession, ChatSessionMeta, ConversationMode, ReasoningBlock, RunActivityRecord, TaskDelegationDisplayRecord, ToolExecutionRecord } from "../../../../../shared/chat-types";
+import { selectModelContextMessages } from "../../../../../shared/chat-context";
+import { isContextUsageSnapshot, type ContextUsageSnapshot } from "../../../../../shared/context-usage";
 import { SidebarToggle } from "../../../components/ui/SidebarToggle";
 import { ModeSwitch } from "../../../components/ui/ModeSwitch";
 import { CharacterStatusPill } from "../../../components/ui/CharacterStatusPill";
@@ -41,6 +43,7 @@ import { SkillModePanel } from "../components/SkillModePanel";
 import { ToolModePanel } from "../components/ToolModePanel";
 import { applyTaskDelegationEvent, normalizeTaskDelegationEvent } from "../components/task-delegations";
 import { RightInspector } from "../components/RightInspector";
+import { useFeedback } from "../../../components/feedback/FeedbackProvider";
 import { ReviewDiffContent } from "../components/ReviewInspector";
 import { shouldRunModelForMode, shouldUseCyreneAutoTts } from "./conversation-run-policy";
 import {
@@ -226,6 +229,7 @@ interface ChatStoreApi {
   create: (input: { identityId?: string | null; mode: ConversationMode; title?: string; multiAgent?: boolean }) => Promise<ChatSession>;
   append: (id: string, message: ChatMessage) => Promise<ChatSession | null>;
   replaceTail: (id: string, startIndex: number, messages: ChatMessage[]) => Promise<ChatSession | null>;
+  compactConversation: (sessionId: string) => Promise<{ ok: boolean; error?: string; session?: ChatSession }>;
   setMessageTtsCacheKey: (id: string, messageId: string, cacheKey: string, converterVersion: string) => Promise<ChatSession | null>;
   rename: (id: string, title: string) => Promise<ChatSession | null>;
   delete: (id: string) => Promise<boolean>;
@@ -366,6 +370,7 @@ function toUiMessages(session: ChatSession): ChatMessageItem[] {
     reasoning: message.reasoning,
     reasoningBlocks: message.reasoningBlocks,
     runActivity: message.runActivity,
+    contextUsage: message.contextUsage,
     ttsCacheKey: message.ttsCacheKey,
     ttsCacheVersion: message.ttsCacheVersion,
     responseStarted: message.role === "model",
@@ -405,6 +410,7 @@ function getInitialMode(): ConversationMode {
 
 export function ChatPage() {
   const preferredAddress = useUserCallPreference();
+  const feedback = useFeedback();
   const [collapsed, setCollapsed] = useState(false);
   const [utilityPanel, setUtilityPanel] = useState<"model" | "skill" | "tool" | null>(null);
   const [reviewInspector, setReviewInspector] = useState<{ runId: string; fileIndex: number } | null>(null);
@@ -551,6 +557,7 @@ export function ChatPage() {
   const scopeKey = activeSessionId ?? `mode:${mode}`;
   const draft = drafts[scopeKey] ?? "";
   const messages = messagesByMode[mode] ?? [];
+  const latestContextUsage = [...messages].reverse().find((message) => message.contextUsage)?.contextUsage;
   const hasMessages = messages.length > 0;
   const attachments = attachmentsByScope[scopeKey] ?? [];
   const sessions = sessionsByMode[mode] ?? [];
@@ -964,6 +971,7 @@ export function ChatPage() {
     let canonicalRunId: string | undefined;
     let runStarted = false;
     let runActivity: RunActivityRecord | undefined;
+    let contextUsage: ContextUsageSnapshot | undefined;
     let codeRunViewModel: CodeRunViewModel = createCodeRunViewModel();
     const activeReasoningStarts = new Map<string, number>();
     let currentReasoningId: string | undefined;
@@ -1178,6 +1186,9 @@ export function ChatPage() {
         }
       } else if (event.type === "CUSTOM" && event.name === "cyrene.compressingContext") {
         setIsCompressingContext(true);
+      } else if (event.type === "CUSTOM" && event.name === "cyrene.context.usage" && isContextUsageSnapshot(event.value)) {
+        contextUsage = event.value;
+        updateMessage(input.targetMode, input.assistantId, { contextUsage });
       } else if (event.type === "CUSTOM" && event.name === "cyrene.sticker") {
         sticker = typeof event.value === "string" ? event.value : null;
         updateMessage(input.targetMode, input.assistantId, { sticker });
@@ -1234,7 +1245,7 @@ export function ChatPage() {
     try {
       const general = await window.chat?.getGeneralSettings?.();
       const ack = await api.run({
-        messages: input.session.messages.slice(-16).map((item) => ({
+        messages: selectModelContextMessages(input.session.messages).map((item) => ({
           role: item.role,
           content: item.content,
           at: item.at,
@@ -1265,6 +1276,7 @@ export function ChatPage() {
         reasoningBlocks,
         reasoningStreaming: false,
         runActivity,
+        contextUsage,
         responseStarted: true,
         sticker,
         toolExecutions,
@@ -1278,6 +1290,7 @@ export function ChatPage() {
         reasoning: reasoningContent || undefined,
         reasoningBlocks,
         runActivity,
+        contextUsage,
         at: Date.now(),
         sticker,
         toolExecutions,
@@ -1467,17 +1480,19 @@ export function ChatPage() {
   async function initVaultStructure(sessionId: string) {
     const store = chatStore();
     if (!store) return;
-    const confirmed = window.confirm(
-      "要在當前 Obsidian Vault 中新增 Cyrene 通用學習結構嗎？只會建立缺失的檔案，不會覆蓋已有內容。"
-    );
+    const confirmed = await feedback.confirm({
+      title: "建立學習工作區",
+      message: "要在目前的 Obsidian Vault 中新增昔漣通用學習結構嗎？只會建立缺少的檔案，不會覆蓋現有內容。",
+      confirmText: "建立結構",
+    });
     if (!confirmed) return;
     const result = await store.initLearnWorkspace(sessionId);
     if (!result.ok) {
-      window.alert(`新增學習結構失敗：${result.error ?? "未知錯誤"}`);
+      await feedback.alert({ tone: "error", title: "建立失敗", message: "無法建立學習工作區。", details: result.error ?? "未知錯誤" });
     } else {
       const created = result.created?.length ?? 0;
       const skipped = result.skipped?.length ?? 0;
-      window.alert(`已建立 ${created} 個檔案/目錄${skipped > 0 ? `，跳過 ${skipped} 個已存在項` : ""}。`);
+      feedback.notice({ tone: "success", message: `已建立 ${created} 個項目${skipped > 0 ? `，保留 ${skipped} 個現有項目` : ""}` });
     }
   }
 
@@ -1485,33 +1500,35 @@ export function ChatPage() {
     if (targetMode === "chat") return true;
     const store = chatStore();
     if (!store?.pickWorkspaceFolder || !store.setWorkspace) {
-      window.alert("工作區服務尚未就緒，請重新開啟此頁後再試一次。");
+      await feedback.alert({ tone: "warning", title: "工作區尚未就緒", message: "請稍後再試，或重新開啟聊天頁。" });
       return false;
     }
     let picked: Awaited<ReturnType<ChatStoreApi["pickWorkspaceFolder"]>>;
     try {
       picked = await store.pickWorkspaceFolder();
     } catch (error) {
-      window.alert(`無法開啟工作區選擇器：${error instanceof Error ? error.message : String(error)}`);
+      await feedback.alert({ tone: "error", title: "無法選擇工作區", message: "工作區選擇器沒有成功開啟。", details: error instanceof Error ? error.message : String(error) });
       return false;
     }
     if (!picked.ok || !picked.path) {
-      if (picked.error) window.alert(`選擇工作區失敗：${picked.error}`);
+      if (picked.error) await feedback.alert({ tone: "error", title: "選擇失敗", message: "沒有選到可用的工作區。", details: picked.error });
       return false;
     }
     const sessionId = await ensureSession(targetMode);
     const result = await store.setWorkspace(sessionId, picked.path);
     if (!result.ok) {
-      window.alert(`設定工作區失敗：${result.error ?? "未知錯誤"}`);
+      await feedback.alert({ tone: "error", title: "設定失敗", message: "無法將資料夾設為這個對話的工作區。", details: result.error ?? "未知錯誤" });
       return false;
     }
     setWorkspaceNames((current) => ({ ...current, [targetMode]: picked.displayName ?? "工作資料夾" }));
 
     // Learn 模式：空目錄詢問是否初始化通用學習結構
     if (targetMode === "learn" && result.isEmpty) {
-      const confirmed = window.confirm(
-        "這是一個空目錄。Cyrene 可以在這裡建立通用學習工作區結構（materials/、notes/、exercises/、templates/、learn/progress.md），方便你之後和 Cyrene 一起學習。\n\n是否建立？"
-      );
+      const confirmed = await feedback.confirm({
+        title: "初始化空白資料夾",
+        message: "這個資料夾目前是空的。要建立 materials、notes、exercises、templates 與學習進度檔嗎？",
+        confirmText: "建立",
+      });
       if (confirmed) {
         await initVaultStructure(sessionId);
       }
@@ -1551,14 +1568,16 @@ export function ChatPage() {
       const result = await store.setWorkspace(session.id, workspace.path);
       if (!result.ok) {
         await store.delete(session.id);
-        window.alert(`設定工作區失敗：${result.error ?? "未知錯誤"}`);
+        await feedback.alert({ tone: "error", title: "設定失敗", message: "新任務無法使用這個工作區。", details: result.error ?? "未知錯誤" });
         return;
       }
       // Learn 模式：空目錄詢問是否初始化通用學習結構
       if (targetMode === "learn" && result.isEmpty) {
-        const confirmed = window.confirm(
-          "這是一個空目錄。Cyrene 可以在這裡建立通用學習工作區結構（materials/、notes/、exercises/、templates/、learn/progress.md），方便你之後和 Cyrene 一起學習。\n\n是否建立？"
-        );
+        const confirmed = await feedback.confirm({
+          title: "初始化空白資料夾",
+          message: "這個資料夾目前是空的。要建立昔漣的學習工作區結構嗎？",
+          confirmText: "建立",
+        });
         if (confirmed) {
           await initVaultStructure(session.id);
         }
@@ -1644,7 +1663,7 @@ export function ChatPage() {
       const result = await store.setCodeMode(sessionId, clineMode);
       if (!result.ok) {
         setSelectedClineMode(previous);
-        window.alert(`切換 Cline 模式失敗：${result.error ?? "未知錯誤"}`);
+        await feedback.alert({ tone: "error", title: "模式切換失敗", message: "已恢復原本的模式。", details: result.error ?? "未知錯誤" });
       }
     } catch (error) {
       setSelectedClineMode(previous);
@@ -1658,7 +1677,7 @@ export function ChatPage() {
     if (!api || !sessionId) return;
     try {
       const result = await api.createNewTask(sessionId);
-      if (!result.ok) window.alert(`建立 Cline Task 失敗：${result.error ?? "未知錯誤"}`);
+      if (!result.ok) await feedback.alert({ tone: "error", title: "建立任務失敗", message: "沒有建立新的程式任務。", details: result.error ?? "未知錯誤" });
     } catch (error) {
       console.warn("[Cyrene React] 建立 Cline Task 失敗:", error);
     }
@@ -1690,7 +1709,7 @@ export function ChatPage() {
         }));
       }
     } catch (error) {
-      window.alert(`檔案攝入失敗：${error instanceof Error ? error.message : String(error)}`);
+      await feedback.alert({ tone: "error", title: "檔案加入失敗", message: "檔案沒有加入目前的對話。", details: error instanceof Error ? error.message : String(error) });
     } finally {
       setAttachmentBusy(false);
     }
@@ -2031,6 +2050,24 @@ export function ChatPage() {
     setPendingQueueBySession(next);
   }
 
+  function editQueuedMessage(sessionId: string, id: string, content: string): boolean {
+    const normalized = content.trim();
+    if (!normalized) return false;
+    const currentQueue = pendingQueueBySessionRef.current[sessionId] ?? [];
+    if (!currentQueue.some((item) => item.id === id)) return false;
+    const nextQueue = {
+      ...pendingQueueBySessionRef.current,
+      [sessionId]: currentQueue.map((item) => {
+        if (item.id !== id) return item;
+        const stickerMarker = item.userSticker ? ` [sticker:${item.userSticker}]` : "";
+        return { ...item, visibleContent: normalized, rawContent: `${normalized}${stickerMarker}` };
+      }),
+    };
+    pendingQueueBySessionRef.current = nextQueue;
+    setPendingQueueBySession(nextQueue);
+    return true;
+  }
+
   function queueCurrentDraft(value: string) {
     if (!activeSessionId || !value.trim()) return;
     const sessionId = activeSessionId;
@@ -2054,7 +2091,11 @@ export function ChatPage() {
 
   const isCurrentScopeRunning = Boolean(activeSessionId && activeRunsBySession.current[activeSessionId]);
   const currentPendingQueue = activeSessionId
-    ? (pendingQueueBySession[activeSessionId] ?? []).map((item) => ({ id: item.id, content: item.visibleContent }))
+    ? (pendingQueueBySession[activeSessionId] ?? []).map((item) => ({
+        id: item.id,
+        content: item.visibleContent,
+        attachmentCount: item.attachments.length,
+      }))
     : [];
   const isEmbedded = window.self !== window.top;
 
@@ -2160,7 +2201,7 @@ export function ChatPage() {
           onSelect={(sessionId) => void selectSession(sessionId)}
           onOpenProject={(workspaceRoot) => {
             void chatStore()?.openWorkspace(workspaceRoot).then((result) => {
-              if (!result.ok) window.alert(`無法開啟專案資料夾：${result.error ?? "未知錯誤"}`);
+              if (!result.ok) void feedback.alert({ tone: "error", title: "無法開啟資料夾", message: "專案資料夾沒有成功開啟。", details: result.error ?? "未知錯誤" });
             });
           }}
           onRename={(sessionId, newTitle) => void handleRenameSession(sessionId, newTitle)}
@@ -2265,12 +2306,17 @@ export function ChatPage() {
             attachments={attachments}
             attachmentBusy={attachmentBusy}
             modelBusy={isCurrentScopeRunning}
+            contextUsage={latestContextUsage}
+            onContextCompacted={activeSessionId ? async () => {
+              await selectSession(activeSessionId, mode);
+            } : undefined}
             pendingQueue={currentPendingQueue}
             clineMode={selectedClineMode}
             onChange={(value) => setDrafts((current) => ({ ...current, [scopeKey]: value }))}
             onSubmit={(value) => void sendMessage(value)}
             onCancel={() => void cancelCurrentRun()}
             onQueueMessage={(value) => queueCurrentDraft(value)}
+            onEditQueuedMessage={(id, content) => editQueuedMessage(activeSessionId, id, content)}
             onRemoveQueuedMessage={(id) => removeQueuedMessage(activeSessionId, id)}
             onChooseWorkspace={() => void chooseWorkspace()}
             onInitVaultStructure={mode === "learn" ? () => {

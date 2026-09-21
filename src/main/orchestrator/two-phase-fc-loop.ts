@@ -80,6 +80,7 @@ export type TwoPhaseEvent =
   | { type: "reasoning_message_content"; messageId: string; delta: string }
   | { type: "reasoning_message_end"; messageId: string }
   | { type: "task_plan_update"; snapshot: TaskPlanSnapshot }
+  | { type: "context_usage"; contextUsage: import("../../shared/context-usage").ContextUsageSnapshot }
   | { type: "compressing_context" };
 
 export type SoulPhaseReason = "no_tool" | "max_rounds" | "timeout" | "tool_error";
