@@ -136,8 +136,7 @@ export async function testGeminiConnection(): Promise<{ ok: boolean; message: st
  * 為什麼要等她回完才 return：Gemini 正在生成時收不了下一則訊息。不等的話
  * 使用者的第一句會被吞掉。回話內容一律丟棄。
  *
- * 每通電話都開新的，加上跨日輪替（isConversationBindingStale），對話就不會養胖
- * ——舊的那個被灌了好幾天，首字從 1.9 秒漲到 9 秒。
+ * 同一串最多沿用 12 小時；接通新電話時若仍在期限內，直接沿用既有上下文。
  */
 export async function primeGeminiConversation(
   personaPrompt: string,
@@ -148,6 +147,11 @@ export async function primeGeminiConversation(
   const startedAt = Date.now();
 
   const win = await getOrCreateBackgroundWindow();
+  const existing = await readGeminiConversationBinding(win.webContents);
+  if (existing && isSameGeminiConversation(existing.url, win.webContents.getURL())) {
+    console.log("[Gemini] 沿用 12 小時內的通話對話，不重複注入人設");
+    return existing.url;
+  }
   await win.loadURL(GEMINI_NEW_CHAT_URL);
 
   const state = await waitForGeminiPageState(win.webContents, Math.min(deadline, Date.now() + 12_000), options.signal);

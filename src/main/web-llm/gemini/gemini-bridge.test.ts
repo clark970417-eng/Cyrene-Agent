@@ -198,7 +198,7 @@ describe("runGeminiPrompt", () => {
   });
 
   it("reuses the bound Gemini conversation and sends only the newest user turn", async () => {
-    mocks.readGeminiConversationBinding.mockResolvedValue({
+    mocks.readGeminiConversationBinding.mockResolvedValueOnce({
       url: "https://gemini.google.com/app/new-chat",
       promptVersion: "cyrene-brain-test",
     });
@@ -262,6 +262,18 @@ describe("primeGeminiConversation", () => {
     expect(win.loadURL).toHaveBeenCalledWith("https://gemini.google.com/u/2/app");
     expect(mocks.sendMessage).toHaveBeenCalledWith(win.webContents, "BRAIN_SEED\n\n完整昔漣人設");
     expect(mocks.rememberGeminiConversation).toHaveBeenCalledWith(win.webContents, "cyrene-brain-test");
+  });
+
+  it("reuses the existing call conversation instead of opening another within its lifetime", async () => {
+    mocks.readGeminiConversationBinding.mockResolvedValueOnce({
+      url: "https://gemini.google.com/app/fresh-call",
+      createdAt: new Date().toISOString(),
+    });
+    const { primeGeminiConversation } = await import("./gemini-bridge");
+    await expect(primeGeminiConversation("完整昔漣人設")).resolves.toBe("https://gemini.google.com/app/fresh-call");
+    const win = await mocks.getOrCreateBackgroundWindow.mock.results[0].value;
+    expect(win.loadURL).not.toHaveBeenCalled();
+    expect(mocks.sendMessage).not.toHaveBeenCalled();
   });
 
   it("does not bind an unfinished prompt when initialization times out", async () => {

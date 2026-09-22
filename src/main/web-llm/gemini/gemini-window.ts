@@ -10,6 +10,7 @@ export const GEMINI_NEW_CHAT_URL = "https://gemini.google.com/u/2/app";
 const CONVERSATION_STORAGE_KEY = "cyrene-agent.gemini-conversation";
 export const SHARED_GEMINI_CONVERSATION_NAME = "Cyrene-Agent";
 export const SHARED_GEMINI_PROMPT_VERSION = "cyrene-shared-v1";
+export const GEMINI_CONVERSATION_LIFETIME_MS = 12 * 60 * 60 * 1_000;
 // 使用者指定的 Cyrene-Agent 分享對話所對應之可續寫內部網址。
 // share.gemini.google 是公開分享入口，背景聊天必須使用 /app/<id> 才能追加訊息。
 /** 昔漣專用的共用對話。
@@ -25,7 +26,7 @@ export const SHARED_GEMINI_CONVERSATION_URL = "https://gemini.google.com/u/2/app
 export interface GeminiConversationBinding {
   url: string;
   promptVersion?: string;
-  /** 建立時間（ISO）。跨日就換一個新對話，見 isConversationBindingStale。 */
+  /** 首次建立時間（ISO）。滿 12 小時才換新對話，且不能在每輪回覆後重設。 */
   createdAt?: string;
 }
 
@@ -87,21 +88,34 @@ export function isSameGeminiConversation(a: string | undefined, b: string | unde
 }
 
 /**
- * 這個 binding 是不是「不是今天建立的」。
+ * 這個 binding 是否已使用滿 12 小時。
  *
  * 對話會隨著使用累積歷史，而 Gemini 每輪都要重讀整段——舊對話曾經長到讓首字
  * 從 1.9 秒漲到 9 秒。除了每通電話開新的之外，跨日也換一次，避免一整天講下來
  * 又養出一個胖對話。
  *
- * 比的是本地日曆日，不是「24 小時」：使用者說的是「每天凌晨 12 點」。
+ * 使用固定生命週期而非跨日判斷，避免 23:59 建立的對話一分鐘後就被換掉。
  */
 export function isConversationBindingStale(createdAt: string | undefined, now: Date): boolean {
   if (!createdAt) return true;
   const created = new Date(createdAt);
   if (Number.isNaN(created.getTime())) return true;
-  return created.getFullYear() !== now.getFullYear()
-    || created.getMonth() !== now.getMonth()
-    || created.getDate() !== now.getDate();
+  const age = now.getTime() - created.getTime();
+  return age < 0 || age >= GEMINI_CONVERSATION_LIFETIME_MS;
+}
+
+export function buildGeminiConversationBinding(
+  currentUrl: string,
+  existing: GeminiConversationBinding | null,
+  promptVersion?: string,
+  now = new Date(),
+): GeminiConversationBinding {
+  const createdAt = existing
+    && isSameGeminiConversation(existing.url, currentUrl)
+    && !isConversationBindingStale(existing.createdAt, now)
+    ? existing.createdAt
+    : now.toISOString();
+  return { url: currentUrl, createdAt, ...(promptVersion ? { promptVersion } : {}) };
 }
 
 export function isSafeGeminiConversationUrl(url: string): boolean {
@@ -150,12 +164,8 @@ export async function rememberGeminiConversation(
 ): Promise<GeminiConversationBinding | null> {
   const url = webContents.getURL();
   if (!isSafeGeminiConversationUrl(url)) return null;
-  // createdAt 是跨日輪替的依據，寫入時一定要帶上。
-  const binding: GeminiConversationBinding = {
-    url,
-    createdAt: new Date().toISOString(),
-    ...(promptVersion ? { promptVersion } : {}),
-  };
+  const existing = await readGeminiConversationBinding(webContents, conversationKey);
+  const binding = buildGeminiConversationBinding(url, existing, promptVersion);
   await persistGeminiConversationBinding(webContents, binding, conversationKey).catch(() => undefined);
   return binding;
 }
@@ -163,18 +173,15 @@ export async function rememberGeminiConversation(
 let bgWindow: BrowserWindow | null = null;
 let loginWindow: BrowserWindow | null = null;
 
-/** 恢復今天的綁定；若綁定屬於昨天，立刻切到乾淨的新對話入口。這個檢查每次
- * 取得背景視窗都會跑，所以 App 整晚不關、視窗一直存在時，凌晨 00:00 仍會輪替。 */
+/** 恢復尚未滿 12 小時的綁定；到期才切到乾淨的新對話入口。 */
 async function restoreConversation(win: BrowserWindow, conversationKey?: string): Promise<void> {
   const remembered = await readGeminiConversationBinding(win.webContents, conversationKey);
   if (!remembered && normalizeConversationKey(conversationKey) !== "default") {
     if (win.webContents.getURL() !== GEMINI_NEW_CHAT_URL) await win.loadURL(GEMINI_NEW_CHAT_URL);
     return;
   }
-  // 舊的共用/通話對話維持每日輪替；具名 Conversation 必須永久固定。
-  if (normalizeConversationKey(conversationKey) === "default"
-    && remembered && isConversationBindingStale(remembered.createdAt, new Date())) {
-    console.log("[Gemini] 綁定的對話不是今天建立的，改開新對話");
+  if (remembered && isConversationBindingStale(remembered.createdAt, new Date())) {
+    console.log("[Gemini] 綁定的對話已使用滿 12 小時，改開新對話");
     await win.loadURL(GEMINI_NEW_CHAT_URL);
     return;
   }

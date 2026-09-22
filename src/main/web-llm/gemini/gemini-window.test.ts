@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildGeminiConversationBinding,
+  GEMINI_CONVERSATION_LIFETIME_MS,
   isConversationBindingStale,
   isSafeGeminiConversationUrl,
   isSameGeminiConversation,
@@ -62,18 +64,42 @@ describe("isSameGeminiConversation", () => {
 });
 
 describe("isConversationBindingStale", () => {
-  const now = new Date(2026, 7, 17, 0, 0, 1);
+  const now = new Date("2026-08-17T12:00:00.000Z");
 
-  it("keeps a conversation created on the same local calendar day", () => {
-    expect(isConversationBindingStale(new Date(2026, 7, 17, 0, 0, 0).toISOString(), now)).toBe(false);
+  it("keeps a conversation until the full 12-hour window ends", () => {
+    expect(isConversationBindingStale(new Date(now.getTime() - GEMINI_CONVERSATION_LIFETIME_MS + 1).toISOString(), now)).toBe(false);
   });
 
-  it("rotates immediately after local midnight", () => {
-    expect(isConversationBindingStale(new Date(2026, 7, 16, 23, 59, 59).toISOString(), now)).toBe(true);
+  it("rotates at 12 hours, including across midnight", () => {
+    expect(isConversationBindingStale(new Date(now.getTime() - GEMINI_CONVERSATION_LIFETIME_MS).toISOString(), now)).toBe(true);
+    const justBeforeMidnight = new Date("2026-08-16T23:59:59.000Z");
+    expect(isConversationBindingStale(justBeforeMidnight.toISOString(), new Date("2026-08-17T00:00:01.000Z"))).toBe(false);
   });
 
   it("treats legacy or invalid timestamps as stale", () => {
     expect(isConversationBindingStale(undefined, now)).toBe(true);
     expect(isConversationBindingStale("not-a-date", now)).toBe(true);
+  });
+});
+
+describe("buildGeminiConversationBinding", () => {
+  it("preserves the original creation time while reusing the same conversation", () => {
+    const createdAt = "2026-08-17T08:00:00.000Z";
+    expect(buildGeminiConversationBinding(
+      "https://gemini.google.com/u/2/app/same",
+      { url: "https://gemini.google.com/app/same", createdAt, promptVersion: "old" },
+      "new",
+      new Date("2026-08-17T10:00:00.000Z"),
+    )).toEqual({ url: "https://gemini.google.com/u/2/app/same", createdAt, promptVersion: "new" });
+  });
+
+  it("starts a fresh lifetime for a different conversation", () => {
+    const now = new Date("2026-08-17T10:00:00.000Z");
+    expect(buildGeminiConversationBinding(
+      "https://gemini.google.com/app/new",
+      { url: "https://gemini.google.com/app/old", createdAt: "2026-08-17T09:00:00.000Z" },
+      undefined,
+      now,
+    ).createdAt).toBe(now.toISOString());
   });
 });
