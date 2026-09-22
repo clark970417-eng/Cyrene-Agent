@@ -331,13 +331,18 @@ export function createSession(opts?: {
   purpose?: ChatSessionPurpose;
   mode?: ConversationMode;
   multiAgent?: boolean;
+  participantIdentityIds?: string[];
 }): ChatSession {
   const now = Date.now();
   const id = randomUUID();
   const messages = opts?.initialMessages ?? [];
   const mode = opts?.mode ?? (opts?.purpose === "proactive-chat" ? "chat" : "work");
+  const requestedParticipantIds = [...new Set(opts?.participantIdentityIds ?? [])]
+    .filter(isCharacterAgentId)
+    .filter((identityId) => identityId !== "cyrene")
+    .slice(0, 4);
   const participantIdentityIds = opts?.multiAgent
-    ? pickStableCharacterAgentIds(id, 3)
+    ? (requestedParticipantIds.length >= 2 ? requestedParticipantIds : pickStableCharacterAgentIds(id, 3))
     : undefined;
   const session: ChatSession = {
     id,

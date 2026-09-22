@@ -1,5 +1,7 @@
-import { getCharacterAgentProfile } from "../../../../shared/character-agents";
-import cyrene from "../../assets/avatars/avatar-light.png";
+import {
+  CHARACTER_AGENT_PROFILES,
+  getCharacterAgentProfile,
+} from "../../../../shared/character-agents";
 import fengjin from "../../../tast/风堇.png";
 import cerdella from "../../../tast/刻律德菈.png";
 import evernight from "../../../tast/长夜月.png";
@@ -14,7 +16,7 @@ import cipher from "../../../tast/赛飞儿.png";
 import mydei from "../../../tast/万敌.png";
 
 const avatarById: Readonly<Record<string, string>> = {
-  cyrene,
+  cyrene: "../avatars/cyrene-avatar.png",
   fengjin,
   cerdella,
   evernight,
@@ -33,4 +35,11 @@ export function resolveConversationCharacter(identityId: string | null | undefin
   const profile = getCharacterAgentProfile(identityId);
   if (!profile) return undefined;
   return { ...profile, avatarUrl: avatarById[profile.id] };
+}
+
+export function listConversationCharacters() {
+  return CHARACTER_AGENT_PROFILES.map((profile) => ({
+    ...profile,
+    avatarUrl: avatarById[profile.id],
+  }));
 }

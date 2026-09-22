@@ -34,6 +34,7 @@ import { useUserCallPreference } from "../../../hooks/useUserNickname";
 import { resolveRevisableLastTurn } from "../components/last-turn-actions";
 import { NewTaskButton } from "../../../components/ui/NewTaskButton";
 import { MultiAgentButton } from "../../../components/ui/MultiAgentButton";
+import { MultiAgentSetupModal } from "../components/MultiAgentSetupModal";
 import { ModelModeButton } from "../../../components/ui/ModelModeButton";
 import { SkillModeButton } from "../../../components/ui/SkillModeButton";
 import { ToolModeButton } from "../../../components/ui/ToolModeButton";
@@ -44,6 +45,7 @@ import { ToolModePanel } from "../components/ToolModePanel";
 import { applyTaskDelegationEvent, normalizeTaskDelegationEvent } from "../components/task-delegations";
 import { RightInspector } from "../components/RightInspector";
 import { WorkspaceContextBar } from "../components/WorkspaceContextBar";
+import { WorkspaceEmptyState } from "../components/WorkspaceEmptyState";
 import { useFeedback } from "../../../components/feedback/FeedbackProvider";
 import { ReviewDiffContent } from "../components/ReviewInspector";
 import { shouldRunModelForMode, shouldUseCyreneAutoTts } from "./conversation-run-policy";
@@ -84,7 +86,6 @@ import "../components/StatusFloat.css";
 // leak into the dark theme (Ant Design portals are covered by the same layer).
 import "../../../styles/react-theme.css";
 
-import avatarLight from "../../../assets/avatars/avatar-light.png";
 import compressingPng from "../../../assets/compressing.png";
 import { resolveConversationCharacter } from "../character-assets";
 import { ConversationCharacterCard } from "../components/ConversationCharacterCard";
@@ -99,6 +100,7 @@ import { AffectionModal } from "../../affection/AffectionModal";
 import { ProactiveAssistantModal } from "../../proactive/ProactiveAssistantModal";
 
 const CONVERSATION_MODES: readonly ConversationMode[] = ["chat", "work", "code", "learn", "daily"];
+const CYRENE_COLOR_AVATAR = "../avatars/cyrene-avatar.png";
 
 function isConversationMode(value: string): value is ConversationMode {
   return CONVERSATION_MODES.includes(value as ConversationMode);
@@ -227,7 +229,13 @@ const DEMO_STICKERS: Readonly<Record<string, string>> = {
 interface ChatStoreApi {
   list: (options?: { mode?: ConversationMode }) => Promise<ChatSessionMeta[]>;
   get: (id: string) => Promise<ChatSession | null>;
-  create: (input: { identityId?: string | null; mode: ConversationMode; title?: string; multiAgent?: boolean }) => Promise<ChatSession>;
+  create: (input: {
+    identityId?: string | null;
+    participantIdentityIds?: string[];
+    mode: ConversationMode;
+    title?: string;
+    multiAgent?: boolean;
+  }) => Promise<ChatSession>;
   append: (id: string, message: ChatMessage) => Promise<ChatSession | null>;
   replaceTail: (id: string, startIndex: number, messages: ChatMessage[]) => Promise<ChatSession | null>;
   compactConversation: (sessionId: string) => Promise<{ ok: boolean; error?: string; session?: ChatSession }>;
@@ -415,6 +423,8 @@ export function ChatPage() {
   const [collapsed, setCollapsed] = useState(false);
   const [utilityPanel, setUtilityPanel] = useState<"model" | "skill" | "tool" | null>(null);
   const [reviewInspector, setReviewInspector] = useState<{ runId: string; fileIndex: number } | null>(null);
+  const [isMultiAgentSetupOpen, setIsMultiAgentSetupOpen] = useState(false);
+  const [isCreatingMultiAgent, setIsCreatingMultiAgent] = useState(false);
   const [mode, setMode] = useState<ConversationMode>(getInitialMode);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [messagesByMode, setMessagesByMode] = useState<Partial<Record<ConversationMode, ChatMessageItem[]>>>({});
@@ -761,11 +771,11 @@ export function ChatPage() {
     const generation = ++sessionSelectionGeneration.current;
     const session = await store.get(sessionId);
     if (!session || generation !== sessionSelectionGeneration.current) return;
-    setActiveSessionIds((current) => {
-      const next = { ...current, [targetMode]: sessionId };
-      activeSessionIdsRef.current = next;
-      return next;
-    });
+    const nextActiveSessionIds = { ...activeSessionIdsRef.current, [targetMode]: sessionId };
+    // React 可能延後執行 state updater。先同步 ref，避免首次建立 Work 任務後
+    // 同一個送出流程又建立第二個未綁定工作區的 session。
+    activeSessionIdsRef.current = nextActiveSessionIds;
+    setActiveSessionIds(nextActiveSessionIds);
     const uiMessages = toUiMessages(session);
     setModelProfilesBySession((current) => ({ ...current, [sessionId]: session.modelProfileId }));
     if (targetMode === "code") {
@@ -1588,18 +1598,32 @@ export function ChatPage() {
     await selectSession(session.id, targetMode);
   }
 
-  async function createMultiAgentConversation() {
+  async function createMultiAgentConversation(participantIdentityIds: string[]) {
     const store = chatStore();
     if (!store) return;
-    const session = await store.create({
-      identityId: null,
-      mode: "chat",
-      title: "多人對話",
-      multiAgent: true,
-    });
-    setMode("chat");
-    await refreshSessions("chat", false);
-    await selectSession(session.id, "chat");
+    setIsCreatingMultiAgent(true);
+    try {
+      const session = await store.create({
+        identityId: null,
+        participantIdentityIds,
+        mode: "chat",
+        title: "多人對話",
+        multiAgent: true,
+      });
+      setMode("chat");
+      await refreshSessions("chat", false);
+      await selectSession(session.id, "chat");
+      setIsMultiAgentSetupOpen(false);
+    } catch (error) {
+      await feedback.alert({
+        tone: "error",
+        title: "無法建立多人聊天室",
+        message: "角色房間沒有成功建立。",
+        details: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      setIsCreatingMultiAgent(false);
+    }
   }
 
   // 舊工作臺外框仍負責顯示主要對話清單。React 聊天嵌入 iframe 時，
@@ -1614,7 +1638,7 @@ export function ChatPage() {
         return;
       }
       if (event.data.type === "create-multi-session") {
-        void createMultiAgentConversation();
+        setIsMultiAgentSetupOpen(true);
         return;
       }
       if (event.data.type === "set-conversation-mode" && isConversationMode(event.data.value)) {
@@ -2107,7 +2131,7 @@ export function ChatPage() {
       </div>
       <div className="cy-page-top-center">
         <CharacterStatusPill
-          avatarPath={activeCharacter?.avatarUrl ?? avatarLight}
+          avatarPath={activeCharacter?.avatarUrl ?? CYRENE_COLOR_AVATAR}
           avatarPaths={activeCharacters.map((character) => character.avatarUrl)}
           name={isMultiAgentConversation ? "多人對話" : activeCharacter?.name ?? "昔漣"}
           status={isMultiAgentConversation
@@ -2185,7 +2209,7 @@ export function ChatPage() {
       </div>
       <div className="cy-page-newtask">
         <NewTaskButton label={taskLabel} onClick={() => void createNewTask()} />
-        <MultiAgentButton onClick={() => void createMultiAgentConversation()} />
+        <MultiAgentButton onClick={() => setIsMultiAgentSetupOpen(true)} />
         <div className="cy-page-utilities" aria-label="能力設定">
           <AmbientModeButton active={isAmbientWidgetOpen} onClick={() => setIsAmbientWidgetOpen((v) => !v)} />
           <ToolModeButton active={utilityPanel === "tool"} onClick={() => setUtilityPanel((value) => value === "tool" ? null : "tool")} />
@@ -2245,7 +2269,10 @@ export function ChatPage() {
             todoState={null}
           />
         )}
-        {!hasMessages && activeCharacters.length > 0 && (
+        {!hasMessages && mode !== "chat" && !workspaceNames[mode] && (
+          <WorkspaceEmptyState mode={mode} onChooseWorkspace={() => void chooseWorkspace()} />
+        )}
+        {!hasMessages && (mode === "chat" || Boolean(workspaceNames[mode])) && activeCharacters.length > 0 && (
           <ConversationCharacterCard characters={activeCharacters} />
         )}
         {hasMessages && (
@@ -2419,6 +2446,12 @@ export function ChatPage() {
           onClose={() => setReviewInspector(null)}
         />
       )}
+      <MultiAgentSetupModal
+        open={isMultiAgentSetupOpen}
+        busy={isCreatingMultiAgent}
+        onClose={() => setIsMultiAgentSetupOpen(false)}
+        onCreate={(participantIdentityIds) => void createMultiAgentConversation(participantIdentityIds)}
+      />
     </div>
   );
 }

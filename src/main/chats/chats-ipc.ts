@@ -101,11 +101,18 @@ export function registerChatsIpc(): void {
     IPC.CHATS_CREATE,
     (
       event,
-      payload?: { title?: string; identityId?: string | null; mode?: ConversationMode; multiAgent?: boolean },
+      payload?: {
+        title?: string;
+        identityId?: string | null;
+        participantIdentityIds?: string[];
+        mode?: ConversationMode;
+        multiAgent?: boolean;
+      },
     ) => {
       const session = chatsStore.createSession({
         title: payload?.title,
         identityId: payload?.identityId ?? null,
+        participantIdentityIds: payload?.participantIdentityIds,
         mode: payload?.mode,
         multiAgent: payload?.multiAgent === true,
       });

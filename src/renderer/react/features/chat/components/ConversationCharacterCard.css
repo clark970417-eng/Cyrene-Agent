@@ -40,7 +40,7 @@
 
 .cy-character-contract__portrait-wrap.is-group {
   display: flex;
-  width: 190px;
+  width: min(260px, 72vw);
   align-items: center;
   justify-content: center;
 }
@@ -50,6 +50,11 @@
   width: 82px;
   height: 82px;
   margin: 0 -13px;
+}
+
+.cy-character-contract__portrait-wrap.is-group .cy-character-contract__portrait:nth-of-type(2),
+.cy-character-contract__portrait-wrap.is-group .cy-character-contract__portrait:nth-of-type(3) {
+  z-index: 1;
 }
 
 .cy-character-contract__portrait-wrap.is-group .cy-character-contract__portrait:first-of-type {

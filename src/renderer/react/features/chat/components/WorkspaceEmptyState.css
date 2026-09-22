@@ -1,0 +1,57 @@
+.cy-workspace-empty {
+  display: grid;
+  width: min(540px, calc(100% - 48px));
+  flex: 1 1 auto;
+  align-content: center;
+  justify-items: center;
+  margin: 0 auto;
+  padding: 34px 0 20px;
+  color: var(--cy-text);
+  text-align: center;
+}
+
+.cy-workspace-empty__eyebrow {
+  color: var(--cy-accent);
+  font: 750 10px/1 var(--rb-font-sans, sans-serif);
+}
+
+.cy-workspace-empty__icon {
+  display: grid;
+  width: 72px;
+  height: 72px;
+  margin: 16px 0 14px;
+  border: 1px solid color-mix(in srgb, var(--cy-accent) 44%, var(--cy-border));
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--cy-accent) 10%, var(--cy-surface-raised));
+  box-shadow: 0 16px 46px color-mix(in srgb, var(--cy-accent) 14%, transparent);
+  color: var(--cy-accent);
+  font-size: 26px;
+  place-items: center;
+}
+
+.cy-workspace-empty h1 {
+  max-width: 420px;
+  margin: 0 0 18px;
+  font: 700 20px/1.4 var(--rb-font-sans, sans-serif);
+}
+
+.cy-workspace-empty button {
+  display: inline-flex;
+  height: 38px;
+  align-items: center;
+  padding: 0 15px;
+  border: 1px solid color-mix(in srgb, var(--cy-accent) 54%, var(--cy-border));
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--cy-accent) 15%, var(--cy-surface-raised));
+  color: var(--cy-text);
+  cursor: pointer;
+  font: 700 11px/1 var(--rb-font-sans, sans-serif);
+  gap: 8px;
+}
+
+.cy-workspace-empty button:hover,
+.cy-workspace-empty button:focus-visible {
+  border-color: var(--cy-accent);
+  background: color-mix(in srgb, var(--cy-accent) 24%, var(--cy-surface-raised));
+  outline: none;
+}

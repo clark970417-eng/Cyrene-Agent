@@ -76,6 +76,19 @@ describe("chats store", () => {
     expect(store.listSessions({ mode: "chat" })[0]?.participantIdentityIds).toEqual(created.participantIdentityIds);
   });
 
+  it("preserves a user-selected multi-agent roster and order", async () => {
+    const store = await import("./chats-store");
+    store.initialize();
+    const selected = ["fengjin", "dan_heng", "aglaea", "cipher"];
+    const created = store.createSession({
+      mode: "chat",
+      multiAgent: true,
+      participantIdentityIds: selected,
+    });
+    expect(created.participantIdentityIds).toEqual(selected);
+    expect(created.identityId).toBe("fengjin");
+  });
+
   it("filters session metadata by mode without changing the unfiltered result", async () => {
     const { createSession, initialize, listSessions } = await import("./chats-store");
     initialize();

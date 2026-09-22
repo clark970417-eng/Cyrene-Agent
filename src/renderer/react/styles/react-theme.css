@@ -50,10 +50,10 @@ html[data-ui-theme="cyrene-night"] {
   --cy-control-shadow: 0 12px 30px rgb(3 1 8 / 32%);
 }
 
-/* 黑色線稿在夜色背景會消失；只於深色主題轉為柔白，淺色保留原圖。 */
+/* 狀態列已改用彩色角色頭像；深淺主題都保留原色，避免整張圖片被洗成白色。 */
 html[data-ui-theme="cyrene-night"] .cy-status-avatar {
-  filter: brightness(0) invert(1);
-  opacity: 0.92;
+  filter: none;
+  opacity: 1;
 }
 
 html[data-ui-theme="pearl-white"] .cy-status-avatar {

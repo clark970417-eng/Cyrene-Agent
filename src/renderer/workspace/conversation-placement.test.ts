@@ -7,6 +7,7 @@ const workspaceCss = fs.readFileSync(fileURLToPath(new URL("./workspace.css", im
 const reactCss = fs.readFileSync(fileURLToPath(new URL("../react/styles/react-root.css", import.meta.url)), "utf8");
 const chatPage = fs.readFileSync(fileURLToPath(new URL("../react/features/chat/pages/ChatPage.tsx", import.meta.url)), "utf8");
 const chatComposer = fs.readFileSync(fileURLToPath(new URL("../react/features/chat/components/ChatComposer.tsx", import.meta.url)), "utf8");
+const workspaceEmptyState = fs.readFileSync(fileURLToPath(new URL("../react/features/chat/components/WorkspaceEmptyState.tsx", import.meta.url)), "utf8");
 const legacyChatHtml = fs.readFileSync(fileURLToPath(new URL("../chat/index.html", import.meta.url)), "utf8");
 const legacyChatCss = fs.readFileSync(fileURLToPath(new URL("../chat/chat.css", import.meta.url)), "utf8");
 const main = fs.readFileSync(fileURLToPath(new URL("./main.ts", import.meta.url)), "utf8");
@@ -64,6 +65,8 @@ describe("unified conversation navigation", () => {
     expect(chatComposer).not.toContain('disabled={requiresWorkspace && !workspaceName}');
     expect(chatPage).toContain('const workspaceReady = await chooseWorkspace(targetMode)');
     expect(chatPage).toContain('if (!workspaceReady) return');
+    expect(chatPage).toContain("<WorkspaceEmptyState");
+    expect(workspaceEmptyState).toContain("選擇工作資料夾");
   });
 
   it("removes the duplicate React rail only when embedded in the workspace", () => {
@@ -80,6 +83,7 @@ describe("unified conversation navigation", () => {
     expect(main).toContain('type: "switch-session"');
     expect(chatPage).toContain('event.data.type === "create-session"');
     expect(chatPage).toContain('event.data.type === "create-multi-session"');
+    expect(chatPage).toContain("setIsMultiAgentSetupOpen(true)");
     expect(chatPage).toContain('event.data.type === "switch-session"');
     expect(chatPage).toContain('event.data.type === "set-conversation-mode"');
     expect(chatPage).toContain('type: "active-session-changed"');

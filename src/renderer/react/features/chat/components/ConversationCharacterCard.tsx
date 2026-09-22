@@ -11,7 +11,7 @@ export function ConversationCharacterCard({ characters }: ConversationCharacterC
     <section className="cy-character-contract" aria-label={`本對話固定角色：${characters.map((character) => character.name).join("、")}`}>
       <div className={`cy-character-contract__portrait-wrap ${isGroup ? "is-group" : ""}`}>
         <span className="cy-character-contract__orbit" aria-hidden="true" />
-        {characters.slice(0, 3).map((character) => (
+        {characters.slice(0, 4).map((character) => (
           <img className="cy-character-contract__portrait" src={character.avatarUrl} alt={character.name} key={character.id} />
         ))}
         <span className="cy-character-contract__lock" title="角色已固定" aria-label="角色已固定">✓</span>
@@ -24,7 +24,7 @@ export function ConversationCharacterCard({ characters }: ConversationCharacterC
       </div>
       <p>
         {isGroup
-          ? "三位角色已綁定此聊天室，會使用各自的 Gemini 對話記憶依序回覆。"
+          ? `${characters.length} 位角色已綁定此聊天室，會保留各自語氣與對話上下文依序回覆。`
           : `已綁定此對話。${primary.name}會保留自己的語氣與 Gemini 對話記憶；只有建立新對話時才會抽選其他角色。`}
       </p>
     </section>
