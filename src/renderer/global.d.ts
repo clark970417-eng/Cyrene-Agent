@@ -69,6 +69,7 @@ declare global {
     trpg?: TrpgApi;
     affection?: AffectionApi;
     proactive?: ProactiveApi;
+    workspaceFiles?: import("../shared/workspace-files-types").WorkspaceFilesApi;
   }
 }
 

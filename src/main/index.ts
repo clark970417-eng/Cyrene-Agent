@@ -123,6 +123,7 @@ import type { StickerConfigItem } from "../shared/sticker-types";
 import { memoryStore } from "./memory/memory-store"
 import { backupMemoryRagFiles, reconcileMemoryRag } from "./memory/memory-rag-reconciliation";
 import { registerChatsIpc } from "./chats/chats-ipc";
+import { registerWorkspaceFilesIpc } from "./chats/workspace-files-ipc";
 import { registerChatUiIpc } from "./chats/chat-ui-ipc";
 import * as chatsStore from "./chats/chats-store";
 import { flush as flushTokenUsage } from "./token-usage-store";
@@ -396,6 +397,7 @@ if (isPrimaryAppInstance) app.whenReady().then(async () => {
 
   // 聊天会话存储 IPC（chats-store.initialize 会建好 cyrene-chats 目录并加载 index）
   registerChatsIpc();
+  registerWorkspaceFilesIpc();
   codeGitService = createGitService({
     getSession: chatsStore.getSession,
     resolveExecutable: () => resolveGitExecutable({

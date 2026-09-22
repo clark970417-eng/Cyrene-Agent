@@ -178,6 +178,8 @@ export const IPC = {
   CHATS_GET_ACTIVE_SESSION: "chats:get-active-session",
   // main → 所有窗口：活跃 sessionId 变化时广播
   CHATS_ACTIVE_SESSION_CHANGED: "chats:active-session-changed",
+  WORKSPACE_FILES_LIST: "workspace-files:list",
+  WORKSPACE_FILES_READ: "workspace-files:read",
 
   // 对话工作区绑定
   // renderer → main：设置当前对话的工作区目录

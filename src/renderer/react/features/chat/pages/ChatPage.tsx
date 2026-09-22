@@ -39,6 +39,9 @@ import { ModelModeButton } from "../../../components/ui/ModelModeButton";
 import { SkillModeButton } from "../../../components/ui/SkillModeButton";
 import { ToolModeButton } from "../../../components/ui/ToolModeButton";
 import { AmbientModeButton } from "../../../components/ui/AmbientModeButton";
+import { InspectorToggle } from "../../../components/ui/InspectorToggle";
+import { MomentsModeButton } from "../../../components/ui/MomentsModeButton";
+import { PluginModeButton } from "../../../components/ui/PluginModeButton";
 import { ModelModePanel } from "../components/ModelModePanel";
 import { SkillModePanel } from "../components/SkillModePanel";
 import { ToolModePanel } from "../components/ToolModePanel";
@@ -46,6 +49,9 @@ import { applyTaskDelegationEvent, normalizeTaskDelegationEvent } from "../compo
 import { RightInspector } from "../components/RightInspector";
 import { WorkspaceContextBar } from "../components/WorkspaceContextBar";
 import { WorkspaceEmptyState } from "../components/WorkspaceEmptyState";
+import { WorkspaceFilesPanel } from "../components/WorkspaceFilesPanel";
+import { MomentsPanel } from "../components/MomentsPanel";
+import { ExtensionCenterPanel } from "../components/ExtensionCenterPanel";
 import { useFeedback } from "../../../components/feedback/FeedbackProvider";
 import { ReviewDiffContent } from "../components/ReviewInspector";
 import { shouldRunModelForMode, shouldUseCyreneAutoTts } from "./conversation-run-policy";
@@ -82,6 +88,9 @@ import "../components/ChatMessageList.css";
 import "../components/ConversationSidebar.css";
 import "../components/ConversationCharacterCard.css";
 import "../components/StatusFloat.css";
+import "../components/WorkspaceFilesPanel.css";
+import "../components/MomentsPanel.css";
+import "../components/ExtensionCenterPanel.css";
 // Keep the semantic colour layer last so component-local light defaults cannot
 // leak into the dark theme (Ant Design portals are covered by the same layer).
 import "../../../styles/react-theme.css";
@@ -421,8 +430,10 @@ export function ChatPage() {
   const preferredAddress = useUserCallPreference();
   const feedback = useFeedback();
   const [collapsed, setCollapsed] = useState(false);
-  const [utilityPanel, setUtilityPanel] = useState<"model" | "skill" | "tool" | null>(null);
+  const [utilityPanel, setUtilityPanel] = useState<"model" | "skill" | "tool" | "moments" | "extensions" | null>(null);
   const [reviewInspector, setReviewInspector] = useState<{ runId: string; fileIndex: number } | null>(null);
+  const [filesInspectorOpen, setFilesInspectorOpen] = useState(false);
+  const [activeInspectorTab, setActiveInspectorTab] = useState<"files" | "diff">("files");
   const [isMultiAgentSetupOpen, setIsMultiAgentSetupOpen] = useState(false);
   const [isCreatingMultiAgent, setIsCreatingMultiAgent] = useState(false);
   const [mode, setMode] = useState<ConversationMode>(getInitialMode);
@@ -2215,6 +2226,16 @@ export function ChatPage() {
           <ToolModeButton active={utilityPanel === "tool"} onClick={() => setUtilityPanel((value) => value === "tool" ? null : "tool")} />
           <SkillModeButton active={utilityPanel === "skill"} onClick={() => setUtilityPanel((value) => value === "skill" ? null : "skill")} />
           <ModelModeButton active={utilityPanel === "model"} onClick={() => setUtilityPanel((value) => value === "model" ? null : "model")} />
+          <InspectorToggle
+            active={filesInspectorOpen}
+            disabled={!activeSessionId || !activeSessionMeta?.workspaceRoot}
+            onClick={() => {
+              setFilesInspectorOpen((open) => !open);
+              setActiveInspectorTab("files");
+            }}
+          />
+          <PluginModeButton active={utilityPanel === "extensions"} onClick={() => setUtilityPanel((value) => value === "extensions" ? null : "extensions")} />
+          <MomentsModeButton active={utilityPanel === "moments"} onClick={() => setUtilityPanel((value) => value === "moments" ? null : "moments")} />
         </div>
       </div>
       <div className="cy-page-conversations">
@@ -2257,7 +2278,12 @@ export function ChatPage() {
         {utilityPanel ? (
           utilityPanel === "model" ? <ModelModePanel />
             : utilityPanel === "skill" ? <SkillModePanel />
-              : <ToolModePanel />
+              : utilityPanel === "tool" ? <ToolModePanel />
+                : utilityPanel === "moments" ? <MomentsPanel onOpenAlbum={() => setIsAlbumOpen(true)} />
+                  : <ExtensionCenterPanel
+                    onOpenPanel={(panel) => setUtilityPanel(panel)}
+                    onOpenSettings={() => sidebarApi()?.openSettings("external-apps")}
+                  />
         ) : <>
         {(mode === "work" || mode === "daily" || mode === "learn") && (
           <TodoPanel state={todoStateByMode[mode]} mode={mode} workspaceName={workspaceNames[mode]} />
@@ -2304,7 +2330,10 @@ export function ChatPage() {
             onRegisterScrollToBottom={(scroll) => {
               scrollToBottomRef.current = scroll;
             }}
-            onOpenReviewInspector={(runId, fileIndex) => setReviewInspector({ runId, fileIndex })}
+            onOpenReviewInspector={(runId, fileIndex) => {
+              setReviewInspector({ runId, fileIndex });
+              setActiveInspectorTab("diff");
+            }}
           />
         )}
         {isCompressingContext && (
@@ -2433,17 +2462,27 @@ export function ChatPage() {
         </div>
         </>}
       </main>
-      {reviewInspector && (
+      {(reviewInspector || filesInspectorOpen) && activeSessionId && (
         <RightInspector
-          tabs={[{
-            id: "diff",
-            label: "變更審查",
-            dotClass: "is-review",
-            content: <ReviewDiffContent {...reviewInspector} />,
-          }]}
-          activeTabId="diff"
-          onTabChange={() => undefined}
-          onClose={() => setReviewInspector(null)}
+          tabs={[
+            ...(filesInspectorOpen ? [{
+              id: "files",
+              label: "專案檔案",
+              content: <WorkspaceFilesPanel sessionId={activeSessionId} workspaceRoot={activeSessionMeta?.workspaceRoot} />,
+            }] : []),
+            ...(reviewInspector ? [{
+              id: "diff",
+              label: "變更審查",
+              dotClass: "is-review",
+              content: <ReviewDiffContent {...reviewInspector} />,
+            }] : []),
+          ]}
+          activeTabId={activeInspectorTab}
+          onTabChange={(id) => setActiveInspectorTab(id as "files" | "diff")}
+          onClose={() => {
+            if (activeInspectorTab === "diff") setReviewInspector(null);
+            else setFilesInspectorOpen(false);
+          }}
         />
       )}
       <MultiAgentSetupModal

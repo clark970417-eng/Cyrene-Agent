@@ -797,6 +797,13 @@ const chatStoreApi = {
 
 contextBridge.exposeInMainWorld("chatStore", chatStoreApi);
 
+contextBridge.exposeInMainWorld("workspaceFiles", {
+  list: (sessionId: string, relPath = "") =>
+    ipcRenderer.invoke(IPC.WORKSPACE_FILES_LIST, { sessionId, relPath }),
+  read: (sessionId: string, relPath: string) =>
+    ipcRenderer.invoke(IPC.WORKSPACE_FILES_READ, { sessionId, relPath }),
+});
+
 const reviewApi = {
   get: (runId: string) => ipcRenderer.invoke(IPC.REVIEW_GET, runId) as Promise<ReviewSnapshot | null>,
 };
