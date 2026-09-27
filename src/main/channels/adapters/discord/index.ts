@@ -2212,7 +2212,7 @@ export class DiscordAdapter implements ChannelAdapter {
       const embeds = hasEmbed ? [embed] : [];
       const mentionLine = announcement.mentionUserIds.map((id) => `<@${id}>`).join(" ");
       const messageContent = announcement.mode === "message"
-        ? [mentionLine, announcement.content].filter(Boolean).join("\n")
+        ? [mentionLine, announcement.content, announcement.link].filter(Boolean).join("\n")
         : mentionLine;
       const allowedMentions = {
         parse: [] as const,

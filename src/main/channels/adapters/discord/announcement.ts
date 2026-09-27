@@ -59,7 +59,7 @@ export async function validateDiscordAnnouncement(raw: DiscordAnnouncementInput)
   }
   const author = trim(raw.author, 256);
   const footer = trim(raw.footer, 2_048);
-  const linkRaw = mode === "announcement" ? trim(raw.link, 2_048) : "";
+  const linkRaw = trim(raw.link, 2_048);
   let link: string | undefined;
   if (linkRaw) {
     try {
@@ -67,20 +67,24 @@ export async function validateDiscordAnnouncement(raw: DiscordAnnouncementInput)
       if (!/^https?:$/.test(parsed.protocol)) throw new Error();
       link = parsed.toString();
     } catch {
-      throw new Error("公告連結必須是有效的 http 或 https 網址");
+      throw new Error("連結必須是有效的 http 或 https 網址");
     }
   }
 
   const uniquePaths = [...new Set((raw.mediaPaths ?? []).filter((item): item is string => typeof item === "string" && item.trim().length > 0))];
   if (uniquePaths.length > 10) throw new Error("Discord 每則訊息最多可附加 10 個檔案");
-  const mentionTextLength = mentionUserIds.reduce((total, id) => total + id.length + 3, 0)
-    + Math.max(0, mentionUserIds.length - 1);
-  const messageLength = content.length + mentionTextLength + (content && mentionUserIds.length ? 1 : 0);
+  const messageSegments = [
+    mentionUserIds.map((id) => `<@${id}>`).join(" "),
+    content,
+    link ?? "",
+  ].filter(Boolean);
+  const messageLength = messageSegments.reduce((total, segment) => total + segment.length, 0)
+    + Math.max(0, messageSegments.length - 1);
   if (mode === "message" && messageLength > 2_000) {
-    throw new Error("訊息與標記對象合計超過 Discord 的 2,000 字元上限");
+    throw new Error("訊息、連結與標記對象合計超過 Discord 的 2,000 字元上限");
   }
-  if (mode === "message" && !content && uniquePaths.length === 0) {
-    throw new Error("請輸入訊息，或至少加入一張圖片／影片");
+  if (mode === "message" && !content && !link && uniquePaths.length === 0) {
+    throw new Error("請輸入訊息、連結，或至少加入一張圖片／影片");
   }
   if (mode === "announcement" && !title && !content && uniquePaths.length === 0) {
     throw new Error("請至少加入標題、內容、圖片或影片其中一項");

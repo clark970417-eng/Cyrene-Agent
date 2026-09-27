@@ -1484,7 +1484,9 @@
                 </div>
                 <div class="discord-announcement__workspace">
                   <div class="discord-announcement__editor">
-                    <label class="field field--full"><span>發布頻道 ID</span><input id="channels-discord-announcement-channel" type="text" inputmode="numeric" placeholder="貼上 Discord 頻道 ID" autocomplete="off" /></label>
+                    <label class="field field--full"><span>發布頻道 ID</span><input id="channels-discord-announcement-channel" type="text" inputmode="numeric" placeholder="貼上 Discord 頻道 ID" autocomplete="off" list="channels-discord-publish-channel-history" aria-describedby="channels-discord-publish-channel-hint" /></label>
+                    <datalist id="channels-discord-publish-channel-history"></datalist>
+                    <p class="discord-publisher__hint" id="channels-discord-publish-channel-hint">輸入過的頻道 ID 會自動保存；再次輸入時可從歷史建議選取。</p>
                     <div class="discord-publisher__mentions">
                       <label class="field field--full" for="channels-discord-publish-mention-search"><span>標記成員 <small>可搜尋名稱，或輸入使用者 ID</small></span></label>
                       <div class="discord-publisher__mention-control">
@@ -1495,11 +1497,12 @@
                       <p class="discord-publisher__hint" id="channels-discord-publish-mention-hint">標記只會通知你選中的成員。若搜尋清單無法載入，可直接輸入 Discord 使用者 ID。</p>
                     </div>
                     <label class="field field--full"><span id="channels-discord-publish-content-label">訊息內容</span><textarea id="channels-discord-announcement-content" rows="6" maxlength="4096" placeholder="輸入要傳送的訊息…"></textarea></label>
+                    <label class="field field--full"><span>連結（可選）</span><input id="channels-discord-announcement-link" type="url" placeholder="https://..." /></label>
+                    <p class="discord-publisher__hint">一般訊息會在內容後附上網址；公告則會把標題連到這個網址。</p>
                     <div class="discord-announcement__meta-grid" id="channels-discord-announcement-fields" hidden>
                       <label class="field field--full"><span>公告標題</span><input id="channels-discord-announcement-title-input" type="text" maxlength="256" placeholder="例如：昔漣的新消息" /></label>
                       <label class="field"><span>作者／來源</span><input id="channels-discord-announcement-author" type="text" maxlength="256" placeholder="昔漣 · Cyrene" /></label>
                       <label class="field"><span>Footer</span><input id="channels-discord-announcement-footer" type="text" maxlength="2048" placeholder="Cyrene Announcement" /></label>
-                      <label class="field field--full"><span>連結（可選）</span><input id="channels-discord-announcement-link" type="url" placeholder="https://..." /></label>
                     </div>
                     <div class="discord-announcement__media-actions">
                       <button type="button" class="btn-secondary" id="channels-discord-announcement-add-media"><span class="cy-icon" data-icon="photo"></span>加入圖片／影片</button>
@@ -1512,6 +1515,7 @@
                     <div class="discord-message-preview__mentions" id="channels-discord-message-preview-mentions" hidden></div>
                     <article class="discord-message-preview" id="channels-discord-message-preview">
                       <p class="discord-message-preview__content" id="channels-discord-message-preview-content">訊息內容會顯示在這裡。</p>
+                      <p class="discord-message-preview__link" id="channels-discord-message-preview-link" hidden></p>
                       <div class="discord-message-preview__media" id="channels-discord-message-preview-media"></div>
                     </article>
                     <article class="discord-embed-preview" id="channels-discord-announcement-preview" hidden>

@@ -4619,6 +4619,10 @@ html[data-embedded="true"] .settings-content {
   box-shadow: 0 12px 30px rgba(0, 0, 0, 0.18);
 }
 .discord-message-preview__content { margin: 0; color: #dbdee1; font-size: 12px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
+.discord-message-preview__link { margin: 8px 0 0; overflow-wrap: anywhere; font-size: 11px; line-height: 1.5; }
+.discord-message-preview__link[hidden] { display: none; }
+.discord-message-preview__link a { color: #00a8fc; text-decoration: none; }
+.discord-message-preview__link a:hover { text-decoration: underline; }
 .discord-message-preview__media { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; margin-top: 12px; }
 .discord-message-preview__media:empty { display: none; }
 .discord-message-preview__media img,

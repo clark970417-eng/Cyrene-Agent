@@ -239,6 +239,7 @@ const channelsWechatFeedbackEl = document.getElementById("channels-wechat-feedba
 const channelsFeishuFeedbackEl = document.getElementById("channels-feishu-feedback");
 const channelsDiscordFeedbackEl = document.getElementById("channels-discord-feedback");
 const announcementChannelEl = document.getElementById("channels-discord-announcement-channel") as HTMLInputElement | null;
+const announcementChannelHistoryEl = document.getElementById("channels-discord-publish-channel-history") as HTMLDataListElement | null;
 const announcementTitleEl = document.getElementById("channels-discord-announcement-title-input") as HTMLInputElement | null;
 const announcementContentEl = document.getElementById("channels-discord-announcement-content") as HTMLTextAreaElement | null;
 const announcementAuthorEl = document.getElementById("channels-discord-announcement-author") as HTMLInputElement | null;
@@ -261,6 +262,7 @@ const publishPreviewLabelEl = document.getElementById("channels-discord-publish-
 const publishButtonLabelEl = document.getElementById("channels-discord-publish-button-label");
 const messagePreviewEl = document.getElementById("channels-discord-message-preview") as HTMLElement | null;
 const messagePreviewContentEl = document.getElementById("channels-discord-message-preview-content");
+const messagePreviewLinkEl = document.getElementById("channels-discord-message-preview-link");
 const messagePreviewMentionsEl = document.getElementById("channels-discord-message-preview-mentions");
 const messagePreviewMediaEl = document.getElementById("channels-discord-message-preview-media");
 const mentionSearchEl = document.getElementById("channels-discord-publish-mention-search") as HTMLInputElement | null;
@@ -319,6 +321,8 @@ let discordPublishMentions: DiscordPublishMention[] = [];
 let discordPublishMentionResults: DiscordPublishMention[] = [];
 let discordPublishMentionTimer: number | null = null;
 let discordPublishMentionRequest = 0;
+const DISCORD_PUBLISH_CHANNEL_HISTORY_KEY = "cyrene.discord-publish.channel-history.v1";
+const DISCORD_PUBLISH_CHANNEL_HISTORY_LIMIT = 12;
 let discordMusicState: DiscordMusicState = {
   active: false,
   paused: false,
@@ -340,6 +344,48 @@ function setAnnouncementFeedback(kind: "info" | "ok" | "err", message: string): 
   if (!announcementFeedbackEl) return;
   announcementFeedbackEl.textContent = message;
   announcementFeedbackEl.className = `channels-feedback channels-feedback--${kind}`;
+}
+
+function readDiscordPublishChannelHistory(): string[] {
+  try {
+    const parsed: unknown = JSON.parse(localStorage.getItem(DISCORD_PUBLISH_CHANNEL_HISTORY_KEY) ?? "[]");
+    return Array.isArray(parsed)
+      ? [...new Set(parsed.filter((value): value is string => typeof value === "string" && /^\d{15,22}$/.test(value)))].slice(0, DISCORD_PUBLISH_CHANNEL_HISTORY_LIMIT)
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function renderDiscordPublishChannelHistory(): void {
+  if (!announcementChannelHistoryEl) return;
+  announcementChannelHistoryEl.replaceChildren(...readDiscordPublishChannelHistory().map((channelId) => {
+    const option = document.createElement("option");
+    option.value = channelId;
+    return option;
+  }));
+}
+
+function rememberDiscordPublishChannelId(value = announcementChannelEl?.value ?? ""): void {
+  const channelId = value.trim();
+  if (!/^\d{15,22}$/.test(channelId)) return;
+  const next = [channelId, ...readDiscordPublishChannelHistory().filter((item) => item !== channelId)]
+    .slice(0, DISCORD_PUBLISH_CHANNEL_HISTORY_LIMIT);
+  try {
+    localStorage.setItem(DISCORD_PUBLISH_CHANNEL_HISTORY_KEY, JSON.stringify(next));
+  } catch {
+    return;
+  }
+  renderDiscordPublishChannelHistory();
+}
+
+function parseDiscordPublishLink(value: string): URL | null {
+  try {
+    const parsed = new URL(value.trim());
+    return /^https?:$/.test(parsed.protocol) ? parsed : null;
+  } catch {
+    return null;
+  }
 }
 
 function renderPublishMode(): void {
@@ -415,6 +461,19 @@ function renderAnnouncement(): void {
   if (announcementPreviewContentEl) announcementPreviewContentEl.textContent = announcementContentEl?.value.trim() || "公告內容會顯示在這裡。";
   if (announcementPreviewFooterEl) announcementPreviewFooterEl.textContent = `${announcementFooterEl?.value.trim() || "Cyrene Announcement"} · 現在`;
   if (messagePreviewContentEl) messagePreviewContentEl.textContent = announcementContentEl?.value.trim() || "訊息內容會顯示在這裡。";
+  const previewLink = parseDiscordPublishLink(announcementLinkEl?.value ?? "");
+  if (messagePreviewLinkEl) {
+    messagePreviewLinkEl.hidden = !previewLink;
+    messagePreviewLinkEl.replaceChildren();
+    if (previewLink) {
+      const anchor = document.createElement("a");
+      anchor.href = previewLink.toString();
+      anchor.target = "_blank";
+      anchor.rel = "noreferrer noopener";
+      anchor.textContent = previewLink.toString();
+      messagePreviewLinkEl.append(anchor);
+    }
+  }
 
   renderPublishMedia(announcementPreviewMediaEl, true);
   renderPublishMedia(messagePreviewMediaEl, true);
@@ -1799,6 +1858,9 @@ export async function loadChannelsPanel(): Promise<void> {
     renderPublishMentionResults();
     if (mentionSearchEl?.value.trim()) void searchPublishMembers(mentionSearchEl.value);
   });
+  renderDiscordPublishChannelHistory();
+  announcementChannelEl?.addEventListener("blur", () => rememberDiscordPublishChannelId());
+  announcementChannelEl?.addEventListener("change", () => rememberDiscordPublishChannelId());
 
   mentionSearchEl?.addEventListener("input", () => {
     discordPublishMentionRequest++;
@@ -1862,6 +1924,7 @@ export async function loadChannelsPanel(): Promise<void> {
         }
         announcementMedia = [];
         discordPublishMentions = [];
+        rememberDiscordPublishChannelId();
         renderPublishMentions();
         renderAnnouncement();
       }
