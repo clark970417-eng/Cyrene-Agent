@@ -2113,7 +2113,76 @@ export class DiscordAdapter implements ChannelAdapter {
     return this.getProfile();
   }
 
-  async publishAnnouncement(raw: DiscordAnnouncementInput): Promise<{ ok: boolean; message?: string; error?: string }> {
+  async searchMembersForChannel(
+    channelId: string,
+    query: string,
+  ): Promise<{
+    ok: boolean;
+    members: Array<{ id: string; displayName: string; username: string }>;
+    message?: string;
+    error?: string;
+  }> {
+    const normalizedChannelId = channelId.trim();
+    const normalizedQuery = query.trim().slice(0, 80);
+    if (!/^\d{15,22}$/.test(normalizedChannelId)) {
+      return { ok: false, members: [], error: "先輸入有效的 Discord 頻道 ID" };
+    }
+    if (normalizedQuery.length < 2) {
+      return { ok: true, members: [], message: "輸入至少 2 個字搜尋伺服器成員" };
+    }
+    if (!this.client?.isReady()) {
+      return { ok: false, members: [], error: "請先連接 Discord Bot，再搜尋伺服器成員" };
+    }
+
+    let guildId: string | null = null;
+    try {
+      const channel = await this.client.channels.fetch(normalizedChannelId);
+      guildId = channel && "guildId" in channel ? channel.guildId : null;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return {
+        ok: false,
+        members: [],
+        error: /Unknown Channel|10003/i.test(message)
+          ? "找不到這個 Discord 頻道，請確認頻道 ID。"
+          : "無法讀取這個頻道，請確認 Bot 有查看頻道的權限。",
+      };
+    }
+    const guild = guildId ? this.client.guilds.cache.get(guildId) : null;
+    if (!guild) {
+      return { ok: false, members: [], error: "這個頻道不屬於 Bot 已加入的伺服器" };
+    }
+
+    try {
+      const members = await guild.members.search({ query: normalizedQuery, limit: 25 });
+      return {
+        ok: true,
+        members: [...members.values()].map((member) => ({
+          id: member.id,
+          displayName: member.displayName,
+          username: member.user.username,
+        })),
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (/Missing Access|Missing Permissions|50001|50013|Privileged intent/i.test(message)) {
+        return {
+          ok: false,
+          members: [],
+          error: "Bot 尚未開啟 Server Members Intent；可在 Discord Developer Portal 啟用，或直接輸入使用者 ID。",
+        };
+      }
+      return {
+        ok: false,
+        members: [],
+        error: /Unknown Channel|10003/i.test(message)
+          ? "找不到這個 Discord 頻道，請確認頻道 ID。"
+          : message,
+      };
+    }
+  }
+
+  async publishDiscordPost(raw: DiscordAnnouncementInput): Promise<{ ok: boolean; message?: string; error?: string }> {
     try {
       const announcement = await validateDiscordAnnouncement(raw);
       const settings = loadChannelsSettings();
@@ -2132,7 +2201,7 @@ export class DiscordAdapter implements ChannelAdapter {
       if (announcement.link) embed.setURL(announcement.link);
       if (firstImage) embed.setImage(`attachment://${firstImage.name}`);
 
-      const hasEmbed = Boolean(
+      const hasEmbed = announcement.mode === "announcement" && Boolean(
         announcement.title
         || announcement.content
         || announcement.author
@@ -2141,11 +2210,35 @@ export class DiscordAdapter implements ChannelAdapter {
         || firstImage,
       );
       const embeds = hasEmbed ? [embed] : [];
-      const body = { embeds: embeds.map((item) => item.toJSON()) };
+      const mentionLine = announcement.mentionUserIds.map((id) => `<@${id}>`).join(" ");
+      const messageContent = announcement.mode === "message"
+        ? [mentionLine, announcement.content].filter(Boolean).join("\n")
+        : mentionLine;
+      const allowedMentions = {
+        parse: [] as const,
+        users: announcement.mentionUserIds,
+        roles: [] as const,
+        repliedUser: false,
+      };
+      const body = {
+        content: messageContent || undefined,
+        embeds: embeds.map((item) => item.toJSON()),
+        allowed_mentions: {
+          parse: [],
+          users: announcement.mentionUserIds,
+          roles: [],
+          replied_user: false,
+        },
+      };
       if (this.client?.isReady()) {
         const channel = await this.client.channels.fetch(announcement.channelId);
         if (!channel?.isSendable()) throw new Error("目標頻道不存在，或 Bot 沒有發送訊息權限");
-        await channel.send({ embeds, files });
+        await channel.send({
+          content: messageContent || undefined,
+          embeds,
+          files,
+          allowedMentions,
+        });
       } else {
         const rest = new REST({ version: "10" }).setToken(settings.discord.botToken);
         await rest.post(Routes.channelMessages(announcement.channelId), {
@@ -2153,16 +2246,23 @@ export class DiscordAdapter implements ChannelAdapter {
           files: files.map((file) => ({ data: file.attachment, name: file.name })),
         });
       }
-      return { ok: true, message: "公告已發布到 Discord" };
+      return {
+        ok: true,
+        message: announcement.mode === "announcement" ? "公告已發布到 Discord" : "訊息已傳送到 Discord",
+      };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      console.error("[DiscordAdapter] 公告發布失敗:", error);
+      console.error("[DiscordAdapter] Discord 訊息發布失敗:", error);
       if (/Missing Access|Missing Permissions|50001|50013/i.test(message)) {
         return { ok: false, error: "Bot 沒有查看或發送到這個頻道的權限" };
       }
       if (/Unknown Channel|10003/i.test(message)) return { ok: false, error: "找不到指定的 Discord 頻道" };
       return { ok: false, error: message };
     }
+  }
+
+  async publishAnnouncement(raw: DiscordAnnouncementInput): Promise<{ ok: boolean; message?: string; error?: string }> {
+    return this.publishDiscordPost({ ...raw, mode: raw.mode ?? "announcement" });
   }
 
   async send(message: OutgoingMessage): Promise<{ ok: boolean; error?: string }> {

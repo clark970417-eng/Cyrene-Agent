@@ -334,6 +334,9 @@ export interface SettingsApi {
   channelsDiscordPickCloudKey: () => Promise<string | null>;
   channelsDiscordCloudStatus: () => Promise<{ reachable?: boolean; cloudService?: "active" | "inactive" | "activating" | "failed" | "unknown"; watchdog?: "active" | "inactive" | "failed" | "unknown"; heartbeatAge?: number | null; localConnected?: boolean; mode?: "local" | "cloud" | "transition" } | undefined>;
   channelsDiscordCloudControl: (action: "local" | "cloud" | "restart-cloud") => Promise<unknown>;
+  channelsDiscordSearchMembers: (input: { channelId: string; query: string }) => Promise<{ ok: boolean; members: Array<{ id: string; displayName: string; username: string }>; message?: string; error?: string }>;
+  channelsDiscordPickPublishMedia: () => Promise<Array<{ path: string; name: string; kind: "image" | "video"; previewUrl: string }>>;
+  channelsDiscordPublish: (input: Record<string, unknown>) => Promise<{ ok: boolean; message?: string; error?: string }>;
   channelsDiscordAnnouncementPickMedia: () => Promise<Array<{ path: string; name: string; kind: "image" | "video"; previewUrl: string }>>;
   channelsDiscordAnnouncementPublish: (input: Record<string, unknown>) => Promise<{ ok: boolean; message?: string; error?: string }>;
   channelsDiscordGetMusicState: () => Promise<{ active: boolean; paused: boolean; current?: { title?: string } | null; volume: number }>;

@@ -408,10 +408,10 @@ function registerChannelsIpc(): void {
     });
     return result.canceled ? null : (result.filePaths[0] ?? null);
   });
-  ipcMain.handle(IPC.CHANNELS_DISCORD_ANNOUNCEMENT_PICK_MEDIA, async () => {
+  const pickDiscordPublishMedia = async () => {
     const result = await dialog.showOpenDialog({
-      title: "選擇公告圖片或影片",
-      buttonLabel: "加入公告",
+      title: "選擇 Discord 圖片或影片",
+      buttonLabel: "加入附件",
       properties: ["openFile", "multiSelections"],
       filters: [
         { name: "圖片與影片", extensions: ["png", "jpg", "jpeg", "webp", "gif", "mp4", "mov", "webm", "m4v"] },
@@ -423,11 +423,29 @@ function registerChannelsIpc(): void {
       kind: [".mp4", ".mov", ".webm", ".m4v"].includes(extname(filePath).toLowerCase()) ? "video" : "image",
       previewUrl: pathToFileURL(filePath).href,
     }));
-  });
-  ipcMain.handle(IPC.CHANNELS_DISCORD_ANNOUNCEMENT_PUBLISH, async (_event, input: unknown) => {
+  };
+  ipcMain.handle(IPC.CHANNELS_DISCORD_PUBLISH_PICK_MEDIA, pickDiscordPublishMedia);
+  ipcMain.handle(IPC.CHANNELS_DISCORD_ANNOUNCEMENT_PICK_MEDIA, pickDiscordPublishMedia);
+  const publishDiscordPost = async (_event: unknown, input: unknown) => {
+    const adapter = channelManager.getAdapter("discord") as DiscordAdapter | undefined;
+    if (!adapter) return { ok: false, error: "Discord adapter 未註冊" };
+    return adapter.publishDiscordPost((input && typeof input === "object" ? input : {}) as Parameters<DiscordAdapter["publishDiscordPost"]>[0]);
+  };
+  const publishLegacyAnnouncement = async (_event: unknown, input: unknown) => {
     const adapter = channelManager.getAdapter("discord") as DiscordAdapter | undefined;
     if (!adapter) return { ok: false, error: "Discord adapter 未註冊" };
     return adapter.publishAnnouncement((input && typeof input === "object" ? input : {}) as Parameters<DiscordAdapter["publishAnnouncement"]>[0]);
+  };
+  ipcMain.handle(IPC.CHANNELS_DISCORD_PUBLISH, publishDiscordPost);
+  ipcMain.handle(IPC.CHANNELS_DISCORD_ANNOUNCEMENT_PUBLISH, publishLegacyAnnouncement);
+  ipcMain.handle(IPC.CHANNELS_DISCORD_SEARCH_MEMBERS, async (_event, input: unknown) => {
+    const adapter = channelManager.getAdapter("discord") as DiscordAdapter | undefined;
+    if (!adapter) return { ok: false, members: [], error: "Discord adapter 未註冊" };
+    const value = input && typeof input === "object" ? input as Record<string, unknown> : {};
+    return adapter.searchMembersForChannel(
+      typeof value.channelId === "string" ? value.channelId : "",
+      typeof value.query === "string" ? value.query : "",
+    );
   });
   ipcMain.handle(IPC.CHANNELS_DISCORD_PICK_CLOUD_KEY, async () => {
     const result = await dialog.showOpenDialog({

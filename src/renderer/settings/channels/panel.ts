@@ -255,6 +255,18 @@ const announcementPreviewContentEl = document.getElementById("channels-discord-a
 const announcementPreviewFooterEl = document.getElementById("channels-discord-announcement-preview-footer");
 const announcementPreviewMediaEl = document.getElementById("channels-discord-announcement-preview-media");
 const announcementFeedbackEl = document.getElementById("channels-discord-announcement-feedback");
+const announcementFieldsEl = document.getElementById("channels-discord-announcement-fields") as HTMLDivElement | null;
+const publishContentLabelEl = document.getElementById("channels-discord-publish-content-label");
+const publishPreviewLabelEl = document.getElementById("channels-discord-publish-preview-label");
+const publishButtonLabelEl = document.getElementById("channels-discord-publish-button-label");
+const messagePreviewEl = document.getElementById("channels-discord-message-preview") as HTMLElement | null;
+const messagePreviewContentEl = document.getElementById("channels-discord-message-preview-content");
+const messagePreviewMentionsEl = document.getElementById("channels-discord-message-preview-mentions");
+const messagePreviewMediaEl = document.getElementById("channels-discord-message-preview-media");
+const mentionSearchEl = document.getElementById("channels-discord-publish-mention-search") as HTMLInputElement | null;
+const mentionResultsEl = document.getElementById("channels-discord-publish-mention-results");
+const mentionSelectedEl = document.getElementById("channels-discord-publish-mentions");
+const mentionHintEl = document.getElementById("channels-discord-publish-mention-hint");
 
 // Google Cloud 備援控制台 DOM 元素
 const channelsCloudStatusEl = document.getElementById("channels-cloud-status");
@@ -300,6 +312,13 @@ let channelsSaveTimer: number | null = null;
 let pendingDiscordAvatarPath: string | undefined;
 let pendingDiscordBannerPath: string | undefined;
 let announcementMedia: DiscordAnnouncementMedia[] = [];
+type DiscordPublishMode = "message" | "announcement";
+type DiscordPublishMention = { id: string; displayName: string; username: string };
+let discordPublishMode: DiscordPublishMode = "message";
+let discordPublishMentions: DiscordPublishMention[] = [];
+let discordPublishMentionResults: DiscordPublishMention[] = [];
+let discordPublishMentionTimer: number | null = null;
+let discordPublishMentionRequest = 0;
 let discordMusicState: DiscordMusicState = {
   active: false,
   paused: false,
@@ -323,24 +342,82 @@ function setAnnouncementFeedback(kind: "info" | "ok" | "err", message: string): 
   announcementFeedbackEl.className = `channels-feedback channels-feedback--${kind}`;
 }
 
+function renderPublishMode(): void {
+  const isAnnouncement = discordPublishMode === "announcement";
+  document.querySelectorAll<HTMLButtonElement>("[data-discord-publish-mode]").forEach((button) => {
+    const selected = button.dataset.discordPublishMode === discordPublishMode;
+    button.setAttribute("aria-pressed", String(selected));
+    button.classList.toggle("is-active", selected);
+  });
+  if (announcementFieldsEl) announcementFieldsEl.hidden = !isAnnouncement;
+  if (announcementColorEl) announcementColorEl.hidden = !isAnnouncement;
+  if (announcementContentEl) {
+    announcementContentEl.maxLength = isAnnouncement ? 4_096 : 2_000;
+    announcementContentEl.placeholder = isAnnouncement
+      ? "輸入公告內容，可使用 Discord Markdown"
+      : "輸入訊息內容，可使用 Discord Markdown";
+  }
+  if (publishContentLabelEl) publishContentLabelEl.textContent = isAnnouncement ? "公告內容" : "訊息內容";
+  if (publishPreviewLabelEl) publishPreviewLabelEl.textContent = isAnnouncement ? "ANNOUNCEMENT PREVIEW" : "MESSAGE PREVIEW";
+  if (publishButtonLabelEl) publishButtonLabelEl.textContent = isAnnouncement ? "發布公告" : "傳送訊息";
+  if (messagePreviewEl) messagePreviewEl.hidden = isAnnouncement;
+  const announcementPreview = document.getElementById("channels-discord-announcement-preview");
+  if (announcementPreview) announcementPreview.hidden = !isAnnouncement;
+  renderAnnouncement();
+}
+
+function renderPublishMentions(): void {
+  mentionSelectedEl?.replaceChildren(...discordPublishMentions.map((mention) => {
+    const chip = document.createElement("span");
+    chip.className = "discord-publisher__mention-chip";
+    const label = document.createElement("span");
+    label.textContent = `@${mention.displayName}`;
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.setAttribute("aria-label", `移除標記 ${mention.displayName}`);
+    remove.textContent = "×";
+    remove.addEventListener("click", () => {
+      discordPublishMentions = discordPublishMentions.filter((item) => item.id !== mention.id);
+      renderPublishMentions();
+    });
+    chip.append(label, remove);
+    return chip;
+  }));
+  if (messagePreviewMentionsEl) {
+    messagePreviewMentionsEl.hidden = discordPublishMentions.length === 0;
+    messagePreviewMentionsEl.replaceChildren(...discordPublishMentions.map((mention) => {
+      const tag = document.createElement("span");
+      tag.textContent = `@${mention.displayName}`;
+      return tag;
+    }));
+  }
+}
+
+function renderPublishMedia(target: HTMLElement | null, compact = false): void {
+  if (!target) return;
+  target.replaceChildren(...announcementMedia.map((media) => {
+    const element = document.createElement(media.kind === "video" ? "video" : "img");
+    element.setAttribute("src", media.previewUrl);
+    if (element instanceof HTMLVideoElement) {
+      element.muted = true;
+      element.controls = !compact;
+    } else {
+      element.alt = compact ? "" : media.name;
+    }
+    return element;
+  }));
+}
+
 function renderAnnouncement(): void {
   if (announcementPreviewColorEl) announcementPreviewColorEl.style.background = announcementColorEl?.value || "#66c8ff";
   if (announcementPreviewAuthorEl) announcementPreviewAuthorEl.textContent = announcementAuthorEl?.value.trim() || "昔漣 · Cyrene";
   if (announcementPreviewTitleEl) announcementPreviewTitleEl.textContent = announcementTitleEl?.value.trim() || "公告標題";
   if (announcementPreviewContentEl) announcementPreviewContentEl.textContent = announcementContentEl?.value.trim() || "公告內容會顯示在這裡。";
   if (announcementPreviewFooterEl) announcementPreviewFooterEl.textContent = `${announcementFooterEl?.value.trim() || "Cyrene Announcement"} · 現在`;
+  if (messagePreviewContentEl) messagePreviewContentEl.textContent = announcementContentEl?.value.trim() || "訊息內容會顯示在這裡。";
 
-  announcementPreviewMediaEl?.replaceChildren(...announcementMedia.map((media) => {
-    const element = document.createElement(media.kind === "video" ? "video" : "img");
-    element.setAttribute("src", media.previewUrl);
-    if (element instanceof HTMLVideoElement) {
-      element.muted = true;
-      element.controls = true;
-    } else {
-      element.alt = media.name;
-    }
-    return element;
-  }));
+  renderPublishMedia(announcementPreviewMediaEl, true);
+  renderPublishMedia(messagePreviewMediaEl, true);
   announcementMediaListEl?.replaceChildren(...announcementMedia.map((media, index) => {
     const item = document.createElement("li");
     const thumb = document.createElement(media.kind === "video" ? "video" : "img");
@@ -360,6 +437,81 @@ function renderAnnouncement(): void {
     item.append(thumb, name, remove);
     return item;
   }));
+}
+
+function renderPublishMentionResults(message = ""): void {
+  if (!mentionResultsEl) return;
+  const options: HTMLElement[] = discordPublishMentionResults.map((member) => {
+    const option = document.createElement("button");
+    option.type = "button";
+    option.className = "discord-publisher__mention-option";
+    option.setAttribute("role", "option");
+    option.setAttribute("aria-selected", "false");
+    option.dataset.discordUserId = member.id;
+    const name = document.createElement("strong");
+    name.textContent = member.displayName;
+    const username = document.createElement("small");
+    username.textContent = `@${member.username}`;
+    option.append(name, username);
+    option.addEventListener("click", () => addPublishMention(member));
+    return option;
+  });
+  if (message) {
+    const empty = document.createElement("p");
+    empty.className = "discord-publisher__mention-empty";
+    empty.textContent = message;
+    options.push(empty);
+  }
+  mentionResultsEl.replaceChildren(...options);
+  mentionResultsEl.hidden = options.length === 0;
+  mentionSearchEl?.setAttribute("aria-expanded", String(options.length > 0));
+}
+
+function addPublishMention(mention: DiscordPublishMention): void {
+  if (discordPublishMentions.some((item) => item.id === mention.id)) {
+    setAnnouncementFeedback("info", `@${mention.displayName} 已加入標記`);
+  } else if (discordPublishMentions.length >= 20) {
+    setAnnouncementFeedback("err", "每則訊息最多標記 20 位成員");
+  } else {
+    discordPublishMentions.push(mention);
+    setAnnouncementFeedback("info", "標記只會通知你選中的成員");
+  }
+  if (mentionSearchEl) mentionSearchEl.value = "";
+  discordPublishMentionResults = [];
+  renderPublishMentionResults();
+  renderPublishMentions();
+  mentionSearchEl?.focus();
+}
+
+async function searchPublishMembers(query: string): Promise<void> {
+  const request = ++discordPublishMentionRequest;
+  const channelId = announcementChannelEl?.value.trim() ?? "";
+  if (query.trim().length < 2) {
+    discordPublishMentionResults = [];
+    renderPublishMentionResults(query.trim() ? "請再輸入一個字搜尋" : "");
+    return;
+  }
+  if (!/^\d{15,22}$/.test(channelId)) {
+    discordPublishMentionResults = [];
+    renderPublishMentionResults("先貼上有效的 Discord 頻道 ID");
+    if (mentionHintEl) mentionHintEl.textContent = "先貼上頻道 ID，才能搜尋該伺服器的成員。";
+    return;
+  }
+
+  renderPublishMentionResults("正在搜尋成員…");
+  try {
+    const result = await window.settings.channelsDiscordSearchMembers({ channelId, query: query.trim() });
+    if (request !== discordPublishMentionRequest) return;
+    discordPublishMentionResults = result.members ?? [];
+    if (mentionHintEl) mentionHintEl.textContent = result.error || result.message || "選擇成員即可加入標記。";
+    renderPublishMentionResults(result.error || (discordPublishMentionResults.length === 0 ? "找不到相符成員；輸入使用者 ID 後按 Enter 可直接標記。" : ""));
+  } catch (error) {
+    if (request !== discordPublishMentionRequest) return;
+    discordPublishMentionResults = [];
+    const message = error instanceof Error ? error.message : String(error);
+    if (mentionHintEl) mentionHintEl.textContent = message;
+    renderPublishMentionResults(message);
+  }
 }
 
 export function setChannelsPolling(active: boolean): void {
@@ -1633,8 +1785,51 @@ export async function loadChannelsPanel(): Promise<void> {
     announcementColorEl,
   ]) element?.addEventListener("input", renderAnnouncement);
 
+  document.querySelectorAll<HTMLButtonElement>("[data-discord-publish-mode]").forEach((button) => {
+    button.addEventListener("click", () => {
+      discordPublishMode = button.dataset.discordPublishMode === "announcement" ? "announcement" : "message";
+      setAnnouncementFeedback("info", "");
+      renderPublishMode();
+    });
+  });
+
+  announcementChannelEl?.addEventListener("input", () => {
+    discordPublishMentionRequest++;
+    discordPublishMentionResults = [];
+    renderPublishMentionResults();
+    if (mentionSearchEl?.value.trim()) void searchPublishMembers(mentionSearchEl.value);
+  });
+
+  mentionSearchEl?.addEventListener("input", () => {
+    discordPublishMentionRequest++;
+    discordPublishMentionResults = [];
+    renderPublishMentionResults();
+    if (discordPublishMentionTimer != null) window.clearTimeout(discordPublishMentionTimer);
+    discordPublishMentionTimer = window.setTimeout(() => {
+      void searchPublishMembers(mentionSearchEl.value);
+    }, 280);
+  });
+  mentionSearchEl?.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      discordPublishMentionResults = [];
+      renderPublishMentionResults();
+      return;
+    }
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    const query = mentionSearchEl.value.trim();
+    const match = discordPublishMentionResults[0];
+    if (/^\d{15,22}$/.test(query)) {
+      addPublishMention({ id: query, displayName: `使用者 ${query}`, username: query });
+    } else if (match) {
+      addPublishMention(match);
+    } else if (query.length >= 2) {
+      void searchPublishMembers(query);
+    }
+  });
+
   announcementAddMediaBtn?.addEventListener("click", async () => {
-    const picked = await window.settings.channelsDiscordAnnouncementPickMedia();
+    const picked = await window.settings.channelsDiscordPickPublishMedia();
     const known = new Set(announcementMedia.map((item) => item.path));
     announcementMedia.push(...picked.filter((item) => !known.has(item.path)));
     announcementMedia = announcementMedia.slice(0, 10);
@@ -1644,9 +1839,10 @@ export async function loadChannelsPanel(): Promise<void> {
   announcementPublishBtn?.addEventListener("click", async () => {
     if (!announcementPublishBtn) return;
     announcementPublishBtn.disabled = true;
-    setAnnouncementFeedback("info", "正在發布公告…");
+    setAnnouncementFeedback("info", discordPublishMode === "announcement" ? "正在發布公告…" : "正在傳送訊息…");
     try {
-      const result = await window.settings.channelsDiscordAnnouncementPublish({
+      const result = await window.settings.channelsDiscordPublish({
+        mode: discordPublishMode,
         channelId: announcementChannelEl?.value.trim() ?? "",
         title: announcementTitleEl?.value ?? "",
         content: announcementContentEl?.value ?? "",
@@ -1655,15 +1851,28 @@ export async function loadChannelsPanel(): Promise<void> {
         link: announcementLinkEl?.value ?? "",
         color: announcementColorEl?.value ?? "#66c8ff",
         mediaPaths: announcementMedia.map((item) => item.path),
+        mentionUserIds: discordPublishMentions.map((mention) => mention.id),
       });
-      setAnnouncementFeedback(result.ok ? "ok" : "err", result.message || result.error || "公告發布失敗");
+      setAnnouncementFeedback(result.ok ? "ok" : "err", result.message || result.error || "Discord 訊息傳送失敗");
+      if (result.ok) {
+        if (announcementContentEl) announcementContentEl.value = "";
+        if (discordPublishMode === "announcement") {
+          if (announcementTitleEl) announcementTitleEl.value = "";
+          if (announcementLinkEl) announcementLinkEl.value = "";
+        }
+        announcementMedia = [];
+        discordPublishMentions = [];
+        renderPublishMentions();
+        renderAnnouncement();
+      }
     } catch (error) {
       setAnnouncementFeedback("err", error instanceof Error ? error.message : String(error));
     } finally {
       announcementPublishBtn.disabled = false;
     }
   });
-  renderAnnouncement();
+  renderPublishMentions();
+  renderPublishMode();
 
   channelsCloudPickKeyBtn?.addEventListener("click", async () => {
     const picked = await window.settings.channelsDiscordPickCloudKey();
